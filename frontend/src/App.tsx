@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 const navItems = [
   { label: 'Dashboard', path: '/' },
   { label: 'Access Logs', path: '/access-logs' },
+  { label: 'Login', path: '/login' },
 ];
 
 export function App() {
@@ -13,7 +14,7 @@ export function App() {
           <span className="brand-mark" aria-hidden="true">
             e
           </span>
-          <span>eIngress</span>
+          <span>EIngress</span>
         </div>
 
         <nav className="nav-list">
