@@ -4,6 +4,7 @@ import { App } from '../App';
 import { ProtectedRoute } from '../auth/ProtectedRoute';
 import { AccessLogsPage } from '../pages/AccessLogsPage';
 import { DashboardPage } from '../pages/DashboardPage';
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { LoginPage } from '../pages/LoginPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 
@@ -11,6 +12,10 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     element: <LoginPage />,
+  },
+  {
+    path: '/forgot-password',
+    element: <ForgotPasswordPage />,
   },
   {
     element: <ProtectedRoute />,

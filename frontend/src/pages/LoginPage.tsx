@@ -12,7 +12,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth';
 
@@ -232,7 +232,7 @@ export function LoginPage() {
                   <input type="checkbox" defaultChecked />
                   <span>Remember me</span>
                 </label>
-                <a href="/login">Forgot Password?</a>
+                <Link to="/forgot-password">Forgot Password?</Link>
               </div>
 
               <button className="gradient-button" disabled={isSubmitting} type="submit">

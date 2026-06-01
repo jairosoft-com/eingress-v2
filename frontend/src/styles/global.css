@@ -90,6 +90,10 @@ button {
   box-shadow: 0 18px 60px rgb(18 32 61 / 8%);
 }
 
+.forgot-auth-card {
+  min-height: calc(100vh - 110px);
+}
+
 .auth-topbar {
   display: flex;
   align-items: center;
@@ -155,10 +159,20 @@ button {
   padding: 34px 70px 0 24px;
 }
 
+.forgot-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 0.72fr);
+  min-height: calc(100vh - 250px);
+  padding: 26px 82px 0 18px;
+}
+
 .auth-hero {
   position: relative;
   min-height: 620px;
   overflow: hidden;
+}
+
+.forgot-hero {
+  min-height: 510px;
 }
 
 .auth-hero::before,
@@ -189,11 +203,19 @@ button {
   max-width: 560px;
 }
 
+.compact-copy {
+  max-width: 430px;
+}
+
 .hero-copy h1 {
   margin: 0;
   color: #071435;
   font-size: clamp(2.2rem, 4vw, 3.45rem);
   line-height: 1.22;
+}
+
+.compact-copy h1 {
+  font-size: clamp(1.9rem, 3vw, 2.7rem);
 }
 
 .hero-copy h1 span,
@@ -222,6 +244,12 @@ button {
   list-style: none;
 }
 
+.compact-feature-list {
+  gap: 17px;
+  margin-top: 32px;
+  font-size: 0.9rem;
+}
+
 .feature-list li {
   display: flex;
   align-items: center;
@@ -243,6 +271,15 @@ button {
   border-radius: 34px;
 }
 
+.forgot-shield {
+  position: absolute;
+  right: 150px;
+  bottom: 48px;
+  width: 176px;
+  height: 176px;
+  border-radius: 30px;
+}
+
 .login-card {
   width: 100%;
   padding: 48px 58px;
@@ -250,6 +287,45 @@ button {
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 18px 45px rgb(18 32 61 / 8%);
+}
+
+.forgot-card {
+  width: 100%;
+  padding: 42px 46px;
+  border: 1px solid #e9edf4;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgb(18 32 61 / 8%);
+}
+
+.reset-icon {
+  display: grid;
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 22px;
+  place-items: center;
+  color: #7c3aed;
+  border-radius: 999px;
+  background: #f0e7ff;
+}
+
+.forgot-heading {
+  max-width: 350px;
+  margin: 0 auto 28px;
+  text-align: center;
+}
+
+.forgot-heading h2 {
+  margin: 0 0 10px;
+  color: #071435;
+  font-size: 1.6rem;
+}
+
+.forgot-heading p {
+  margin: 0;
+  color: #6b7389;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .login-heading {
@@ -297,6 +373,12 @@ button {
   border: 1px solid #e2e7ef;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.compact-input {
+  min-height: 46px;
+  gap: 10px;
+  padding: 0 14px;
 }
 
 .input-shell:focus-within {
@@ -384,6 +466,12 @@ button {
   box-shadow: 0 18px 30px rgb(224 24 53 / 18%);
 }
 
+.reset-button {
+  min-height: 50px;
+  font-size: 0.9rem;
+  background: linear-gradient(100deg, #ef4444 0%, #cf3240 42%, #101936 100%);
+}
+
 .gradient-button:disabled {
   cursor: not-allowed;
   opacity: 0.72;
@@ -403,6 +491,14 @@ button {
   align-items: center;
   gap: 18px;
   margin: 28px 0;
+}
+
+.compact-divider {
+  margin: 24px 0;
+}
+
+.compact-divider span {
+  font-size: 0.74rem;
 }
 
 .divider::before,
@@ -430,6 +526,40 @@ button {
   border: 1px solid #e2e7ef;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.outline-reset-button {
+  display: inline-flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #1684ff;
+  font-weight: 700;
+  border: 1px solid #aab8cc;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.remember-login {
+  margin: 34px 0 0;
+  color: #6b7389;
+  font-size: 0.86rem;
+  text-align: center;
+}
+
+.remember-login a {
+  color: #5b21b6;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.success-message {
+  color: #15803d;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-align: center;
 }
 
 .google-mark {
