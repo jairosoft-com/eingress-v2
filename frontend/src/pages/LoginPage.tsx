@@ -5,16 +5,22 @@ import {
   Eye,
   Fingerprint,
   Globe2,
+  IdCard,
   LockKeyhole,
   RadioTower,
   ShieldCheck,
   UserRound,
 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+
+import { useAuth } from '../auth/useAuth';
 
 type LoginErrors = {
   email?: string;
+  form?: string;
   password?: string;
+  rfidCode?: string;
 };
 
 const loginFeatures = [
@@ -24,7 +30,7 @@ const loginFeatures = [
   { label: 'Real-time Monitoring', Icon: BarChart3 },
 ];
 
-function validateLoginForm(email: string, password: string): LoginErrors {
+function validateLoginForm(email: string, password: string, rfidCode: string): LoginErrors {
   const errors: LoginErrors = {};
 
   if (!email.trim()) {
@@ -35,20 +41,31 @@ function validateLoginForm(email: string, password: string): LoginErrors {
     errors.password = 'Password is required.';
   }
 
+  if (!rfidCode.trim()) {
+    errors.rfidCode = 'RFID verification is required.';
+  }
+
   return errors;
 }
 
 export function LoginPage() {
+  const { isAuthenticated, signIn } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rfidCode, setRfidCode] = useState('');
   const [errors, setErrors] = useState<LoginErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  const redirectTo =
+    (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/dashboard';
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const validationErrors = validateLoginForm(email, password);
+    const validationErrors = validateLoginForm(email, password, rfidCode);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) {
@@ -57,11 +74,20 @@ export function LoginPage() {
 
     setIsSubmitting(true);
 
-    await new Promise((resolve) => {
-      window.setTimeout(resolve, 900);
-    });
+    try {
+      await signIn({ email, password, rfidCode });
+      navigate(redirectTo, { replace: true });
+    } catch (error) {
+      setErrors({
+        form: error instanceof Error ? error.message : 'Authentication failed.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
-    setIsSubmitting(false);
+  if (isAuthenticated) {
+    return <Navigate replace to="/dashboard" />;
   }
 
   return (
@@ -178,6 +204,29 @@ export function LoginPage() {
                 ) : null}
               </div>
 
+              <div className="form-field">
+                <label htmlFor="rfidCode">RFID Verification</label>
+                <div className="input-shell">
+                  <IdCard size={22} aria-hidden="true" />
+                  <input
+                    aria-describedby={errors.rfidCode ? 'rfid-error' : undefined}
+                    aria-invalid={Boolean(errors.rfidCode)}
+                    autoComplete="one-time-code"
+                    id="rfidCode"
+                    name="rfidCode"
+                    onChange={(event) => setRfidCode(event.target.value)}
+                    placeholder="Scan or enter RFID code"
+                    type="text"
+                    value={rfidCode}
+                  />
+                </div>
+                {errors.rfidCode ? (
+                  <span className="field-error" id="rfid-error">
+                    {errors.rfidCode}
+                  </span>
+                ) : null}
+              </div>
+
               <div className="form-row">
                 <label className="checkbox-label">
                   <input type="checkbox" defaultChecked />
@@ -190,7 +239,7 @@ export function LoginPage() {
                 {isSubmitting ? (
                   <>
                     <span className="button-spinner" aria-hidden="true" />
-                    Signing in
+                    Verifying session
                   </>
                 ) : (
                   <>
@@ -199,6 +248,8 @@ export function LoginPage() {
                   </>
                 )}
               </button>
+
+              {errors.form ? <span className="field-error form-error">{errors.form}</span> : null}
             </form>
 
             <div className="divider"></div>

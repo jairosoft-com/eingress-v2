@@ -5,6 +5,7 @@ import {
   ClipboardList,
   Fingerprint,
   Home,
+  LogOut,
   Menu,
   Search,
   Settings,
@@ -14,8 +15,10 @@ import {
 } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 
+import { useAuth } from './auth/useAuth';
+
 const navItems = [
-  { label: 'Dashboard', path: '/', Icon: Home },
+  { label: 'Dashboard', path: '/dashboard', Icon: Home },
   { label: 'Users', path: '/users', Icon: UsersRound },
   { label: 'Attendance', path: '/access-logs', Icon: CalendarDays },
   { label: 'Devices', path: '/devices', Icon: Smartphone },
@@ -27,6 +30,8 @@ const navItems = [
 ];
 
 export function App() {
+  const { session, signOut } = useAuth();
+
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar" aria-label="Primary navigation">
@@ -44,7 +49,7 @@ export function App() {
           {navItems.map(({ Icon, label, path }) => (
             <NavLink
               className={({ isActive }) => (isActive ? 'admin-nav-link active' : 'admin-nav-link')}
-              end={path === '/'}
+              end={path === '/dashboard'}
               key={path}
               to={path}
             >
@@ -87,10 +92,15 @@ export function App() {
               JD
             </span>
             <span>
-              <strong>Juan Dela Cruz</strong>
+              <strong>{session?.adminName ?? 'Juan Dela Cruz'}</strong>
               <small>Administrator</small>
             </span>
             <ChevronDown size={18} />
+          </button>
+
+          <button className="logout-button" onClick={signOut} type="button">
+            <LogOut size={18} />
+            Sign out
           </button>
         </header>
 
