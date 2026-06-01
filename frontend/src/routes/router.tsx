@@ -8,6 +8,10 @@ import { NotFoundPage } from '../pages/NotFoundPage';
 
 export const router = createBrowserRouter([
   {
+    path: '/login',
+    element: <LoginPage />,
+  },
+  {
     path: '/',
     element: <App />,
     children: [
@@ -18,10 +22,6 @@ export const router = createBrowserRouter([
       {
         path: 'access-logs',
         element: <AccessLogsPage />,
-      },
-      {
-        path: 'login',
-        element: <LoginPage />,
       },
       {
         path: '*',
