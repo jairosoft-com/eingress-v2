@@ -5,6 +5,7 @@ import { ProtectedRoute } from '../auth/ProtectedRoute';
 import { AccessLogsPage } from '../pages/AccessLogsPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
+import { KioskPage } from '../pages/KioskPage';
 import { LoginPage } from '../pages/LoginPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 
@@ -16,6 +17,10 @@ export const router = createBrowserRouter([
   {
     path: '/forgot-password',
     element: <ForgotPasswordPage />,
+  },
+  {
+    path: '/kiosk',
+    element: <KioskPage />,
   },
   {
     element: <ProtectedRoute />,
