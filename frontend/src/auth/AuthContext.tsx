@@ -7,7 +7,8 @@ import {
   getStoredSession,
   refreshStoredSession,
 } from './session';
-import { AuthContext, AuthContextValue } from './context';
+import { AuthContext, AuthContextValue, SignInInput } from './context';
+import { apiFetch } from '../api/client';
 
 const activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
 
@@ -56,18 +57,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session,
       isAuthenticated: Boolean(session),
-      async signIn(input) {
-        await new Promise((resolve) => {
-          window.setTimeout(resolve, 900);
-        });
-
+      async signIn(input: SignInInput) {
         if (!input.password.trim() || !input.rfidCode.trim()) {
           throw new Error('Password and RFID verification are required.');
         }
 
+        const response = await apiFetch('/auth/login', {
+          method: 'POST',
+          body: {
+            usernameOrEmail: input.email,
+            password: input.password,
+            rfidCode: input.rfidCode,
+          },
+        });
+
+        const data = await response.json();
         const createdSession = createStoredSession({
-          email: input.email,
-          adminName: 'Juan Dela Cruz',
+          accessToken: data.accessToken,
+          expiresAt: data.expiresAt,
+          adminName: data.adminName,
+          email: data.email ?? input.email,
         });
 
         setSession(createdSession);

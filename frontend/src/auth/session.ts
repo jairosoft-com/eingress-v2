@@ -8,21 +8,13 @@ export type AuthSession = {
 };
 
 export type CreateSessionInput = {
+  accessToken: string;
+  expiresAt: number;
   adminName?: string;
-  email: string;
+  email?: string;
 };
 
-export const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
-
 const SESSION_STORAGE_KEY = 'eingress.admin.session';
-
-function createAccessToken() {
-  if (window.crypto.randomUUID) {
-    return window.crypto.randomUUID();
-  }
-
-  return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
 function readSession(): AuthSession | null {
   const value = window.localStorage.getItem(SESSION_STORAGE_KEY);
@@ -60,12 +52,12 @@ export function getStoredSession(now = Date.now()) {
 
 export function createStoredSession(input: CreateSessionInput, now = Date.now()) {
   const session: AuthSession = {
-    accessToken: createAccessToken(),
-    adminName: input.adminName ?? 'Juan Dela Cruz',
-    email: input.email,
+    accessToken: input.accessToken,
+    adminName: input.adminName ?? 'Admin',
+    email: input.email ?? '',
     issuedAt: now,
     lastActivityAt: now,
-    expiresAt: now + SESSION_TIMEOUT_MS,
+    expiresAt: input.expiresAt,
   };
 
   writeSession(session);
@@ -83,7 +75,7 @@ export function refreshStoredSession(now = Date.now()) {
   const refreshedSession: AuthSession = {
     ...session,
     lastActivityAt: now,
-    expiresAt: now + SESSION_TIMEOUT_MS,
+    expiresAt: now + 15 * 60 * 1000,
   };
 
   writeSession(refreshedSession);
