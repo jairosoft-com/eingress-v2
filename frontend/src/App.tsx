@@ -3,15 +3,15 @@ import {
   CalendarDays,
   ChevronDown,
   ClipboardList,
+  FileText,
   Fingerprint,
   Home,
   LogOut,
+  Monitor,
   Menu,
   Search,
   Settings,
   ShieldCheck,
-  Smartphone,
-  UsersRound,
 } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 
@@ -19,13 +19,11 @@ import { useAuth } from './auth/useAuth';
 
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', Icon: Home },
-  { label: 'Users', path: '/users', Icon: UsersRound },
-  { label: 'Attendance', path: '/access-logs', Icon: CalendarDays },
-  { label: 'Devices', path: '/devices', Icon: Smartphone },
-  { label: 'Reports', path: '/reports', Icon: ClipboardList },
-  { label: 'Access Control', path: '/access-control', Icon: ShieldCheck },
-  { label: 'Alerts', path: '/alerts', Icon: Bell },
-  { label: 'System Logs', path: '/system-logs', Icon: ClipboardList },
+  { label: 'Attendance Management', path: '/attendance-management', Icon: CalendarDays },
+  { label: 'Enrollment Requests', path: '/enrollment-requests', Icon: ClipboardList },
+  { label: 'Device Management', path: '/device-management', Icon: Monitor },
+  { label: 'Reports', path: '/reports', Icon: FileText },
+  { label: 'Audit Logs', path: '/audit-logs', Icon: ClipboardList },
   { label: 'Settings', path: '/settings', Icon: Settings },
 ];
 

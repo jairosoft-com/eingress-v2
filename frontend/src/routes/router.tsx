@@ -3,6 +3,14 @@ import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { App } from '../App';
 import { ProtectedRoute } from '../auth/ProtectedRoute';
 import { AccessLogsPage } from '../pages/AccessLogsPage';
+import {
+  AttendanceManagementPage,
+  AuditLogsPage,
+  DeviceManagementPage,
+  EnrollmentRequestsPage,
+  ReportsPage,
+  SettingsPage,
+} from '../pages/AdminModulePages';
 import { DashboardPage } from '../pages/DashboardPage';
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { KioskPage } from '../pages/KioskPage';
@@ -40,6 +48,30 @@ export const router = createBrowserRouter([
           {
             path: 'access-logs',
             element: <AccessLogsPage />,
+          },
+          {
+            path: 'attendance-management',
+            element: <AttendanceManagementPage />,
+          },
+          {
+            path: 'enrollment-requests',
+            element: <EnrollmentRequestsPage />,
+          },
+          {
+            path: 'device-management',
+            element: <DeviceManagementPage />,
+          },
+          {
+            path: 'reports',
+            element: <ReportsPage />,
+          },
+          {
+            path: 'audit-logs',
+            element: <AuditLogsPage />,
+          },
+          {
+            path: 'settings',
+            element: <SettingsPage />,
           },
           {
             path: '*',
