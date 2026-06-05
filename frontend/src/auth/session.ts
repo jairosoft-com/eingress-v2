@@ -9,11 +9,10 @@ export type AuthSession = {
 
 export type CreateSessionInput = {
   adminName?: string;
-  email: string;
+  email?: string;
 };
 
-export const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
-
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 const SESSION_STORAGE_KEY = 'eingress.admin.session';
 
 function createAccessToken() {
@@ -21,7 +20,7 @@ function createAccessToken() {
     return window.crypto.randomUUID();
   }
 
-  return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `frontend-session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function readSession(): AuthSession | null {
@@ -61,8 +60,8 @@ export function getStoredSession(now = Date.now()) {
 export function createStoredSession(input: CreateSessionInput, now = Date.now()) {
   const session: AuthSession = {
     accessToken: createAccessToken(),
-    adminName: input.adminName ?? 'Juan Dela Cruz',
-    email: input.email,
+    adminName: input.adminName ?? 'Admin',
+    email: input.email ?? '',
     issuedAt: now,
     lastActivityAt: now,
     expiresAt: now + SESSION_TIMEOUT_MS,

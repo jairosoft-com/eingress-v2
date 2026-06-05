@@ -1,7 +1,33 @@
-const sampleLogs = [
-  { id: 'EVT-1001', name: 'Main Entrance', status: 'Granted', time: '08:45' },
-  { id: 'EVT-1002', name: 'Lab Door', status: 'Review', time: '09:12' },
-  { id: 'EVT-1003', name: 'Server Room', status: 'Denied', time: '09:18' },
+type AccessLog = {
+  access_time: string;
+  authentication_method: string;
+  id: number;
+  result: string;
+  user_name: string;
+};
+
+const accessLogs: AccessLog[] = [
+  {
+    id: 1001,
+    user_name: 'Juan Dela Cruz',
+    authentication_method: 'Fingerprint + RFID',
+    result: 'Granted',
+    access_time: '2026-06-05T08:21:00+08:00',
+  },
+  {
+    id: 1002,
+    user_name: 'Maria Santos',
+    authentication_method: 'Fingerprint',
+    result: 'Granted',
+    access_time: '2026-06-05T08:18:00+08:00',
+  },
+  {
+    id: 1003,
+    user_name: 'Peter Reyes',
+    authentication_method: 'RFID',
+    result: 'Denied',
+    access_time: '2026-06-05T08:15:00+08:00',
+  },
 ];
 
 export function AccessLogsPage() {
@@ -18,19 +44,21 @@ export function AccessLogsPage() {
         <table>
           <thead>
             <tr>
-              <th>Event</th>
-              <th>Entry Point</th>
+              <th>Log ID</th>
+              <th>User</th>
+              <th>Method</th>
               <th>Status</th>
               <th>Time</th>
             </tr>
           </thead>
           <tbody>
-            {sampleLogs.map((log) => (
+            {accessLogs.map((log) => (
               <tr key={log.id}>
                 <td>{log.id}</td>
-                <td>{log.name}</td>
-                <td>{log.status}</td>
-                <td>{log.time}</td>
+                <td>{log.user_name}</td>
+                <td>{log.authentication_method}</td>
+                <td>{log.result}</td>
+                <td>{new Date(log.access_time).toLocaleString()}</td>
               </tr>
             ))}
           </tbody>

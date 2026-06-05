@@ -7,7 +7,7 @@ import {
   getStoredSession,
   refreshStoredSession,
 } from './session';
-import { AuthContext, AuthContextValue } from './context';
+import { AuthContext, AuthContextValue, SignInInput } from './context';
 
 const activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
 
@@ -56,18 +56,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session,
       isAuthenticated: Boolean(session),
-      async signIn(input) {
-        await new Promise((resolve) => {
-          window.setTimeout(resolve, 900);
-        });
-
+      async signIn(input: SignInInput) {
         if (!input.password.trim() || !input.rfidCode.trim()) {
           throw new Error('Password and RFID verification are required.');
         }
 
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, 700);
+        });
+
         const createdSession = createStoredSession({
-          email: input.email,
           adminName: 'Juan Dela Cruz',
+          email: input.email,
         });
 
         setSession(createdSession);
