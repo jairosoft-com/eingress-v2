@@ -3,7 +3,7 @@ import { createContext } from 'react';
 import { AuthSession } from './session';
 
 export type SignInInput = {
-  email: string;
+  usernameOrEmail: string;
   password: string;
   rfidCode: string;
 };

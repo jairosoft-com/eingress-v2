@@ -56,7 +56,9 @@ export function ForgotPasswordPage() {
     });
 
     setIsSubmitting(false);
-    setSuccessMessage('Reset link sent. Please check your email.');
+    setSuccessMessage(
+      'Reset request submitted. Please check your email when email delivery is configured.',
+    );
   }
 
   return (
@@ -76,7 +78,7 @@ export function ForgotPasswordPage() {
               English
               <ChevronDown size={16} />
             </button>
-            <a className="help-link" href="mailto:support@eingress.local">
+            <a className="help-link" href="/login">
               <CircleHelp size={18} />
               Need help?
             </a>
@@ -119,10 +121,7 @@ export function ForgotPasswordPage() {
 
             <div className="forgot-heading">
               <h2 id="forgot-password-title">Forgot Password?</h2>
-              <p>
-                No worries! Enter your email address and we'll send you a link to reset your
-                password.
-              </p>
+              <p>No worries! Enter your email address to request a password reset.</p>
             </div>
 
             <form className="login-form" noValidate onSubmit={handleSubmit}>

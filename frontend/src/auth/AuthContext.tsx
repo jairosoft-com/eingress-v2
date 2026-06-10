@@ -10,6 +10,14 @@ import {
 import { AuthContext, AuthContextValue, SignInInput } from './context';
 
 const activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+
+type LoginResponse = {
+  accessToken: string;
+  adminName: string;
+  email: string;
+  expiresAt: number;
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(() => getStoredSession());
@@ -57,17 +65,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       isAuthenticated: Boolean(session),
       async signIn(input: SignInInput) {
-        if (!input.password.trim() || !input.rfidCode.trim()) {
-          throw new Error('Password and RFID verification are required.');
+        if (!input.usernameOrEmail.trim() || !input.password.trim() || !input.rfidCode.trim()) {
+          throw new Error('Username/email, password, and RFID verification are required.');
         }
 
-        await new Promise((resolve) => {
-          window.setTimeout(resolve, 700);
+        const response = await fetch(`${API_BASE_URL}/auth/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            usernameOrEmail: input.usernameOrEmail,
+            password: input.password,
+            rfidCode: input.rfidCode,
+          }),
         });
 
+        const data = (await response.json().catch(() => null)) as
+          | (Partial<LoginResponse> & { error?: string })
+          | null;
+
+        if (!response.ok || !data?.accessToken) {
+          throw new Error(data?.error || 'Authentication failed.');
+        }
+
         const createdSession = createStoredSession({
-          adminName: 'Juan Dela Cruz',
-          email: input.email,
+          accessToken: data.accessToken,
+          adminName: data.adminName,
+          email: data.email,
+          expiresAt: data.expiresAt,
         });
 
         setSession(createdSession);

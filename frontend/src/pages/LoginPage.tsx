@@ -17,10 +17,10 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 
 type LoginErrors = {
-  email?: string;
   form?: string;
   password?: string;
   rfidCode?: string;
+  usernameOrEmail?: string;
 };
 
 const loginFeatures = [
@@ -30,11 +30,15 @@ const loginFeatures = [
   { label: 'Real-time Monitoring', Icon: BarChart3 },
 ];
 
-function validateLoginForm(email: string, password: string, rfidCode: string): LoginErrors {
+function validateLoginForm(
+  usernameOrEmail: string,
+  password: string,
+  rfidCode: string,
+): LoginErrors {
   const errors: LoginErrors = {};
 
-  if (!email.trim()) {
-    errors.email = 'Email or username is required.';
+  if (!usernameOrEmail.trim()) {
+    errors.usernameOrEmail = 'Email or username is required.';
   }
 
   if (!password.trim()) {
@@ -52,7 +56,7 @@ export function LoginPage() {
   const { isAuthenticated, signIn } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [usernameOrEmail, setUsernameOrEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rfidCode, setRfidCode] = useState('');
   const [errors, setErrors] = useState<LoginErrors>({});
@@ -65,7 +69,7 @@ export function LoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const validationErrors = validateLoginForm(email, password, rfidCode);
+    const validationErrors = validateLoginForm(usernameOrEmail, password, rfidCode);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) {
@@ -75,7 +79,7 @@ export function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      await signIn({ email, password, rfidCode });
+      await signIn({ usernameOrEmail, password, rfidCode });
       navigate(redirectTo, { replace: true });
     } catch (error) {
       setErrors({
@@ -107,7 +111,7 @@ export function LoginPage() {
               English
               <ChevronDown size={16} />
             </button>
-            <a className="help-link" href="mailto:support@eingress.local">
+            <a className="help-link" href="/login">
               <CircleHelp size={18} />
               Need help?
             </a>
@@ -151,24 +155,24 @@ export function LoginPage() {
 
             <form className="login-form" noValidate onSubmit={handleSubmit}>
               <div className="form-field">
-                <label htmlFor="email">Email or Username</label>
+                <label htmlFor="usernameOrEmail">Email or Username</label>
                 <div className="input-shell">
                   <UserRound size={22} aria-hidden="true" />
                   <input
-                    aria-describedby={errors.email ? 'email-error' : undefined}
-                    aria-invalid={Boolean(errors.email)}
+                    aria-describedby={errors.usernameOrEmail ? 'username-error' : undefined}
+                    aria-invalid={Boolean(errors.usernameOrEmail)}
                     autoComplete="username"
-                    id="email"
-                    name="email"
-                    onChange={(event) => setEmail(event.target.value)}
+                    id="usernameOrEmail"
+                    name="usernameOrEmail"
+                    onChange={(event) => setUsernameOrEmail(event.target.value)}
                     placeholder="Enter your email or username"
                     type="text"
-                    value={email}
+                    value={usernameOrEmail}
                   />
                 </div>
-                {errors.email ? (
-                  <span className="field-error" id="email-error">
-                    {errors.email}
+                {errors.usernameOrEmail ? (
+                  <span className="field-error" id="username-error">
+                    {errors.usernameOrEmail}
                   </span>
                 ) : null}
               </div>

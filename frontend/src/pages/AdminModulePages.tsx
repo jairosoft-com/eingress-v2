@@ -384,7 +384,6 @@ export function SettingsPage() {
             'General Settings',
             'System Preferences',
             'Security Settings',
-            'Email Notifications',
             'Backup & Restore',
             'System Information',
           ].map((item, index) => (
@@ -400,10 +399,6 @@ export function SettingsPage() {
             <label>
               Company Name
               <input defaultValue="EINGRESS Corporation" />
-            </label>
-            <label>
-              Company Email
-              <input defaultValue="admin@eingress.com" />
             </label>
             <label>
               Time Zone
