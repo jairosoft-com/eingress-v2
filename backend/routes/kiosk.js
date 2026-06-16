@@ -4,9 +4,8 @@ import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
 
 export const kioskRouter = express.Router();
-kioskRouter.use(authMiddleware);
 
-kioskRouter.post('/scan', async (req, res) => {
+async function processKioskScan(req, res) {
   const { userId, employeeId, rfidUid, fingerprintId, authenticationMethod, deviceId } = req.body;
 
   if (!userId && !employeeId && !rfidUid && !fingerprintId) {
@@ -85,4 +84,17 @@ kioskRouter.post('/scan', async (req, res) => {
 
   broadcastMessage({ type: 'access-log', payload: log });
   res.json(log);
+}
+
+kioskRouter.post('/fingerprint-scan', async (req, res) => {
+  req.body = {
+    fingerprintId: req.body.fingerprintId,
+    authenticationMethod: 'Fingerprint',
+    deviceId: req.body.deviceId,
+  };
+
+  return processKioskScan(req, res);
 });
+
+kioskRouter.use(authMiddleware);
+kioskRouter.post('/scan', processKioskScan);

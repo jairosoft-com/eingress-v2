@@ -1,9 +1,25 @@
 import { Check, CircleUserRound, Fingerprint, IdCard, Info, Plus, QrCode, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type KioskState = 'idle' | 'processing' | 'recognized' | 'unregistered' | 'enrollment';
+type RecognizedUser = {
+  department: string;
+  employeeId: string;
+  name: string;
+};
+type KioskTerminalInput = {
+  fingerprintId: string | null;
+  nonce: number;
+};
+type KioskScanResponse = {
+  department: string | null;
+  employeeId: string;
+  result: 'Granted' | 'Denied';
+  userName: string;
+};
 
-const recognizedUser = {
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+const fallbackRecognizedUser = {
   name: 'Juan Dela Cruz',
   employeeId: 'EMP-000123',
   department: 'Information Technology',
@@ -39,14 +55,74 @@ const modeCopy = {
 
 export function KioskPage() {
   const [kioskState, setKioskState] = useState<KioskState>('idle');
+  const [recognizedUser, setRecognizedUser] = useState<RecognizedUser>(fallbackRecognizedUser);
+  const [doorAlert, setDoorAlert] = useState('');
+  const lastProcessedNonce = useRef(0);
 
-  function simulateFingerprintScan(result: 'recognized' | 'unregistered') {
+  const scanFingerprint = useCallback((fingerprintId: string) => {
     setKioskState('processing');
+    setDoorAlert('');
 
     window.setTimeout(() => {
-      setKioskState(result);
+      void fetch(`${API_BASE_URL}/kiosk/fingerprint-scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fingerprintId }),
+      })
+        .then(async (response) => {
+          const data = (await response.json().catch(() => null)) as KioskScanResponse | null;
+          const isRegistered = response.ok && data?.result === 'Granted';
+
+          if (isRegistered) {
+            setRecognizedUser({
+              department: data.department ?? 'Unassigned',
+              employeeId: data.employeeId,
+              name: data.userName,
+            });
+            setDoorAlert('The door is unlocked!');
+            setKioskState('recognized');
+            return;
+          }
+
+          setDoorAlert('Unrecognized user. Door Locked');
+          setKioskState('unregistered');
+        })
+        .catch(() => {
+          setDoorAlert('Unrecognized user. Door Locked');
+          setKioskState('unregistered');
+        });
     }, 1200);
-  }
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void fetch(`/kiosk-input.json?t=${Date.now()}`, { cache: 'no-store' })
+        .then((response) => {
+          if (!response.ok) {
+            return null;
+          }
+
+          return response.json() as Promise<KioskTerminalInput>;
+        })
+        .then((input) => {
+          const fingerprintId = input?.fingerprintId?.trim();
+
+          if (!input || !fingerprintId || input.nonce <= lastProcessedNonce.current) {
+            return;
+          }
+
+          lastProcessedNonce.current = input.nonce;
+          scanFingerprint(fingerprintId);
+        })
+        .catch(() => {
+          // The terminal bridge is optional while the hardware scanner is unavailable.
+        });
+    }, 600);
+
+    return () => window.clearInterval(intervalId);
+  }, [scanFingerprint]);
 
   useEffect(() => {
     if (kioskState !== 'recognized') {
@@ -60,8 +136,20 @@ export function KioskPage() {
     return () => window.clearTimeout(timeoutId);
   }, [kioskState]);
 
+  useEffect(() => {
+    if (!doorAlert) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDoorAlert('');
+    }, 3500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [doorAlert]);
+
   return (
-    <main className="kiosk-screen" aria-labelledby="kiosk-title">
+    <main className="kiosk-screen" aria-label="Kiosk Frontend System">
       <section className={`kiosk-stage kiosk-${kioskState}`}>
         <header className="kiosk-header">
           <div className="kiosk-brand">
@@ -82,7 +170,7 @@ export function KioskPage() {
 
         <div className="kiosk-body">
           {kioskState === 'recognized' ? (
-            <RecognizedState />
+            <RecognizedState user={recognizedUser} />
           ) : kioskState === 'unregistered' ? (
             <UnregisteredState />
           ) : kioskState === 'enrollment' ? (
@@ -99,25 +187,11 @@ export function KioskPage() {
         <div className="kiosk-dot-grid" aria-hidden="true" />
       </section>
 
-      <aside className="kiosk-controls" aria-label="Kiosk frontend test controls">
-        <div>
-          <p>{modeCopy[kioskState].eyebrow}</p>
-          <h1 id="kiosk-title">Kiosk Frontend System</h1>
+      {doorAlert ? (
+        <div className="kiosk-door-alert" role="alert">
+          {doorAlert}
         </div>
-
-        <button type="button" onClick={() => simulateFingerprintScan('recognized')}>
-          Simulate recognized scan
-        </button>
-        <button type="button" onClick={() => simulateFingerprintScan('unregistered')}>
-          Simulate unregistered scan
-        </button>
-        <button type="button" onClick={() => setKioskState('enrollment')}>
-          Show enrollment mode
-        </button>
-        <button type="button" onClick={() => setKioskState('idle')}>
-          Reset idle prompt
-        </button>
-      </aside>
+      ) : null}
     </main>
   );
 }
@@ -143,7 +217,7 @@ function FingerprintPrompt({
   );
 }
 
-function RecognizedState() {
+function RecognizedState({ user }: { user: RecognizedUser }) {
   return (
     <section className="recognized-layout" aria-live="polite">
       <div className="kiosk-portrait">
@@ -157,16 +231,16 @@ function RecognizedState() {
 
       <div className="recognized-details">
         <p>Welcome back,</p>
-        <h2>{recognizedUser.name}</h2>
+        <h2>{user.name}</h2>
 
         <dl className="user-detail-card">
           <div>
             <dt>Employee ID</dt>
-            <dd>{recognizedUser.employeeId}</dd>
+            <dd>{user.employeeId}</dd>
           </div>
           <div>
             <dt>Department</dt>
-            <dd>{recognizedUser.department}</dd>
+            <dd>{user.department}</dd>
           </div>
         </dl>
 

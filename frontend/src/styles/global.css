@@ -1590,8 +1590,6 @@ td small {
 
 .kiosk-screen {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
-  gap: 22px;
   min-height: 100vh;
   padding: 28px;
   color: #ffffff;
@@ -1661,6 +1659,23 @@ td small {
 .kiosk-clock strong {
   margin-bottom: 4px;
   font-size: 0.9rem;
+}
+
+.kiosk-door-alert {
+  position: fixed;
+  z-index: 20;
+  top: 28px;
+  left: 50%;
+  width: min(420px, calc(100vw - 32px));
+  padding: 18px 24px;
+  color: #ffffff;
+  font-weight: 900;
+  text-align: center;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 8px;
+  background: #101936;
+  box-shadow: 0 22px 50px rgb(0 0 0 / 38%);
+  transform: translateX(-50%);
 }
 
 .kiosk-body {
@@ -2025,41 +2040,6 @@ td small {
   color: #c7d2e4;
 }
 
-.kiosk-controls {
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  padding: 18px;
-  border: 1px solid #333;
-  border-radius: 8px;
-  background: #151515;
-}
-
-.kiosk-controls p {
-  margin: 0 0 4px;
-  color: #e01835;
-  font-weight: 800;
-}
-
-.kiosk-controls h1 {
-  margin: 0 0 10px;
-  color: #ffffff;
-  font-size: 1rem;
-}
-
-.kiosk-controls button {
-  min-height: 44px;
-  color: #ffffff;
-  font-weight: 800;
-  border: 1px solid #34435c;
-  border-radius: 8px;
-  background: #0b1b39;
-}
-
-.kiosk-controls button:hover {
-  border-color: #e01835;
-}
-
 @keyframes kioskPulse {
   0%,
   100% {
@@ -2100,18 +2080,6 @@ td small {
 
   .dashboard-grid {
     grid-template-columns: 1fr;
-  }
-
-  .kiosk-screen {
-    grid-template-columns: 1fr;
-  }
-
-  .kiosk-controls {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .kiosk-controls div {
-    grid-column: 1 / -1;
   }
 }
 
@@ -2223,10 +2191,6 @@ td small {
   .kiosk-body {
     min-height: 470px;
     padding: 0 22px 34px;
-  }
-
-  .kiosk-controls {
-    grid-template-columns: 1fr;
   }
 
   .admin-sidebar {
