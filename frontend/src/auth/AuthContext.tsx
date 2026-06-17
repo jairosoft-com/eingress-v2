@@ -8,9 +8,9 @@ import {
   refreshStoredSession,
 } from './session';
 import { AuthContext, AuthContextValue, SignInInput } from './context';
+import { API_BASE_URL } from '../lib/api';
 
 const activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 
 type LoginResponse = {
   accessToken: string;

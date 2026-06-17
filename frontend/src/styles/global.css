@@ -562,6 +562,36 @@ button {
   text-align: center;
 }
 
+.reset-status {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  color: #4d5873;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.reset-status a {
+  color: #2449d8;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.error-status {
+  color: #c70b2d;
+}
+
+.success-status {
+  color: #15803d;
+}
+
+.dark-spinner {
+  border-color: rgb(20 36 70 / 20%);
+  border-top-color: #142446;
+}
+
 .google-mark {
   color: #1473e6;
   font-weight: 900;
@@ -2177,6 +2207,10 @@ td small {
   }
 
   .login-card {
+    padding: 28px 20px;
+  }
+
+  .forgot-card {
     padding: 28px 20px;
   }
 

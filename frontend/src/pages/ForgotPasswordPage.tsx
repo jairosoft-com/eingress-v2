@@ -13,6 +13,8 @@ import {
 import { FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { API_BASE_URL } from '../lib/api';
+
 const resetFeatures = [
   { label: 'Secure Authentication', Icon: ShieldCheck },
   { label: 'Biometric Technology', Icon: Fingerprint },
@@ -35,6 +37,7 @@ function validateEmail(email: string) {
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
 
@@ -43,6 +46,7 @@ export function ForgotPasswordPage() {
 
     const validationMessage = validateEmail(email);
     setEmailError(validationMessage);
+    setSubmitError('');
     setSuccessMessage('');
 
     if (validationMessage) {
@@ -51,14 +55,32 @@ export function ForgotPasswordPage() {
 
     setIsSubmitting(true);
 
-    await new Promise((resolve) => {
-      window.setTimeout(resolve, 900);
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      });
 
-    setIsSubmitting(false);
-    setSuccessMessage(
-      'Reset request submitted. Please check your email when email delivery is configured.',
-    );
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(data?.error || 'Unable to send reset link.');
+      }
+
+      setSuccessMessage(
+        data?.message || 'If that email exists, a password reset link has been sent.',
+      );
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to send reset link.');
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -167,16 +189,8 @@ export function ForgotPasswordPage() {
               </button>
 
               {successMessage ? <span className="success-message">{successMessage}</span> : null}
+              {submitError ? <span className="field-error form-error">{submitError}</span> : null}
             </form>
-
-            <div className="divider compact-divider">
-              <span>OR</span>
-            </div>
-
-            <button className="outline-reset-button" type="button">
-              <ShieldCheck size={16} />
-              Send Reset Link via SMS Instead
-            </button>
 
             <p className="remember-login">
               Remember your password? <Link to="/login">Back to Login</Link>

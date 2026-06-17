@@ -16,6 +16,7 @@ import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { KioskPage } from '../pages/KioskPage';
 import { LoginPage } from '../pages/LoginPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
+import { ResetPasswordPage } from '../pages/ResetPasswordPage';
 
 export const router = createBrowserRouter([
   {
@@ -25,6 +26,10 @@ export const router = createBrowserRouter([
   {
     path: '/forgot-password',
     element: <ForgotPasswordPage />,
+  },
+  {
+    path: '/reset-password',
+    element: <ResetPasswordPage />,
   },
   {
     path: '/kiosk',
