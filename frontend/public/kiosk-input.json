@@ -1,5 +1,7 @@
 {
-  "fingerprintId": "FP-EMP001",
-  "nonce": 1781597773112,
-  "updatedAt": "2026-06-16T08:16:34.257Z"
+  "biometricCaptured": false,
+  "fingerprintId": null,
+  "rfidUid": null,
+  "nonce": 1781667931677,
+  "updatedAt": "2026-06-17T03:45:48.487Z"
 }

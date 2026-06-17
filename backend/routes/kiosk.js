@@ -96,5 +96,43 @@ kioskRouter.post('/fingerprint-scan', async (req, res) => {
   return processKioskScan(req, res);
 });
 
+kioskRouter.post('/admin-rfid-scan', async (req, res, next) => {
+  try {
+    const rfidUid = req.body.rfidUid?.trim();
+
+    if (!rfidUid) {
+      return res.status(400).json({ error: 'rfidUid is required' });
+    }
+
+    const adminResult = await query(
+      `SELECT id, username, email, is_active
+       FROM admins
+       WHERE rfid_uid = $1
+       LIMIT 1`,
+      [rfidUid],
+    );
+
+    if (adminResult.rowCount === 0 || !adminResult.rows[0].is_active) {
+      return res.status(401).json({ error: 'Invalid admin RFID' });
+    }
+
+    const admin = adminResult.rows[0];
+
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [admin.id, 'Authorize Enrollment', 'Kiosk', 'Admin RFID authorized kiosk enrollment', req.ip],
+    );
+
+    return res.json({
+      authorized: true,
+      adminName: admin.username,
+      email: admin.email,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 kioskRouter.use(authMiddleware);
 kioskRouter.post('/scan', processKioskScan);

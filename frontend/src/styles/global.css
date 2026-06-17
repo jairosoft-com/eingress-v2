@@ -1590,23 +1590,21 @@ td small {
 
 .kiosk-screen {
   display: grid;
+  grid-template-columns: 1fr;
   min-height: 100vh;
-  padding: 28px;
+  padding: 0;
   color: #ffffff;
   background: #1f1f1f;
 }
 
 .kiosk-stage {
   position: relative;
-  min-height: calc(100vh - 56px);
+  min-height: 100vh;
   overflow: hidden;
-  border: 1px solid #102748;
-  border-radius: 8px;
   background:
     radial-gradient(circle at 18% 18%, rgb(21 66 129 / 42%), transparent 34%),
     radial-gradient(circle at 92% 94%, rgb(220 22 54 / 13%), transparent 24%),
     linear-gradient(135deg, #07182f 0%, #021024 100%);
-  box-shadow: 0 22px 60px rgb(0 0 0 / 32%);
 }
 
 .kiosk-header {
@@ -1962,10 +1960,10 @@ td small {
 
 .enrollment-layout {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr) 190px;
-  gap: 30px;
+  grid-template-columns: 160px minmax(0, 1fr) 300px;
+  gap: 38px;
   align-items: center;
-  width: min(820px, 100%);
+  width: min(980px, 100%);
 }
 
 .enrollment-symbol svg:last-child {
@@ -2016,18 +2014,30 @@ td small {
 .qr-panel {
   display: grid;
   justify-items: center;
-  gap: 16px;
+  gap: 14px;
   color: #c7d2e4;
   text-align: center;
 }
 
-.qr-panel svg {
-  width: 132px;
-  height: 132px;
-  padding: 10px;
-  color: #07182f;
+.qr-panel img {
+  width: 260px;
+  height: 260px;
+  padding: 18px;
+  object-fit: contain;
   border-radius: 8px;
   background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 82%),
+    0 20px 45px rgb(0 0 0 / 32%);
+}
+
+.qr-panel small {
+  display: block;
+  max-width: 280px;
+  overflow-wrap: anywhere;
+  color: #ffffff;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .enrollment-help {
@@ -2084,6 +2094,10 @@ td small {
 }
 
 @media (max-width: 1020px) {
+  .kiosk-screen {
+    grid-template-columns: 1fr;
+  }
+
   .auth-layout {
     grid-template-columns: 1fr;
     padding: 34px 0 0;
@@ -2180,12 +2194,8 @@ td small {
     display: none;
   }
 
-  .kiosk-screen {
-    padding: 12px;
-  }
-
   .kiosk-stage {
-    min-height: 620px;
+    min-height: 100vh;
   }
 
   .kiosk-body {

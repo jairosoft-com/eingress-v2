@@ -1,14 +1,22 @@
-import { Check, CircleUserRound, Fingerprint, IdCard, Info, Plus, QrCode, X } from 'lucide-react';
+import { Check, CircleUserRound, Fingerprint, IdCard, Info, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-type KioskState = 'idle' | 'processing' | 'recognized' | 'unregistered' | 'enrollment';
+type KioskState =
+  | 'idle'
+  | 'processing'
+  | 'recognized'
+  | 'unregistered'
+  | 'biometricEnrollment'
+  | 'enrollment';
 type RecognizedUser = {
   department: string;
   employeeId: string;
   name: string;
 };
 type KioskTerminalInput = {
+  biometricCaptured?: boolean;
   fingerprintId: string | null;
+  rfidUid?: string | null;
   nonce: number;
 };
 type KioskScanResponse = {
@@ -16,6 +24,10 @@ type KioskScanResponse = {
   employeeId: string;
   result: 'Granted' | 'Denied';
   userName: string;
+};
+type AdminRfidResponse = {
+  adminName: string;
+  authorized: boolean;
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
@@ -51,13 +63,22 @@ const modeCopy = {
     title: 'Register New User',
     description: 'Follow the steps below to complete your registration.',
   },
+  biometricEnrollment: {
+    eyebrow: 'Biometric Enrollment',
+    title: 'Scan New Fingerprint',
+    description: 'Admin authorized registration. Scan the user fingerprint to continue.',
+  },
 };
 
 export function KioskPage() {
   const [kioskState, setKioskState] = useState<KioskState>('idle');
   const [recognizedUser, setRecognizedUser] = useState<RecognizedUser>(fallbackRecognizedUser);
+  const [enrollmentFingerprintId, setEnrollmentFingerprintId] = useState('');
   const [doorAlert, setDoorAlert] = useState('');
   const lastProcessedNonce = useRef(0);
+  const adminRfidAcceptedNonce = useRef(0);
+  const isUnrecognizedUser = kioskState === 'unregistered';
+  const isBiometricEnrollment = kioskState === 'biometricEnrollment';
 
   const scanFingerprint = useCallback((fingerprintId: string) => {
     setKioskState('processing');
@@ -96,6 +117,57 @@ export function KioskPage() {
     }, 1200);
   }, []);
 
+  const scanAdminRfid = useCallback(
+    (rfidUid: string, inputNonce: number) => {
+      if (!isUnrecognizedUser) {
+        return;
+      }
+
+      setDoorAlert('Verifying admin RFID...');
+
+      void fetch(`${API_BASE_URL}/kiosk/admin-rfid-scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rfidUid }),
+      })
+        .then(async (response) => {
+          const data = (await response.json().catch(() => null)) as AdminRfidResponse | null;
+
+          if (!response.ok || !data?.authorized) {
+            setDoorAlert('Invalid admin RFID. Registration locked.');
+            return;
+          }
+
+          setDoorAlert(`Admin ${data.adminName} authorized registration`);
+          adminRfidAcceptedNonce.current = inputNonce;
+          setKioskState('biometricEnrollment');
+        })
+        .catch(() => {
+          setDoorAlert('Unable to verify admin RFID. Registration locked.');
+        });
+    },
+    [isUnrecognizedUser],
+  );
+
+  const registerEnrollmentFingerprint = useCallback(
+    (fingerprintId: string) => {
+      if (!isBiometricEnrollment) {
+        return;
+      }
+
+      setEnrollmentFingerprintId(fingerprintId);
+      setDoorAlert('Fingerprint captured for registration');
+      setKioskState('enrollment');
+    },
+    [isBiometricEnrollment],
+  );
+
+  const capturePlaceholderBiometrics = useCallback(() => {
+    registerEnrollmentFingerprint('Placeholder biometric #3');
+  }, [registerEnrollmentFingerprint]);
+
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void fetch(`/kiosk-input.json?t=${Date.now()}`, { cache: 'no-store' })
@@ -108,13 +180,49 @@ export function KioskPage() {
         })
         .then((input) => {
           const fingerprintId = input?.fingerprintId?.trim();
+          const rfidUid = input?.rfidUid?.trim();
+          const biometricCaptured = input?.biometricCaptured === true || fingerprintId === '3';
 
-          if (!input || !fingerprintId || input.nonce <= lastProcessedNonce.current) {
+          if (!input || input.nonce <= lastProcessedNonce.current) {
             return;
           }
 
           lastProcessedNonce.current = input.nonce;
-          scanFingerprint(fingerprintId);
+
+          // Only treat an admin RFID when we're in the unregistered state and
+          // a real RFID UID was provided. Do NOT treat a fingerprint scan as
+          // an admin RFID candidate — that caused accidental enrollment flows.
+          if (isUnrecognizedUser) {
+            const adminRfidCandidate = rfidUid || (!biometricCaptured ? fingerprintId : null);
+
+            if (adminRfidCandidate) {
+              scanAdminRfid(adminRfidCandidate, input.nonce);
+            }
+
+            return;
+          }
+
+          if (
+            isBiometricEnrollment &&
+            biometricCaptured &&
+            input.nonce > adminRfidAcceptedNonce.current
+          ) {
+            capturePlaceholderBiometrics();
+            return;
+          }
+
+          if (isBiometricEnrollment) {
+            setDoorAlert('Enter 3 to capture fingerprint biometrics.');
+            return;
+          }
+
+          if (biometricCaptured) {
+            return;
+          }
+
+          if (fingerprintId) {
+            scanFingerprint(fingerprintId);
+          }
         })
         .catch(() => {
           // The terminal bridge is optional while the hardware scanner is unavailable.
@@ -122,7 +230,13 @@ export function KioskPage() {
     }, 600);
 
     return () => window.clearInterval(intervalId);
-  }, [scanFingerprint]);
+  }, [
+    capturePlaceholderBiometrics,
+    isBiometricEnrollment,
+    isUnrecognizedUser,
+    scanAdminRfid,
+    scanFingerprint,
+  ]);
 
   useEffect(() => {
     if (kioskState !== 'recognized') {
@@ -132,6 +246,19 @@ export function KioskPage() {
     const timeoutId = window.setTimeout(() => {
       setKioskState('idle');
     }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [kioskState]);
+
+  useEffect(() => {
+    if (kioskState !== 'unregistered') {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDoorAlert('');
+      setKioskState('idle');
+    }, 8000);
 
     return () => window.clearTimeout(timeoutId);
   }, [kioskState]);
@@ -171,10 +298,12 @@ export function KioskPage() {
         <div className="kiosk-body">
           {kioskState === 'recognized' ? (
             <RecognizedState user={recognizedUser} />
-          ) : kioskState === 'unregistered' ? (
+          ) : isUnrecognizedUser ? (
             <UnregisteredState />
+          ) : isBiometricEnrollment ? (
+            <BiometricEnrollmentState />
           ) : kioskState === 'enrollment' ? (
-            <EnrollmentState />
+            <EnrollmentState fingerprintId={enrollmentFingerprintId} />
           ) : (
             <FingerprintPrompt
               description={modeCopy[kioskState].description}
@@ -270,7 +399,7 @@ function UnregisteredState() {
 
       <div className="unregistered-copy">
         <h2>Unrecognized</h2>
-        <p>We couldn't verify your fingerprint. Please contact an administrator.</p>
+        <p>We couldn't verify your fingerprint. Scan an admin RFID to open registration.</p>
       </div>
 
       <div className="admin-rfid-card">
@@ -284,7 +413,19 @@ function UnregisteredState() {
   );
 }
 
-function EnrollmentState() {
+function BiometricEnrollmentState() {
+  return (
+    <section className="fingerprint-prompt" aria-live="polite">
+      <div className="fingerprint-orb">
+        <Fingerprint size={78} strokeWidth={1.7} />
+      </div>
+      <h2>Scan New Fingerprint</h2>
+      <p>Admin RFID accepted. Enter 3 to capture the placeholder fingerprint biometric.</p>
+    </section>
+  );
+}
+
+function EnrollmentState({ fingerprintId }: { fingerprintId: string }) {
   return (
     <section className="enrollment-layout" aria-live="polite">
       <div className="enrollment-symbol">
@@ -295,10 +436,13 @@ function EnrollmentState() {
       <div className="enrollment-copy">
         <p>Enrollment Mode</p>
         <h2>Register New User</h2>
-        <span>Follow the steps below to complete your registration.</span>
+        <span>
+          Fingerprint biometric captured{fingerprintId ? `: ${fingerprintId}` : ''}. Continue with
+          the registration form.
+        </span>
 
         <ol>
-          <li>Scan your fingerprint</li>
+          <li>Capture fingerprint biometric</li>
           <li>Fill out the registration form</li>
           <li>Wait for admin approval</li>
         </ol>
@@ -306,7 +450,7 @@ function EnrollmentState() {
 
       <div className="qr-panel">
         <span>Or scan this QR code to open the form</span>
-        <QrCode size={126} />
+        <img alt="Enrollment form QR code" src="/enrollment-qr.png" />
       </div>
 
       <div className="enrollment-help">
