@@ -8,6 +8,11 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+
+import { useAuth } from '../auth/useAuth';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 
 const attendanceRows = [
   ['EMP001', 'Juan Dela Cruz', 'IT Department', '08:01 AM', '05:02 PM', 'Present', 'Main Office'],
@@ -16,19 +21,6 @@ const attendanceRows = [
   ['EMP004', 'Ana Garcia', 'Finance', '08:23 AM', '-', 'Late', 'Main Office'],
   ['EMP005', 'Carlo Mendoza', 'IT Department', '-', '-', 'Absent', '-'],
   ['EMP006', 'Liza Morales', 'HR Department', '08:05 AM', '04:58 PM', 'Present', 'Main Office'],
-];
-
-const enrollmentRows = [
-  ['REQ-0101', 'Juan Dela Cruz', 'EMP001', 'IT', 'RFID Enrollment', 'May 20', 'Pending'],
-  ['REQ-0102', 'Maria Santos', 'EMP002', 'HR', 'Biometric', 'May 20', 'Pending'],
-  ['REQ-0103', 'Pedro Reyes', 'EMP003', 'Operations', 'RFID', 'May 20', 'Pending'],
-  ['REQ-0104', 'Ana Garcia', 'EMP004', 'Finance', 'Biometric', 'May 20', 'Approved'],
-  ['REQ-0105', 'Carlo Mendoza', 'EMP005', 'IT', 'Biometric', 'May 20', 'Rejected'],
-  ['REQ-0106', 'Liza Morales', 'EMP006', 'HR', 'RFID', 'May 20', 'Approved'],
-  ['REQ-0107', 'Ryan Torres', 'EMP007', 'Operations', 'Biometric', 'May 20', 'Approved'],
-  ['REQ-0108', 'Grace Lee', 'EMP008', 'Finance', 'RFID', 'May 20', 'Approved'],
-  ['REQ-0109', 'Kevin V.', 'EMP009', 'IT', 'Biometric', 'May 20', 'Approved'],
-  ['REQ-0110', 'Ivy Cruz', 'EMP010', 'HR', 'RFID', 'May 20', 'Rejected'],
 ];
 
 const deviceRows = [
@@ -85,6 +77,18 @@ const auditRows = [
   ['May 20 10:35 AM', 'Admin', 'Login', 'Authentication', 'Admin logged in', '192.168.1.100'],
 ];
 
+type EnrollmentRequest = {
+  department: string;
+  employee_id: string;
+  email?: string | null;
+  full_name: string;
+  id: number;
+  request_code: string;
+  request_type: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
+  submitted_at: string;
+};
+
 function PageHeader({ description, title }: { description: string; title: string }) {
   return (
     <header className="module-header">
@@ -112,11 +116,17 @@ function FilterRow({ showGenerate = false }: { showGenerate?: boolean }) {
 
 function ModuleTable({
   columns,
+  emptyMessage = 'No records found.',
+  errorMessage,
+  isLoading = false,
   rows,
   title,
   withActions = false,
 }: {
   columns: string[];
+  emptyMessage?: string;
+  errorMessage?: string;
+  isLoading?: boolean;
   rows: string[][];
   title: string;
   withActions?: boolean;
@@ -135,36 +145,65 @@ function ModuleTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.join('-')}>
-                {row.map((cell, index) => (
-                  <td key={`${cell}-${index}`}>
-                    {isStatusColumn(columns[index]) ? (
-                      <span className={`module-status ${statusTone(cell)}`}>{cell}</span>
-                    ) : index === 1 ? (
-                      <strong>{cell}</strong>
-                    ) : (
-                      cell
-                    )}
-                  </td>
-                ))}
-                {withActions ? (
-                  <td>
-                    <span className="table-actions">
-                      <button className="tiny-action approve" type="button" aria-label="Approve">
-                        <Check size={14} />
-                      </button>
-                      <button className="tiny-action reject" type="button" aria-label="Reject">
-                        <X size={14} />
-                      </button>
-                      <button className="tiny-view" type="button">
-                        View
-                      </button>
-                    </span>
-                  </td>
-                ) : null}
+            {isLoading ? (
+              <tr>
+                <td
+                  className="module-table-message"
+                  colSpan={columns.length + (withActions ? 1 : 0)}
+                >
+                  Loading {title.toLowerCase()}...
+                </td>
               </tr>
-            ))}
+            ) : errorMessage ? (
+              <tr>
+                <td
+                  className="module-table-message error"
+                  colSpan={columns.length + (withActions ? 1 : 0)}
+                >
+                  {errorMessage}
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td
+                  className="module-table-message"
+                  colSpan={columns.length + (withActions ? 1 : 0)}
+                >
+                  {emptyMessage}
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => (
+                <tr key={row.join('-')}>
+                  {row.map((cell, index) => (
+                    <td key={`${cell}-${index}`}>
+                      {isStatusColumn(columns[index]) ? (
+                        <span className={`module-status ${statusTone(cell)}`}>{cell}</span>
+                      ) : index === 1 ? (
+                        <strong>{cell}</strong>
+                      ) : (
+                        cell
+                      )}
+                    </td>
+                  ))}
+                  {withActions ? (
+                    <td>
+                      <span className="table-actions">
+                        <button className="tiny-action approve" type="button" aria-label="Approve">
+                          <Check size={14} />
+                        </button>
+                        <button className="tiny-action reject" type="button" aria-label="Reject">
+                          <X size={14} />
+                        </button>
+                        <button className="tiny-view" type="button">
+                          View
+                        </button>
+                      </span>
+                    </td>
+                  ) : null}
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -195,6 +234,20 @@ function statusTone(status: string) {
   }
 
   return 'danger';
+}
+
+function formatSubmittedDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
 }
 
 function MetricCards({
@@ -254,6 +307,82 @@ export function AttendanceManagementPage() {
 }
 
 export function EnrollmentRequestsPage() {
+  const { session } = useAuth();
+  const [requests, setRequests] = useState<EnrollmentRequest[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadEnrollmentRequests() {
+      if (!session?.accessToken) {
+        setErrorMessage('Please sign in again to view enrollment requests.');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setErrorMessage('');
+
+        const response = await fetch(`${API_BASE_URL}/enrollment-requests`, {
+          headers: {
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+          signal: controller.signal,
+        });
+
+        const data = (await response.json().catch(() => null)) as
+          | EnrollmentRequest[]
+          | { error?: string }
+          | null;
+
+        if (!response.ok || !Array.isArray(data)) {
+          throw new Error(
+            !Array.isArray(data) && data?.error
+              ? data.error
+              : 'Unable to load enrollment requests.',
+          );
+        }
+
+        setRequests(data);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        setErrorMessage(
+          error instanceof Error ? error.message : 'Unable to load enrollment requests.',
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadEnrollmentRequests();
+
+    return () => {
+      controller.abort();
+    };
+  }, [session?.accessToken]);
+
+  const enrollmentRows = useMemo(
+    () =>
+      requests.map((request) => [
+        request.request_code,
+        request.full_name,
+        request.employee_id,
+        request.department,
+        request.request_type,
+        formatSubmittedDate(request.submitted_at),
+        request.status,
+      ]),
+    [requests],
+  );
+
   return (
     <section className="module-page">
       <PageHeader
@@ -273,6 +402,9 @@ export function EnrollmentRequestsPage() {
           'Status',
         ]}
         rows={enrollmentRows}
+        isLoading={isLoading}
+        errorMessage={errorMessage}
+        emptyMessage="No enrollment requests found."
         withActions
       />
     </section>

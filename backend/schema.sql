@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   UNIQUE (user_id, attendance_date)
 );
 
-CREATE SEQUENCE IF NOT EXISTS enrollment_request_code_seq START WITH 101;
+CREATE SEQUENCE IF NOT EXISTS enrollment_request_code_seq START WITH 1;
 
 CREATE TABLE IF NOT EXISTS enrollment_requests (
   id BIGSERIAL PRIMARY KEY,

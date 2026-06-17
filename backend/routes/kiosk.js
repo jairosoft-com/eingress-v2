@@ -1,4 +1,5 @@
 import express from 'express';
+import { setPendingEnrollmentFingerprintId } from '../enrollmentSession.js';
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
@@ -132,6 +133,24 @@ kioskRouter.post('/admin-rfid-scan', async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+});
+
+kioskRouter.post('/enrollment-fingerprint', (req, res) => {
+  const fingerprintNumber = String(req.body.fingerprintNumber || '').trim();
+
+  if (!/^\d+$/.test(fingerprintNumber)) {
+    return res.status(400).json({ error: 'fingerprintNumber must be numeric' });
+  }
+
+  const fingerprintId = `FP${fingerprintNumber}`;
+  setPendingEnrollmentFingerprintId(fingerprintId);
+
+  broadcastMessage({
+    type: 'enrollment:fingerprint-captured',
+    payload: { fingerprintId },
+  });
+
+  return res.json({ fingerprintId });
 });
 
 kioskRouter.use(authMiddleware);

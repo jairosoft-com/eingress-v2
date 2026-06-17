@@ -6,3 +6,4 @@ dev-err.log
 .env
 __pycache__/
 .venv/
+.env.example

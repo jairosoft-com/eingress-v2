@@ -29,8 +29,36 @@ type AdminRfidResponse = {
   adminName: string;
   authorized: boolean;
 };
+type EnrollmentFingerprintResponse = {
+  fingerprintId: string;
+};
+type RealtimeMessage = {
+  payload?: {
+    fullName?: string;
+    requestCode?: string;
+  };
+  type?: string;
+};
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+function getApiBaseUrl() {
+  const configuredUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+
+  if (
+    typeof window === 'undefined' ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1'
+  ) {
+    return configuredUrl;
+  }
+
+  return configuredUrl.replace(
+    /\/\/(localhost|127\.0\.0\.1)(?=:)/,
+    `//${window.location.hostname}`,
+  );
+}
+
+const API_BASE_URL = getApiBaseUrl();
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 const fallbackRecognizedUser = {
   name: 'Juan Dela Cruz',
   employeeId: 'EMP-000123',
@@ -75,47 +103,56 @@ export function KioskPage() {
   const [recognizedUser, setRecognizedUser] = useState<RecognizedUser>(fallbackRecognizedUser);
   const [enrollmentFingerprintId, setEnrollmentFingerprintId] = useState('');
   const [doorAlert, setDoorAlert] = useState('');
+  const [unregisteredCountdown, setUnregisteredCountdown] = useState(8);
   const lastProcessedNonce = useRef(0);
   const adminRfidAcceptedNonce = useRef(0);
   const isUnrecognizedUser = kioskState === 'unregistered';
   const isBiometricEnrollment = kioskState === 'biometricEnrollment';
 
-  const scanFingerprint = useCallback((fingerprintId: string) => {
-    setKioskState('processing');
-    setDoorAlert('');
-
-    window.setTimeout(() => {
-      void fetch(`${API_BASE_URL}/kiosk/fingerprint-scan`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ fingerprintId }),
-      })
-        .then(async (response) => {
-          const data = (await response.json().catch(() => null)) as KioskScanResponse | null;
-          const isRegistered = response.ok && data?.result === 'Granted';
-
-          if (isRegistered) {
-            setRecognizedUser({
-              department: data.department ?? 'Unassigned',
-              employeeId: data.employeeId,
-              name: data.userName,
-            });
-            setDoorAlert('The door is unlocked!');
-            setKioskState('recognized');
-            return;
-          }
-
-          setDoorAlert('Unrecognized user. Door Locked');
-          setKioskState('unregistered');
-        })
-        .catch(() => {
-          setDoorAlert('Unrecognized user. Door Locked');
-          setKioskState('unregistered');
-        });
-    }, 1200);
+  const enterUnregisteredState = useCallback(() => {
+    setUnregisteredCountdown(8);
+    setKioskState('unregistered');
   }, []);
+
+  const scanFingerprint = useCallback(
+    (fingerprintId: string) => {
+      setKioskState('processing');
+      setDoorAlert('');
+
+      window.setTimeout(() => {
+        void fetch(`${API_BASE_URL}/kiosk/fingerprint-scan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ fingerprintId }),
+        })
+          .then(async (response) => {
+            const data = (await response.json().catch(() => null)) as KioskScanResponse | null;
+            const isRegistered = response.ok && data?.result === 'Granted';
+
+            if (isRegistered) {
+              setRecognizedUser({
+                department: data.department ?? 'Unassigned',
+                employeeId: data.employeeId,
+                name: data.userName,
+              });
+              setDoorAlert('The door is unlocked!');
+              setKioskState('recognized');
+              return;
+            }
+
+            setDoorAlert('Unrecognized user. Door Locked');
+            enterUnregisteredState();
+          })
+          .catch(() => {
+            setDoorAlert('Unrecognized user. Door Locked');
+            enterUnregisteredState();
+          });
+      }, 1200);
+    },
+    [enterUnregisteredState],
+  );
 
   const scanAdminRfid = useCallback(
     (rfidUid: string, inputNonce: number) => {
@@ -152,21 +189,45 @@ export function KioskPage() {
   );
 
   const registerEnrollmentFingerprint = useCallback(
-    (fingerprintId: string) => {
+    (fingerprintNumber: string) => {
       if (!isBiometricEnrollment) {
         return;
       }
 
-      setEnrollmentFingerprintId(fingerprintId);
-      setDoorAlert('Fingerprint captured for registration');
-      setKioskState('enrollment');
+      void fetch(`${API_BASE_URL}/kiosk/enrollment-fingerprint`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fingerprintNumber }),
+      })
+        .then(async (response) => {
+          const data = (await response
+            .json()
+            .catch(() => null)) as EnrollmentFingerprintResponse | null;
+
+          if (!response.ok || !data?.fingerprintId) {
+            setDoorAlert('Unable to capture fingerprint biometrics.');
+            return;
+          }
+
+          setEnrollmentFingerprintId(data.fingerprintId);
+          setDoorAlert(`Fingerprint ${data.fingerprintId} captured for registration`);
+          setKioskState('enrollment');
+        })
+        .catch(() => {
+          setDoorAlert('Unable to capture fingerprint biometrics.');
+        });
     },
     [isBiometricEnrollment],
   );
 
-  const capturePlaceholderBiometrics = useCallback(() => {
-    registerEnrollmentFingerprint('Placeholder biometric #3');
-  }, [registerEnrollmentFingerprint]);
+  const capturePlaceholderBiometrics = useCallback(
+    (fingerprintNumber: string) => {
+      registerEnrollmentFingerprint(fingerprintNumber);
+    },
+    [registerEnrollmentFingerprint],
+  );
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -181,7 +242,9 @@ export function KioskPage() {
         .then((input) => {
           const fingerprintId = input?.fingerprintId?.trim();
           const rfidUid = input?.rfidUid?.trim();
-          const biometricCaptured = input?.biometricCaptured === true || fingerprintId === '3';
+          const biometricCaptured =
+            input?.biometricCaptured === true ||
+            (isBiometricEnrollment && Boolean(fingerprintId?.match(/^\d+$/)));
 
           if (!input || input.nonce <= lastProcessedNonce.current) {
             return;
@@ -205,14 +268,15 @@ export function KioskPage() {
           if (
             isBiometricEnrollment &&
             biometricCaptured &&
+            fingerprintId &&
             input.nonce > adminRfidAcceptedNonce.current
           ) {
-            capturePlaceholderBiometrics();
+            capturePlaceholderBiometrics(fingerprintId);
             return;
           }
 
           if (isBiometricEnrollment) {
-            setDoorAlert('Enter 3 to capture fingerprint biometrics.');
+            setDoorAlert('Enter any number to capture fingerprint biometrics.');
             return;
           }
 
@@ -239,6 +303,56 @@ export function KioskPage() {
   ]);
 
   useEffect(() => {
+    let socket: WebSocket | null = null;
+    let reconnectTimeoutId: number | null = null;
+    let shouldReconnect = true;
+
+    function connectRealtimeSocket() {
+      socket = new WebSocket(WS_BASE_URL);
+
+      socket.addEventListener('message', (event) => {
+        try {
+          const message = JSON.parse(event.data as string) as RealtimeMessage;
+
+          if (message.type !== 'enrollment:submitted') {
+            return;
+          }
+
+          const requestLabel = message.payload?.requestCode
+            ? ` (${message.payload.requestCode})`
+            : '';
+
+          setDoorAlert(`Registration submitted${requestLabel}. Returning to idle.`);
+          setEnrollmentFingerprintId('');
+          setKioskState('idle');
+        } catch {
+          // Ignore realtime messages that are not JSON.
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        if (!shouldReconnect) {
+          return;
+        }
+
+        reconnectTimeoutId = window.setTimeout(connectRealtimeSocket, 2000);
+      });
+    }
+
+    connectRealtimeSocket();
+
+    return () => {
+      shouldReconnect = false;
+
+      if (reconnectTimeoutId) {
+        window.clearTimeout(reconnectTimeoutId);
+      }
+
+      socket?.close();
+    };
+  }, []);
+
+  useEffect(() => {
     if (kioskState !== 'recognized') {
       return;
     }
@@ -255,12 +369,19 @@ export function KioskPage() {
       return;
     }
 
+    const intervalId = window.setInterval(() => {
+      setUnregisteredCountdown((current) => Math.max(current - 1, 0));
+    }, 1000);
+
     const timeoutId = window.setTimeout(() => {
       setDoorAlert('');
       setKioskState('idle');
     }, 8000);
 
-    return () => window.clearTimeout(timeoutId);
+    return () => {
+      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
+    };
   }, [kioskState]);
 
   useEffect(() => {
@@ -299,7 +420,7 @@ export function KioskPage() {
           {kioskState === 'recognized' ? (
             <RecognizedState user={recognizedUser} />
           ) : isUnrecognizedUser ? (
-            <UnregisteredState />
+            <UnregisteredState countdown={unregisteredCountdown} />
           ) : isBiometricEnrollment ? (
             <BiometricEnrollmentState />
           ) : kioskState === 'enrollment' ? (
@@ -387,7 +508,7 @@ function RecognizedState({ user }: { user: RecognizedUser }) {
   );
 }
 
-function UnregisteredState() {
+function UnregisteredState({ countdown }: { countdown: number }) {
   return (
     <section className="unregistered-layout" aria-live="polite">
       <div className="unregistered-symbol">
@@ -406,7 +527,9 @@ function UnregisteredState() {
         <IdCard size={26} />
         <span>
           <strong>Scan Admin RFID</strong>
-          <small>Place admin card on the RFID reader</small>
+          <small>
+            Place admin card on the RFID reader. Returning to idle in {countdown} seconds.
+          </small>
         </span>
       </div>
     </section>
@@ -420,7 +543,7 @@ function BiometricEnrollmentState() {
         <Fingerprint size={78} strokeWidth={1.7} />
       </div>
       <h2>Scan New Fingerprint</h2>
-      <p>Admin RFID accepted. Enter 3 to capture the placeholder fingerprint biometric.</p>
+      <p>Admin RFID accepted. Enter any number to capture the placeholder fingerprint biometric.</p>
     </section>
   );
 }
@@ -450,7 +573,10 @@ function EnrollmentState({ fingerprintId }: { fingerprintId: string }) {
 
       <div className="qr-panel">
         <span>Or scan this QR code to open the form</span>
-        <img alt="Enrollment form QR code" src="/enrollment-qr.png" />
+        <img
+          alt="Enrollment form QR code"
+          src="/qrcode_363816586_9ed6ef5e5d5453f6bafa82ed7dd83a0e.png"
+        />
       </div>
 
       <div className="enrollment-help">

@@ -34,7 +34,7 @@ const terminal = createInterface({ input, output });
 console.log('Kiosk fingerprint terminal input');
 console.log('Enter a fingerprint ID from the database, such as FP01 or FP-EMP001.');
 console.log('After an unrecognized fingerprint, enter the admin RFID or rfid:<admin-rfid>.');
-console.log('After admin RFID is accepted, enter 3 to capture placeholder fingerprint biometrics.');
+console.log('After admin RFID is accepted, enter any number to capture placeholder fingerprint biometrics.');
 console.log('Type q to quit.');
 
 async function handleAnswer(value) {
@@ -45,13 +45,7 @@ async function handleAnswer(value) {
   }
 
   if (!scanValue) {
-    console.log('Invalid input. Enter a fingerprint ID, admin RFID, 3, or rfid:<admin-rfid>.');
-    return true;
-  }
-
-  if (scanValue === '3') {
-    await writeKioskInput({ biometricCaptured: true, fingerprintId: '3' });
-    console.log('Sent placeholder fingerprint biometric capture.');
+    console.log('Invalid input. Enter a fingerprint ID, admin RFID, number, or rfid:<admin-rfid>.');
     return true;
   }
 

@@ -259,6 +259,10 @@ export function LoginPage() {
             <div className="divider"></div>
 
             <div className="social-grid"></div>
+
+            <p className="register-prompt">
+              Need access? <Link to="/register">Fill out the registration form</Link>
+            </p>
           </section>
         </div>
       </section>
