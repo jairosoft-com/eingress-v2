@@ -379,7 +379,6 @@ export function EnrollmentRequestsPage() {
     }
 
     void loadEnrollmentRequests();
-
     return () => {
       controller.abort();
     };
@@ -421,6 +420,7 @@ export function EnrollmentRequestsPage() {
       setRequests((currentRequests) =>
         currentRequests.map((request) => (request.id === id ? data : request)),
       );
+      window.dispatchEvent(new Event('enrollment-requests:changed'));
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to update enrollment request.',

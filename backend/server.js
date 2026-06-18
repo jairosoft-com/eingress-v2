@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import express from 'express';
 import http from 'http';
+import os from 'os';
 import cors from 'cors';
 
 import { authRouter } from './routes/auth.js';
@@ -25,8 +26,26 @@ const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
+function getLanIpAddress() {
+  const networkInterfaces = os.networkInterfaces();
+
+  for (const addresses of Object.values(networkInterfaces)) {
+    for (const address of addresses ?? []) {
+      if (address.family === 'IPv4' && !address.internal) {
+        return address.address;
+      }
+    }
+  }
+
+  return null;
+}
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/network-info', (req, res) => {
+  res.json({ lanIp: getLanIpAddress() });
 });
 
 app.use('/api/auth', authRouter);

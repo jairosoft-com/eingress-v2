@@ -1,4 +1,5 @@
 import { Check, CircleUserRound, Fingerprint, IdCard, Info, Plus, X } from 'lucide-react';
+import QRCode from 'qrcode';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type KioskState =
@@ -39,6 +40,9 @@ type RealtimeMessage = {
   };
   type?: string;
 };
+type NetworkInfoResponse = {
+  lanIp?: string | null;
+};
 
 function getApiBaseUrl() {
   const configuredUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
@@ -59,11 +63,37 @@ function getApiBaseUrl() {
 
 const API_BASE_URL = getApiBaseUrl();
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
+const QR_CODE_SIZE = 260;
 const fallbackRecognizedUser = {
   name: 'Juan Dela Cruz',
   employeeId: 'EMP-000123',
   department: 'Information Technology',
 };
+
+function getRegistrationUrl() {
+  const configuredUrl = import.meta.env.VITE_REGISTRATION_URL;
+
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  if (typeof window === 'undefined') {
+    return '/register';
+  }
+
+  return new URL('/register', window.location.origin).toString();
+}
+
+function getRegistrationUrlForHost(hostname: string) {
+  if (typeof window === 'undefined') {
+    return '/register';
+  }
+
+  const url = new URL('/register', window.location.origin);
+  url.hostname = hostname;
+
+  return url.toString();
+}
 
 const modeCopy = {
   idle: {
@@ -549,6 +579,55 @@ function BiometricEnrollmentState() {
 }
 
 function EnrollmentState({ fingerprintId }: { fingerprintId: string }) {
+  const [registrationUrl, setRegistrationUrl] = useState(getRegistrationUrl);
+  const [qrCodeUrl, setQrCodeUrl] = useState('');
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      import.meta.env.VITE_REGISTRATION_URL ||
+      (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE_URL}/network-info`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as NetworkInfoResponse | null;
+
+        if (response.ok && data?.lanIp) {
+          setRegistrationUrl(getRegistrationUrlForHost(data.lanIp));
+        }
+      })
+      .catch(() => {
+        // Keep the current URL visible if network discovery is unavailable.
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void QRCode.toDataURL(registrationUrl, {
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: QR_CODE_SIZE,
+    }).then((dataUrl) => {
+      if (isMounted) {
+        setQrCodeUrl(dataUrl);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [registrationUrl]);
+
   return (
     <section className="enrollment-layout" aria-live="polite">
       <div className="enrollment-symbol">
@@ -573,10 +652,8 @@ function EnrollmentState({ fingerprintId }: { fingerprintId: string }) {
 
       <div className="qr-panel">
         <span>Or scan this QR code to open the form</span>
-        <img
-          alt="Enrollment form QR code"
-          src="/qrcode_363816586_9ed6ef5e5d5453f6bafa82ed7dd83a0e.png"
-        />
+        {qrCodeUrl ? <img alt="Enrollment form QR code" src={qrCodeUrl} /> : null}
+        <small>{registrationUrl}</small>
       </div>
 
       <div className="enrollment-help">

@@ -855,6 +855,21 @@ button {
   border-radius: 8px;
 }
 
+.admin-nav-badge {
+  display: inline-grid;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  margin-left: auto;
+  place-items: center;
+  color: #e01835;
+  font-size: 0.82rem;
+  font-weight: 900;
+  line-height: 1;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
 .admin-nav-link.active,
 .admin-nav-link:hover {
   color: #ffffff;
