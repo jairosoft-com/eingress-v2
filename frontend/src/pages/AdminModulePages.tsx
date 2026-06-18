@@ -8,6 +8,7 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '../auth/useAuth';
@@ -89,6 +90,10 @@ type EnrollmentRequest = {
   submitted_at: string;
 };
 
+function isEnrollmentRequest(value: unknown): value is EnrollmentRequest {
+  return typeof value === 'object' && value !== null && 'id' in value && 'status' in value;
+}
+
 function PageHeader({ description, title }: { description: string; title: string }) {
   return (
     <header className="module-header">
@@ -115,6 +120,7 @@ function FilterRow({ showGenerate = false }: { showGenerate?: boolean }) {
 }
 
 function ModuleTable({
+  actionRenderer,
   columns,
   emptyMessage = 'No records found.',
   errorMessage,
@@ -123,6 +129,7 @@ function ModuleTable({
   title,
   withActions = false,
 }: {
+  actionRenderer?: (rowIndex: number) => ReactNode;
   columns: string[];
   emptyMessage?: string;
   errorMessage?: string;
@@ -173,7 +180,7 @@ function ModuleTable({
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              rows.map((row, rowIndex) => (
                 <tr key={row.join('-')}>
                   {row.map((cell, index) => (
                     <td key={`${cell}-${index}`}>
@@ -188,17 +195,25 @@ function ModuleTable({
                   ))}
                   {withActions ? (
                     <td>
-                      <span className="table-actions">
-                        <button className="tiny-action approve" type="button" aria-label="Approve">
-                          <Check size={14} />
-                        </button>
-                        <button className="tiny-action reject" type="button" aria-label="Reject">
-                          <X size={14} />
-                        </button>
-                        <button className="tiny-view" type="button">
-                          View
-                        </button>
-                      </span>
+                      {actionRenderer ? (
+                        actionRenderer(rowIndex)
+                      ) : (
+                        <span className="table-actions">
+                          <button
+                            className="tiny-action approve"
+                            type="button"
+                            aria-label="Approve"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button className="tiny-action reject" type="button" aria-label="Reject">
+                            <X size={14} />
+                          </button>
+                          <button className="tiny-view" type="button">
+                            View
+                          </button>
+                        </span>
+                      )}
                     </td>
                   ) : null}
                 </tr>
@@ -311,6 +326,7 @@ export function EnrollmentRequestsPage() {
   const [requests, setRequests] = useState<EnrollmentRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [updatingRequestId, setUpdatingRequestId] = useState<number | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -369,6 +385,51 @@ export function EnrollmentRequestsPage() {
     };
   }, [session?.accessToken]);
 
+  async function updateEnrollmentStatus(id: number, status: 'Approved' | 'Rejected') {
+    if (!session?.accessToken) {
+      setErrorMessage('Please sign in again to update enrollment requests.');
+      return;
+    }
+
+    try {
+      setUpdatingRequestId(id);
+      setErrorMessage('');
+
+      const response = await fetch(`${API_BASE_URL}/enrollment-requests/${id}/status`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status }),
+      });
+
+      const data = (await response.json().catch(() => null)) as
+        | EnrollmentRequest
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !isEnrollmentRequest(data)) {
+        const responseError =
+          data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+            ? data.error
+            : 'Unable to update enrollment request.';
+
+        throw new Error(responseError);
+      }
+
+      setRequests((currentRequests) =>
+        currentRequests.map((request) => (request.id === id ? data : request)),
+      );
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Unable to update enrollment request.',
+      );
+    } finally {
+      setUpdatingRequestId(null);
+    }
+  }
+
   const enrollmentRows = useMemo(
     () =>
       requests.map((request) => [
@@ -406,6 +467,37 @@ export function EnrollmentRequestsPage() {
         errorMessage={errorMessage}
         emptyMessage="No enrollment requests found."
         withActions
+        actionRenderer={(rowIndex) => {
+          const request = requests[rowIndex];
+          const isUpdating = updatingRequestId === request.id;
+          const isPending = request.status === 'Pending';
+
+          return (
+            <span className="table-actions">
+              <button
+                className="tiny-action approve"
+                type="button"
+                aria-label="Approve"
+                disabled={!isPending || isUpdating}
+                onClick={() => void updateEnrollmentStatus(request.id, 'Approved')}
+              >
+                <Check size={14} />
+              </button>
+              <button
+                className="tiny-action reject"
+                type="button"
+                aria-label="Reject"
+                disabled={!isPending || isUpdating}
+                onClick={() => void updateEnrollmentStatus(request.id, 'Rejected')}
+              >
+                <X size={14} />
+              </button>
+              <button className="tiny-view" type="button">
+                View
+              </button>
+            </span>
+          );
+        }}
       />
     </section>
   );

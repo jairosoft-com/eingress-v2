@@ -164,6 +164,8 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
 });
 
 enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
+  const client = await pool.connect();
+
   try {
     const id = Number(req.params.id);
     const { status, rejectionReason } = req.body;
@@ -172,22 +174,65 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
       return res.status(400).json({ error: 'Valid id and status are required' });
     }
 
-    const result = await query(
+    await client.query('BEGIN');
+
+    const requestResult = await client.query(
+      `SELECT *
+       FROM enrollment_requests
+       WHERE id = $1
+       FOR UPDATE`,
+      [id],
+    );
+
+    if (requestResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Enrollment request not found' });
+    }
+
+    const request = requestResult.rows[0];
+
+    if (status === 'Approved') {
+      await client.query(
+        `INSERT INTO users
+          (employee_id, full_name, email, phone, department, fingerprint_id, rfid_uid)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (employee_id) DO UPDATE
+         SET full_name = EXCLUDED.full_name,
+           email = EXCLUDED.email,
+           phone = EXCLUDED.phone,
+           department = EXCLUDED.department,
+           fingerprint_id = EXCLUDED.fingerprint_id,
+           rfid_uid = EXCLUDED.rfid_uid,
+           updated_at = NOW()`,
+        [
+          request.employee_id,
+          request.full_name,
+          request.email,
+          request.phone,
+          request.department,
+          request.fingerprint_template,
+          request.rfid_uid,
+        ],
+      );
+    }
+
+    const result = await client.query(
       `UPDATE enrollment_requests
-       SET status = $1, rejection_reason = $2, reviewed_by = $3,
-         reviewed_at = CASE WHEN $1 = 'Pending' THEN NULL ELSE NOW() END,
+       SET status = $1::enrollment_status, rejection_reason = $2, reviewed_by = $3,
+         reviewed_at = CASE WHEN $1::enrollment_status = 'Pending' THEN NULL ELSE NOW() END,
          updated_at = NOW()
        WHERE id = $4
        RETURNING *`,
       [status, rejectionReason || null, req.user.adminId || null, id],
     );
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Enrollment request not found' });
-    }
+    await client.query('COMMIT');
 
     res.json(result.rows[0]);
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     next(error);
+  } finally {
+    client.release();
   }
 });

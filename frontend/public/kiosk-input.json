@@ -1,7 +1,7 @@
 {
-  "biometricCaptured": true,
-  "fingerprintId": "3",
+  "biometricCaptured": false,
+  "fingerprintId": "FP27",
   "rfidUid": null,
-  "nonce": 1781674177164,
-  "updatedAt": "2026-06-17T05:32:06.946Z"
+  "nonce": 1781747844621,
+  "updatedAt": "2026-06-18T02:04:16.257Z"
 }

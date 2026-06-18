@@ -12,7 +12,7 @@ const RESET_TOKEN_EXPIRES_MINUTES = Number.parseInt(
   process.env.RESET_TOKEN_EXPIRES_MINUTES || '30',
   10,
 );
-const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5174').replace(/\/$/, '');
 const MAIL_FROM = process.env.MAIL_FROM || 'EINGRESS Support <no-reply@eingress.local>';
 
 export const authRouter = express.Router();

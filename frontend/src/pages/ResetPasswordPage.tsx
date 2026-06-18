@@ -12,7 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { API_BASE_URL } from '../lib/api';
 
@@ -48,8 +48,9 @@ function validateResetForm(password: string, confirmPassword: string): ResetErro
 }
 
 export function ResetPasswordPage() {
+  const params = useParams();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') ?? '';
+  const token = searchParams.get('token') ?? params.token ?? '';
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errors, setErrors] = useState<ResetErrors>({});
