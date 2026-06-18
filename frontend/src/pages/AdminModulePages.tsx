@@ -90,6 +90,8 @@ type EnrollmentRequest = {
   submitted_at: string;
 };
 
+type EnrollmentStatusFilter = EnrollmentRequest['status'] | 'All';
+
 function isEnrollmentRequest(value: unknown): value is EnrollmentRequest {
   return typeof value === 'object' && value !== null && 'id' in value && 'status' in value;
 }
@@ -115,6 +117,89 @@ function FilterRow({ showGenerate = false }: { showGenerate?: boolean }) {
         Filter
         <Filter size={16} />
       </button>
+    </div>
+  );
+}
+
+function EnrollmentFilterRow({
+  departmentFilter,
+  departments,
+  endDateFilter,
+  nameFilter,
+  onClear,
+  onDepartmentChange,
+  onEndDateChange,
+  onNameChange,
+  onStatusChange,
+  onStartDateChange,
+  resultCount,
+  startDateFilter,
+  statusFilter,
+}: {
+  departmentFilter: string;
+  departments: string[];
+  endDateFilter: string;
+  nameFilter: string;
+  onClear: () => void;
+  onDepartmentChange: (value: string) => void;
+  onEndDateChange: (value: string) => void;
+  onNameChange: (value: string) => void;
+  onStatusChange: (value: EnrollmentStatusFilter) => void;
+  onStartDateChange: (value: string) => void;
+  resultCount: number;
+  startDateFilter: string;
+  statusFilter: EnrollmentStatusFilter;
+}) {
+  return (
+    <div className="module-filter-row enrollment-filter-row">
+      <input
+        aria-label="Filter by name"
+        onChange={(event) => onNameChange(event.target.value)}
+        placeholder="Filter by name..."
+        type="search"
+        value={nameFilter}
+      />
+      <select
+        aria-label="Filter by status"
+        onChange={(event) => onStatusChange(event.target.value as EnrollmentStatusFilter)}
+        value={statusFilter}
+      >
+        <option value="All">All Status</option>
+        <option value="Pending">Pending</option>
+        <option value="Approved">Approved</option>
+        <option value="Rejected">Rejected</option>
+      </select>
+      <select
+        aria-label="Filter by department"
+        onChange={(event) => onDepartmentChange(event.target.value)}
+        value={departmentFilter}
+      >
+        <option value="All">All Departments</option>
+        {departments.map((department) => (
+          <option key={department} value={department}>
+            {department}
+          </option>
+        ))}
+      </select>
+      <input
+        aria-label="Filter start date"
+        onChange={(event) => onStartDateChange(event.target.value)}
+        type="date"
+        value={startDateFilter}
+      />
+      <input
+        aria-label="Filter end date"
+        onChange={(event) => onEndDateChange(event.target.value)}
+        type="date"
+        value={endDateFilter}
+      />
+      <button className="filter-button" onClick={onClear} type="button">
+        Clear
+        <Filter size={16} />
+      </button>
+      <span className="filter-result-count" aria-live="polite">
+        {resultCount} shown
+      </span>
     </div>
   );
 }
@@ -265,6 +350,16 @@ function formatSubmittedDate(value: string) {
   }).format(date);
 }
 
+function toDateInputValue(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
 function MetricCards({
   cards,
 }: {
@@ -327,6 +422,11 @@ export function EnrollmentRequestsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [updatingRequestId, setUpdatingRequestId] = useState<number | null>(null);
+  const [nameFilter, setNameFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<EnrollmentStatusFilter>('All');
+  const [departmentFilter, setDepartmentFilter] = useState('All');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -430,9 +530,39 @@ export function EnrollmentRequestsPage() {
     }
   }
 
+  const departmentOptions = useMemo(
+    () =>
+      Array.from(new Set(requests.map((request) => request.department).filter(Boolean))).sort(
+        (departmentA, departmentB) => departmentA.localeCompare(departmentB),
+      ),
+    [requests],
+  );
+
+  const filteredRequests = useMemo(() => {
+    const normalizedNameFilter = nameFilter.trim().toLowerCase();
+
+    return requests.filter((request) => {
+      const submittedDate = toDateInputValue(request.submitted_at);
+      const matchesName =
+        !normalizedNameFilter ||
+        request.full_name.toLowerCase().includes(normalizedNameFilter) ||
+        request.employee_id.toLowerCase().includes(normalizedNameFilter) ||
+        request.request_code.toLowerCase().includes(normalizedNameFilter);
+      const matchesStatus = statusFilter === 'All' || request.status === statusFilter;
+      const matchesDepartment =
+        departmentFilter === 'All' || request.department === departmentFilter;
+      const matchesStartDate = !startDateFilter || submittedDate >= startDateFilter;
+      const matchesEndDate = !endDateFilter || submittedDate <= endDateFilter;
+
+      return (
+        matchesName && matchesStatus && matchesDepartment && matchesStartDate && matchesEndDate
+      );
+    });
+  }, [departmentFilter, endDateFilter, nameFilter, requests, startDateFilter, statusFilter]);
+
   const enrollmentRows = useMemo(
     () =>
-      requests.map((request) => [
+      filteredRequests.map((request) => [
         request.request_code,
         request.full_name,
         request.employee_id,
@@ -441,8 +571,16 @@ export function EnrollmentRequestsPage() {
         formatSubmittedDate(request.submitted_at),
         request.status,
       ]),
-    [requests],
+    [filteredRequests],
   );
+
+  function clearEnrollmentFilters() {
+    setNameFilter('');
+    setStatusFilter('All');
+    setDepartmentFilter('All');
+    setStartDateFilter('');
+    setEndDateFilter('');
+  }
 
   return (
     <section className="module-page">
@@ -450,7 +588,21 @@ export function EnrollmentRequestsPage() {
         title="Enrollment Requests"
         description="Review and manage biometric and RFID enrollment requests."
       />
-      <FilterRow />
+      <EnrollmentFilterRow
+        departmentFilter={departmentFilter}
+        departments={departmentOptions}
+        endDateFilter={endDateFilter}
+        nameFilter={nameFilter}
+        onClear={clearEnrollmentFilters}
+        onDepartmentChange={setDepartmentFilter}
+        onEndDateChange={setEndDateFilter}
+        onNameChange={setNameFilter}
+        onStartDateChange={setStartDateFilter}
+        onStatusChange={setStatusFilter}
+        resultCount={filteredRequests.length}
+        startDateFilter={startDateFilter}
+        statusFilter={statusFilter}
+      />
       <ModuleTable
         title="Enrollment Requests"
         columns={[
@@ -468,7 +620,7 @@ export function EnrollmentRequestsPage() {
         emptyMessage="No enrollment requests found."
         withActions
         actionRenderer={(rowIndex) => {
-          const request = requests[rowIndex];
+          const request = filteredRequests[rowIndex];
           const isUpdating = updatingRequestId === request.id;
           const isPending = request.status === 'Pending';
 
