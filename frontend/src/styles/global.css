@@ -1508,7 +1508,13 @@ td small {
   grid-template-columns: repeat(4, minmax(140px, 1fr)) max-content max-content;
 }
 
+.enrollment-filter-row {
+  grid-template-columns: minmax(190px, 1.35fr) repeat(4, minmax(140px, 1fr)) max-content max-content;
+  gap: 14px;
+}
+
 .module-filter-row input,
+.module-filter-row select,
 .settings-form-grid input {
   width: 100%;
   min-height: 42px;
@@ -1517,6 +1523,44 @@ td small {
   border: 1px solid #aeb8c7;
   border-radius: 4px;
   background: #ffffff;
+}
+
+.module-filter-row select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #667089 50%),
+    linear-gradient(135deg, #667089 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 18px,
+    calc(100% - 12px) 18px;
+  background-repeat: no-repeat;
+  background-size:
+    6px 6px,
+    6px 6px;
+  padding-right: 34px;
+}
+
+.filter-result-count {
+  color: #667089;
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .enrollment-filter-row {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+
+  .filter-result-count {
+    align-self: center;
+  }
+}
+
+@media (max-width: 760px) {
+  .enrollment-filter-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .filter-button,
