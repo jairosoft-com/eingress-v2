@@ -102,6 +102,7 @@ type UserRecord = {
   full_name: string;
   id: number;
   is_active: boolean;
+  is_archived?: boolean;
   phone: string | null;
   rfid_uid: string | null;
   role: string;
@@ -496,9 +497,11 @@ export function AttendanceManagementPage() {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [usersErrorMessage, setUsersErrorMessage] = useState('');
+  const [userActionMessage, setUserActionMessage] = useState('');
   const [userSearch, setUserSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('All Departments');
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -553,6 +556,100 @@ export function AttendanceManagementPage() {
     };
   }, [session?.accessToken]);
 
+  async function updateUserStatus(id: number, isActive: boolean) {
+    if (!session?.accessToken) {
+      setUsersErrorMessage('Please sign in again to update users.');
+      return;
+    }
+
+    try {
+      setUpdatingUserId(id);
+      setUsersErrorMessage('');
+      setUserActionMessage('');
+
+      const response = await fetch(`${API_BASE_URL}/users/${id}/status`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ isActive }),
+      });
+
+      const data = (await response.json().catch(() => null)) as
+        | UserRecord
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !('id' in (data ?? {}))) {
+        throw new Error(
+          data && typeof data === 'object' && 'error' in data
+            ? data.error
+            : 'Unable to update user.',
+        );
+      }
+
+      setUsers((currentUsers) =>
+        currentUsers.map((user) =>
+          user.id === id ? { ...user, is_active: isActive, is_archived: false } : user,
+        ),
+      );
+      setUserActionMessage(
+        isActive ? 'User reactivated successfully.' : 'User deactivated successfully.',
+      );
+    } catch (error) {
+      setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to update user.');
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
+  async function archiveUser(id: number) {
+    if (!session?.accessToken) {
+      setUsersErrorMessage('Please sign in again to update users.');
+      return;
+    }
+
+    try {
+      setUpdatingUserId(id);
+      setUsersErrorMessage('');
+      setUserActionMessage('');
+
+      const response = await fetch(`${API_BASE_URL}/users/${id}/archive`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ isArchived: true }),
+      });
+
+      const data = (await response.json().catch(() => null)) as
+        | UserRecord
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !('id' in (data ?? {}))) {
+        throw new Error(
+          data && typeof data === 'object' && 'error' in data
+            ? data.error
+            : 'Unable to archive user.',
+        );
+      }
+
+      setUsers((currentUsers) =>
+        currentUsers.map((user) =>
+          user.id === id ? { ...user, is_active: false, is_archived: true } : user,
+        ),
+      );
+      setUserActionMessage('User archived successfully.');
+    } catch (error) {
+      setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to archive user.');
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
   const departmentOptions = useMemo(
     () =>
       Array.from(new Set(users.map((user) => user.department).filter(Boolean) as string[])).sort(
@@ -565,6 +662,10 @@ export function AttendanceManagementPage() {
     const normalizedSearch = userSearch.trim().toLowerCase();
 
     return users.filter((user) => {
+      if (user.is_archived) {
+        return false;
+      }
+
       const matchesSearch =
         !normalizedSearch ||
         user.full_name.toLowerCase().includes(normalizedSearch) ||
@@ -698,6 +799,12 @@ export function AttendanceManagementPage() {
           </button>
         </div>
 
+        {userActionMessage ? (
+          <p className="module-table-message success" role="status">
+            {userActionMessage}
+          </p>
+        ) : null}
+
         <div className="user-table-wrap">
           <table className="user-management-table">
             <thead>
@@ -770,6 +877,10 @@ export function AttendanceManagementPage() {
                               ? `Activate ${user.name}`
                               : `Deactivate ${user.name}`
                           }
+                          disabled={updatingUserId === user.id}
+                          onClick={() =>
+                            void updateUserStatus(user.id, user.accessStatus === 'Disabled')
+                          }
                         >
                           <Power size={15} />
                         </button>
@@ -777,6 +888,8 @@ export function AttendanceManagementPage() {
                           className="archive"
                           type="button"
                           aria-label={`Archive ${user.name}`}
+                          disabled={updatingUserId === user.id}
+                          onClick={() => void archiveUser(user.id)}
                         >
                           <Archive size={15} />
                         </button>
