@@ -37,7 +37,7 @@ async function processKioskScan(req, res) {
   }
 
   const userResult = await query(
-    `SELECT id, employee_id, full_name, department, is_active FROM users WHERE ${predicates.join(' OR ')} LIMIT 1`,
+    `SELECT id, employee_id, full_name, department, is_active FROM users WHERE ${predicates.join(' OR ')} AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
     params,
   );
 
