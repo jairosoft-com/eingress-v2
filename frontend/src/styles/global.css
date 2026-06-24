@@ -1410,6 +1410,7 @@ td small {
   color: #667089;
 }
 
+<<<<<<< HEAD
 .user-management-page {
   gap: 0;
   min-height: calc(100vh - 158px);
@@ -1880,6 +1881,8 @@ td small {
   width: 100px;
 }
 
+=======
+>>>>>>> qa
 .content-panel,
 .table-panel {
   padding: 24px;
@@ -1978,6 +1981,7 @@ td small {
   grid-template-columns: repeat(4, minmax(140px, 1fr)) max-content max-content;
 }
 
+<<<<<<< HEAD
 .enrollment-filter-row {
   grid-template-columns: minmax(190px, 1.35fr) repeat(4, minmax(140px, 1fr)) max-content max-content;
   gap: 14px;
@@ -1985,6 +1989,9 @@ td small {
 
 .module-filter-row input,
 .module-filter-row select,
+=======
+.module-filter-row input,
+>>>>>>> qa
 .settings-form-grid input {
   width: 100%;
   min-height: 42px;
@@ -1995,6 +2002,7 @@ td small {
   background: #ffffff;
 }
 
+<<<<<<< HEAD
 .module-filter-row select {
   appearance: none;
   background-image:
@@ -2033,6 +2041,8 @@ td small {
   }
 }
 
+=======
+>>>>>>> qa
 .filter-button,
 .dark-action-button {
   display: inline-flex;
@@ -2079,10 +2089,17 @@ td small {
 }
 
 .module-table th {
+<<<<<<< HEAD
   color: #263650;
   font-size: 0.9rem;
   text-transform: none;
   background: #dce2eb;
+=======
+  color: #071435;
+  font-size: 0.9rem;
+  text-transform: none;
+  background: linear-gradient(180deg, #9aa9bb, #8291a3);
+>>>>>>> qa
 }
 
 .module-table th,
