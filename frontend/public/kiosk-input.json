@@ -1,7 +1,14 @@
 {
   "biometricCaptured": false,
+<<<<<<< HEAD
   "fingerprintId": null,
   "rfidUid": null,
   "nonce": 1782283122946,
   "updatedAt": "2026-06-24T06:38:42.946Z"
+=======
+  "fingerprintId": "20",
+  "rfidUid": null,
+  "nonce": 1781754957518,
+  "updatedAt": "2026-06-18T03:57:05.492Z"
+>>>>>>> qa
 }
