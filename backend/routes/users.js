@@ -5,12 +5,23 @@ import { authMiddleware } from '../middleware/auth.js';
 export const usersRouter = express.Router();
 usersRouter.use(authMiddleware);
 
+async function ensureUserStatusColumns() {
+  try {
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE`);
+  } catch (error) {
+    console.error('Unable to ensure user archive column exists', error);
+  }
+}
+
+void ensureUserStatusColumns();
+
 usersRouter.get('/', async (req, res) => {
   try {
     const result = await query(
       `SELECT id, employee_id, full_name, email, phone, department, role,
-        fingerprint_id, rfid_uid, is_active, created_at, updated_at
+        fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at
        FROM users
+       WHERE COALESCE(is_archived, FALSE) = FALSE
        ORDER BY full_name`,
     );
     res.json(result.rows);
@@ -28,9 +39,9 @@ usersRouter.post('/', async (req, res) => {
 
   try {
     const result = await query(
-      `INSERT INTO users (employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, created_at, updated_at`,
+      `INSERT INTO users (employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)
+       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
       [employeeId, fullName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive],
     );
     res.status(201).json(result.rows[0]);
@@ -41,9 +52,9 @@ usersRouter.post('/', async (req, res) => {
 
 usersRouter.patch('/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const { fullName, email, phone, department, role, fingerprintId, rfidUid, isActive } = req.body;
+  const { fullName, email, phone, department, role, fingerprintId, rfidUid, isActive, isArchived } = req.body;
 
-  if (!id) {
+  if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: 'Valid user id is required' });
   }
 
@@ -58,10 +69,69 @@ usersRouter.patch('/:id', async (req, res) => {
          fingerprint_id = COALESCE($6, fingerprint_id),
          rfid_uid = COALESCE($7, rfid_uid),
          is_active = COALESCE($8, is_active),
+         is_archived = COALESCE($9, is_archived),
          updated_at = NOW()
-       WHERE id = $9
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, created_at, updated_at`,
-      [fullName ?? null, email ?? null, phone ?? null, department ?? null, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, id],
+       WHERE id = $10
+       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
+      [fullName ?? null, email ?? null, phone ?? null, department ?? null, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, isArchived ?? null, id],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+usersRouter.patch('/:id/status', async (req, res) => {
+  const id = Number(req.params.id);
+  const { isActive } = req.body;
+
+  if (!Number.isInteger(id) || id <= 0 || typeof isActive !== 'boolean') {
+    return res.status(400).json({ error: 'Valid user id and isActive are required' });
+  }
+
+  try {
+    const result = await query(
+      `UPDATE users
+       SET is_active = $1,
+         is_archived = FALSE,
+         updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
+      [isActive, id],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+usersRouter.patch('/:id/archive', async (req, res) => {
+  const id = Number(req.params.id);
+  const { isArchived = true } = req.body;
+
+  if (!Number.isInteger(id) || id <= 0 || typeof isArchived !== 'boolean') {
+    return res.status(400).json({ error: 'Valid user id and archive state are required' });
+  }
+
+  try {
+    const result = await query(
+      `UPDATE users
+       SET is_active = $1,
+         is_archived = $2,
+         updated_at = NOW()
+       WHERE id = $3
+       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
+      [isArchived ? false : true, isArchived, id],
     );
 
     if (result.rowCount === 0) {
