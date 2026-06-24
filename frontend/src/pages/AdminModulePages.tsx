@@ -2,9 +2,19 @@ import {
   AlertTriangle,
   Archive,
   Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Download,
   Filter,
   Fingerprint,
+  HardDrive,
   Monitor,
+  Pencil,
+  Power,
+  Search,
+  TrendingUp,
   UsersRound,
   X,
 } from 'lucide-react';
@@ -14,15 +24,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/useAuth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
-
-const attendanceRows = [
-  ['EMP001', 'Juan Dela Cruz', 'IT Department', '08:01 AM', '05:02 PM', 'Present', 'Main Office'],
-  ['EMP002', 'Maria Santos', 'HR Department', '07:55 AM', '05:10 PM', 'Present', 'Main Office'],
-  ['EMP003', 'Pedro Reyes', 'Operations', '08:15 AM', '06:01 PM', 'Present', 'Main Office'],
-  ['EMP004', 'Ana Garcia', 'Finance', '08:23 AM', '-', 'Late', 'Main Office'],
-  ['EMP005', 'Carlo Mendoza', 'IT Department', '-', '-', 'Absent', '-'],
-  ['EMP006', 'Liza Morales', 'HR Department', '08:05 AM', '04:58 PM', 'Present', 'Main Office'],
-];
 
 const deviceRows = [
   ['DEV-001', 'Main Entrance', 'RFID Reader', 'Office', '192.168.1.10', 'Online', 'May 20'],
@@ -91,6 +92,37 @@ type EnrollmentRequest = {
 };
 
 type EnrollmentStatusFilter = EnrollmentRequest['status'] | 'All';
+
+type UserRecord = {
+  created_at: string;
+  department: string | null;
+  email: string | null;
+  employee_id: string;
+  fingerprint_id: string | null;
+  full_name: string;
+  id: number;
+  is_active: boolean;
+  phone: string | null;
+  rfid_uid: string | null;
+  role: string;
+  updated_at: string;
+};
+
+type UserDisplayRow = {
+  accessStatus: 'Active' | 'Disabled';
+  accessTone: 'success' | 'danger';
+  avatar: string;
+  avatarTone: string;
+  biometricStatus: 'Registered' | 'Missing';
+  biometricTone: 'success' | 'danger';
+  department: string;
+  employeeId: string;
+  id: number;
+  lastUpdated: string;
+  name: string;
+  online: boolean;
+  role: string;
+};
 
 function isEnrollmentRequest(value: unknown): value is EnrollmentRequest {
   return typeof value === 'object' && value !== null && 'id' in value && 'status' in value;
@@ -360,6 +392,65 @@ function toDateInputValue(value: string) {
   return date.toISOString().slice(0, 10);
 }
 
+function formatUserTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length === 0) {
+    return '--';
+  }
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+}
+
+function getAvatarTone(index: number) {
+  const tones = ['violet', 'lavender', 'sky', 'mint', 'gold', 'rose', 'teal'];
+  return tones[index % tones.length];
+}
+
+function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
+  const hasBiometric = Boolean(user.fingerprint_id || user.rfid_uid);
+
+  return {
+    accessStatus: user.is_active ? 'Active' : 'Disabled',
+    accessTone: user.is_active ? 'success' : 'danger',
+    avatar: getInitials(user.full_name),
+    avatarTone: getAvatarTone(index),
+    biometricStatus: hasBiometric ? 'Registered' : 'Missing',
+    biometricTone: hasBiometric ? 'success' : 'danger',
+    department: user.department || '-',
+    employeeId: user.employee_id,
+    id: user.id,
+    lastUpdated: formatUserTimestamp(user.updated_at || user.created_at),
+    name: user.full_name,
+    online: user.is_active,
+    role: user.role || 'Employee',
+  };
+}
+
 function MetricCards({
   cards,
 }: {
@@ -384,34 +475,357 @@ function MetricCards({
   );
 }
 
+function attendanceStatusIcon(status: string) {
+  if (status === 'Registered') {
+    return <Fingerprint size={14} />;
+  }
+
+  if (status === 'Active') {
+    return <CheckCircle2 size={14} />;
+  }
+
+  if (status === 'Pending' || status === 'Restricted') {
+    return <Clock3 size={14} />;
+  }
+
+  return <AlertTriangle size={14} />;
+}
+
 export function AttendanceManagementPage() {
+  const { session } = useAuth();
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [usersErrorMessage, setUsersErrorMessage] = useState('');
+  const [userSearch, setUserSearch] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('All Departments');
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadUsers() {
+      if (!session?.accessToken) {
+        setUsersErrorMessage('Please sign in again to view users.');
+        setIsLoadingUsers(false);
+        return;
+      }
+
+      try {
+        setIsLoadingUsers(true);
+        setUsersErrorMessage('');
+
+        const response = await fetch(`${API_BASE_URL}/users`, {
+          headers: {
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+          signal: controller.signal,
+        });
+
+        const data = (await response.json().catch(() => null)) as
+          | UserRecord[]
+          | { error?: string }
+          | null;
+
+        if (!response.ok || !Array.isArray(data)) {
+          throw new Error(
+            !Array.isArray(data) && data?.error ? data.error : 'Unable to load users.',
+          );
+        }
+
+        setUsers(data);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to load users.');
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingUsers(false);
+        }
+      }
+    }
+
+    void loadUsers();
+
+    return () => {
+      controller.abort();
+    };
+  }, [session?.accessToken]);
+
+  const departmentOptions = useMemo(
+    () =>
+      Array.from(new Set(users.map((user) => user.department).filter(Boolean) as string[])).sort(
+        (departmentA, departmentB) => departmentA.localeCompare(departmentB),
+      ),
+    [users],
+  );
+
+  const filteredUsers = useMemo(() => {
+    const normalizedSearch = userSearch.trim().toLowerCase();
+
+    return users.filter((user) => {
+      const matchesSearch =
+        !normalizedSearch ||
+        user.full_name.toLowerCase().includes(normalizedSearch) ||
+        user.employee_id.toLowerCase().includes(normalizedSearch) ||
+        (user.department || '').toLowerCase().includes(normalizedSearch) ||
+        user.role.toLowerCase().includes(normalizedSearch);
+      const matchesDepartment =
+        departmentFilter === 'All Departments' || user.department === departmentFilter;
+
+      return matchesSearch && matchesDepartment;
+    });
+  }, [departmentFilter, userSearch, users]);
+
+  const visibleUsers = useMemo(
+    () => filteredUsers.slice(0, rowsPerPage).map(toUserDisplayRow),
+    [filteredUsers, rowsPerPage],
+  );
+
+  const registeredBiometricCount = users.filter(
+    (user) => user.fingerprint_id || user.rfid_uid,
+  ).length;
+  const missingBiometricCount = users.length - registeredBiometricCount;
+  const inactiveUserCount = users.filter((user) => !user.is_active).length;
+  const attendanceMetrics = [
+    {
+      label: 'Total Users',
+      value: users.length.toLocaleString(),
+      delta: 'Live',
+      Icon: UsersRound,
+      tone: 'green',
+    },
+    {
+      label: 'Registered Biometrics',
+      value: registeredBiometricCount.toLocaleString(),
+      delta: 'Live',
+      Icon: Fingerprint,
+      tone: 'blue',
+    },
+    {
+      label: 'Missing Biometrics',
+      value: missingBiometricCount.toLocaleString(),
+      delta: 'Live',
+      Icon: AlertTriangle,
+      tone: 'amber',
+    },
+    {
+      label: 'Inactive / Disabled',
+      value: inactiveUserCount.toLocaleString(),
+      delta: 'Live',
+      Icon: HardDrive,
+      tone: 'red',
+    },
+  ];
+
+  function clearUserFilters() {
+    setUserSearch('');
+    setDepartmentFilter('All Departments');
+  }
+
   return (
-    <section className="module-page">
-      <PageHeader
-        title="Attendance Management"
-        description="Monitor and manage attendance records in real-time."
-      />
-      <MetricCards
-        cards={[
-          { label: 'Total Users', value: '1,248', tone: 'green', Icon: UsersRound },
-          { label: "Today's Attendance", value: '856', tone: 'blue', Icon: Fingerprint },
-          { label: 'Late', value: '23', tone: 'amber', Icon: AlertTriangle },
-          { label: 'Absent', value: '12', tone: 'red', Icon: Archive },
-        ]}
-      />
-      <ModuleTable
-        title="Today's Attendance"
-        columns={[
-          'Employee ID',
-          'Name',
-          'Department',
-          'Check In',
-          'Check Out',
-          'Status',
-          'Location',
-        ]}
-        rows={attendanceRows}
-      />
+    <section className="dashboard-page user-management-page" aria-labelledby="attendance-title">
+      <div className="dashboard-hero">
+        <header className="dashboard-header user-management-header">
+          <div>
+            <h1 id="attendance-title">User Management</h1>
+            <p>Manage employee attendance, biometric status, and access settings.</p>
+          </div>
+
+          <div className="dashboard-actions">
+            <button className="soft-action-button" type="button">
+              <Download size={16} />
+              Export
+            </button>
+            <button className="soft-action-button" type="button">
+              <Filter size={16} />
+              Filter
+            </button>
+          </div>
+        </header>
+
+        <div className="stats-grid user-metrics-grid">
+          {attendanceMetrics.map(({ Icon, delta, label, tone, value }) => (
+            <article className="stat-card user-metric-card" key={label}>
+              <span className={`stat-icon ${tone}`}>
+                <Icon size={34} />
+              </span>
+              <div>
+                <span>{label}</span>
+                <strong>{value}</strong>
+                <small>vs yesterday</small>
+              </div>
+              <span className="stat-delta up">
+                <TrendingUp size={15} />
+                {delta}
+              </span>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <section className="user-table-panel" aria-labelledby="attendance-table-title">
+        <h2 id="attendance-table-title">Attendance Users</h2>
+        <div className="user-filter-row">
+          <label className="user-search-field">
+            <Search size={19} aria-hidden="true" />
+            <input
+              onChange={(event) => setUserSearch(event.target.value)}
+              placeholder="Search by name, ID, department..."
+              type="search"
+              value={userSearch}
+            />
+          </label>
+
+          <select
+            aria-label="Filter by department"
+            onChange={(event) => setDepartmentFilter(event.target.value)}
+            value={departmentFilter}
+          >
+            <option>All Departments</option>
+            {departmentOptions.map((department) => (
+              <option key={department}>{department}</option>
+            ))}
+          </select>
+
+          <button
+            className="soft-action-button clear-filter-button"
+            onClick={clearUserFilters}
+            type="button"
+          >
+            Clear Filter
+          </button>
+        </div>
+
+        <div className="user-table-wrap">
+          <table className="user-management-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Role</th>
+                <th>Department</th>
+                <th>Biometric Status</th>
+                <th>Access Status</th>
+                <th>Last Updated</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoadingUsers ? (
+                <tr>
+                  <td className="module-table-message" colSpan={7}>
+                    Loading users...
+                  </td>
+                </tr>
+              ) : usersErrorMessage ? (
+                <tr>
+                  <td className="module-table-message error" colSpan={7}>
+                    {usersErrorMessage}
+                  </td>
+                </tr>
+              ) : visibleUsers.length === 0 ? (
+                <tr>
+                  <td className="module-table-message" colSpan={7}>
+                    No users found.
+                  </td>
+                </tr>
+              ) : (
+                visibleUsers.map((user) => (
+                  <tr key={user.id}>
+                    <td>
+                      <span className="managed-user-cell">
+                        <span className={`managed-avatar ${user.avatarTone}`}>
+                          {user.avatar}
+                          {user.online ? <i aria-hidden="true" /> : null}
+                        </span>
+                        <span>
+                          <strong>{user.name}</strong>
+                          <small>{user.employeeId}</small>
+                        </span>
+                      </span>
+                    </td>
+                    <td>{user.role}</td>
+                    <td>{user.department}</td>
+                    <td>
+                      <span className={`user-status-pill ${user.biometricTone}`}>
+                        {attendanceStatusIcon(user.biometricStatus)}
+                        {user.biometricStatus}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`user-status-pill ${user.accessTone}`}>
+                        {attendanceStatusIcon(user.accessStatus)}
+                        {user.accessStatus}
+                      </span>
+                    </td>
+                    <td>{user.lastUpdated}</td>
+                    <td>
+                      <span className="user-row-actions">
+                        <button
+                          className={user.accessStatus === 'Disabled' ? 'activate' : 'deactivate'}
+                          type="button"
+                          aria-label={
+                            user.accessStatus === 'Disabled'
+                              ? `Activate ${user.name}`
+                              : `Deactivate ${user.name}`
+                          }
+                        >
+                          <Power size={15} />
+                        </button>
+                        <button
+                          className="archive"
+                          type="button"
+                          aria-label={`Archive ${user.name}`}
+                        >
+                          <Archive size={15} />
+                        </button>
+                        <button className="edit" type="button" aria-label={`Edit ${user.name}`}>
+                          <Pencil size={15} />
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <footer className="user-table-footer">
+          <span>
+            Showing {visibleUsers.length === 0 ? 0 : 1} to {visibleUsers.length} of{' '}
+            {filteredUsers.length.toLocaleString()} entries
+          </span>
+          <div className="user-pagination" aria-label="Pagination">
+            <button type="button" aria-label="Previous page">
+              <ChevronLeft size={15} />
+            </button>
+            <button className="active" type="button">
+              1
+            </button>
+            <button type="button">2</button>
+            <button type="button">3</button>
+            <button type="button">...</button>
+            <button type="button">156</button>
+            <button type="button" aria-label="Next page">
+              <ChevronRight size={15} />
+            </button>
+          </div>
+          <label className="rows-per-page">
+            Rows per page:
+            <select
+              aria-label="Rows per page"
+              onChange={(event) => setRowsPerPage(Number(event.target.value))}
+              value={String(rowsPerPage)}
+            >
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+            </select>
+          </label>
+        </footer>
+      </section>
     </section>
   );
 }
