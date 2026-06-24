@@ -59,10 +59,7 @@ CREATE TABLE IF NOT EXISTS users (
   fingerprint_id VARCHAR(120) UNIQUE,
   rfid_uid VARCHAR(120) UNIQUE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
-<<<<<<< HEAD
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
-=======
->>>>>>> qa
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

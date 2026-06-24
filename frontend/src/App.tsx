@@ -1,9 +1,5 @@
 import {
   Bell,
-<<<<<<< HEAD
-=======
-  CalendarDays,
->>>>>>> qa
   ChevronDown,
   ClipboardList,
   FileText,
@@ -15,10 +11,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
-<<<<<<< HEAD
   UsersRound,
-=======
->>>>>>> qa
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
@@ -30,11 +23,7 @@ const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws')
 
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', Icon: Home },
-<<<<<<< HEAD
   { label: 'User Management', path: '/attendance-management', Icon: UsersRound },
-=======
-  { label: 'Attendance Management', path: '/attendance-management', Icon: CalendarDays },
->>>>>>> qa
   { label: 'Enrollment Requests', path: '/enrollment-requests', Icon: ClipboardList },
   { label: 'Device Management', path: '/device-management', Icon: Monitor },
   { label: 'Reports', path: '/reports', Icon: FileText },
