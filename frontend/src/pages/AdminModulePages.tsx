@@ -25,18 +25,6 @@ import { useAuth } from '../auth/useAuth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 
-<<<<<<< HEAD
-=======
-const attendanceRows = [
-  ['EMP001', 'Juan Dela Cruz', 'IT Department', '08:01 AM', '05:02 PM', 'Present', 'Main Office'],
-  ['EMP002', 'Maria Santos', 'HR Department', '07:55 AM', '05:10 PM', 'Present', 'Main Office'],
-  ['EMP003', 'Pedro Reyes', 'Operations', '08:15 AM', '06:01 PM', 'Present', 'Main Office'],
-  ['EMP004', 'Ana Garcia', 'Finance', '08:23 AM', '-', 'Late', 'Main Office'],
-  ['EMP005', 'Carlo Mendoza', 'IT Department', '-', '-', 'Absent', '-'],
-  ['EMP006', 'Liza Morales', 'HR Department', '08:05 AM', '04:58 PM', 'Present', 'Main Office'],
-];
-
->>>>>>> qa
 const deviceRows = [
   ['DEV-001', 'Main Entrance', 'RFID Reader', 'Office', '192.168.1.10', 'Online', 'May 20'],
   ['DEV-002', 'HR Office Bio', 'Biometric', 'HR Office', '192.168.1.11', 'Online', 'May 20'],
