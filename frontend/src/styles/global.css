@@ -1572,7 +1572,10 @@ td small {
 
 .user-filter-row {
   display: grid;
-  grid-template-columns: minmax(280px, 520px) minmax(180px, 250px) minmax(130px, 170px);
+  grid-template-columns: minmax(280px, 1fr) minmax(180px, 228px) minmax(180px, 230px) minmax(
+      130px,
+      170px
+    );
   gap: 24px;
   align-items: center;
   justify-content: space-between;
@@ -1624,7 +1627,7 @@ td small {
 }
 
 .user-management-table {
-  min-width: 1040px;
+  min-width: 930px;
   overflow: hidden;
   border-collapse: separate;
   border-spacing: 0;
@@ -1657,31 +1660,26 @@ td small {
 
 .user-management-table th:nth-child(2),
 .user-management-table td:nth-child(2) {
-  width: 140px;
+  width: 165px;
 }
 
 .user-management-table th:nth-child(3),
 .user-management-table td:nth-child(3) {
-  width: 165px;
+  width: 180px;
 }
 
 .user-management-table th:nth-child(4),
 .user-management-table td:nth-child(4) {
-  width: 180px;
+  width: 170px;
 }
 
 .user-management-table th:nth-child(5),
 .user-management-table td:nth-child(5) {
-  width: 170px;
+  width: 150px;
 }
 
 .user-management-table th:nth-child(6),
 .user-management-table td:nth-child(6) {
-  width: 150px;
-}
-
-.user-management-table th:nth-child(7),
-.user-management-table td:nth-child(7) {
   width: 132px;
 }
 
