@@ -1,5 +1,5 @@
 import express from 'express';
-import { setPendingEnrollmentFingerprintId } from '../enrollmentSession.js';
+import { setPendingEnrollmentRfidUid } from '../enrollmentSession.js';
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
@@ -97,6 +97,16 @@ kioskRouter.post('/fingerprint-scan', async (req, res) => {
   return processKioskScan(req, res);
 });
 
+kioskRouter.post('/rfid-scan', async (req, res) => {
+  req.body = {
+    rfidUid: req.body.rfidUid,
+    authenticationMethod: 'RFID',
+    deviceId: req.body.deviceId,
+  };
+
+  return processKioskScan(req, res);
+});
+
 kioskRouter.post('/admin-rfid-scan', async (req, res, next) => {
   try {
     const rfidUid = req.body.rfidUid?.trim();
@@ -135,22 +145,44 @@ kioskRouter.post('/admin-rfid-scan', async (req, res, next) => {
   }
 });
 
-kioskRouter.post('/enrollment-fingerprint', (req, res) => {
-  const fingerprintNumber = String(req.body.fingerprintNumber || '').trim();
+kioskRouter.post('/enrollment-fingerprint', async (req, res, next) => {
+  const rfidUid = String(req.body.fingerprintNumber || req.body.rfidUid || '').trim();
 
-  if (!/^\d+$/.test(fingerprintNumber)) {
-    return res.status(400).json({ error: 'fingerprintNumber must be numeric' });
+  if (!rfidUid) {
+    return res.status(400).json({ error: 'rfidUid is required' });
   }
 
-  const fingerprintId = `FP${fingerprintNumber}`;
-  setPendingEnrollmentFingerprintId(fingerprintId);
+  try {
+    const existingRfid = await query(
+      `SELECT rfid_uid
+       FROM (
+         SELECT rfid_uid FROM users WHERE rfid_uid IS NOT NULL
+         UNION ALL
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL
+       ) existing_rfids
+       WHERE LOWER(TRIM(rfid_uid)) = LOWER(TRIM($1))
+       LIMIT 1`,
+      [rfidUid],
+    );
 
-  broadcastMessage({
-    type: 'enrollment:fingerprint-captured',
-    payload: { fingerprintId },
-  });
+    if (existingRfid.rowCount > 0) {
+      return res.status(409).json({
+        error: 'RFID already exists. Tap a new RFID.',
+        field: 'rfidUid',
+      });
+    }
 
-  return res.json({ fingerprintId });
+    setPendingEnrollmentRfidUid(rfidUid);
+
+    broadcastMessage({
+      type: 'enrollment:rfid-captured',
+      payload: { rfidUid },
+    });
+
+    return res.json({ rfidUid });
+  } catch (error) {
+    return next(error);
+  }
 });
 
 kioskRouter.use(authMiddleware);

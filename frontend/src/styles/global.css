@@ -1572,7 +1572,10 @@ td small {
 
 .user-filter-row {
   display: grid;
-  grid-template-columns: minmax(280px, 520px) minmax(180px, 250px) minmax(130px, 170px);
+  grid-template-columns: minmax(280px, 1fr) minmax(180px, 228px) minmax(180px, 230px) minmax(
+      130px,
+      170px
+    );
   gap: 24px;
   align-items: center;
   justify-content: space-between;
@@ -1624,7 +1627,7 @@ td small {
 }
 
 .user-management-table {
-  min-width: 1040px;
+  min-width: 930px;
   overflow: hidden;
   border-collapse: separate;
   border-spacing: 0;
@@ -1657,31 +1660,26 @@ td small {
 
 .user-management-table th:nth-child(2),
 .user-management-table td:nth-child(2) {
-  width: 140px;
+  width: 165px;
 }
 
 .user-management-table th:nth-child(3),
 .user-management-table td:nth-child(3) {
-  width: 165px;
+  width: 180px;
 }
 
 .user-management-table th:nth-child(4),
 .user-management-table td:nth-child(4) {
-  width: 180px;
+  width: 170px;
 }
 
 .user-management-table th:nth-child(5),
 .user-management-table td:nth-child(5) {
-  width: 170px;
+  width: 150px;
 }
 
 .user-management-table th:nth-child(6),
 .user-management-table td:nth-child(6) {
-  width: 150px;
-}
-
-.user-management-table th:nth-child(7),
-.user-management-table td:nth-child(7) {
   width: 132px;
 }
 
@@ -2475,6 +2473,53 @@ td small {
   animation: kioskPulse 1.1s ease-in-out infinite;
 }
 
+.id-tap-symbol {
+  position: relative;
+  display: grid;
+  width: 116px;
+  height: 116px;
+  place-items: center;
+  border: 2px solid #e01835;
+  border-radius: 999px;
+  background: #18213b;
+  animation: idTapRotate 2.8s linear infinite;
+}
+
+.id-tap-symbol::before,
+.id-tap-symbol::after {
+  position: absolute;
+  inset: 7px;
+  content: '';
+  border: 3px solid #ff2145;
+  border-left-color: transparent;
+  border-radius: inherit;
+  transform: rotate(7deg);
+}
+
+.id-tap-symbol::after {
+  inset: 14px;
+  border-width: 2px;
+  border-top-color: transparent;
+  border-right-color: transparent;
+  transform: rotate(-8deg);
+}
+
+.id-tap-symbol span {
+  position: relative;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px 0 0 999px;
+  background: #ffffff;
+  transform: translateX(-3px);
+}
+
+@keyframes idTapRotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .fingerprint-prompt h2 {
   margin: 36px 0 6px;
   font-size: clamp(1.6rem, 3vw, 2.25rem);
@@ -2636,10 +2681,32 @@ td small {
   color: #c7d2e4;
 }
 
-.return-note {
-  display: block;
-  margin-top: 20px;
+.return-timer {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin-top: 4px;
   text-align: center;
+}
+
+.return-timer span {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  place-items: center;
+  color: #ffffff;
+  font-size: 1.9rem;
+  font-weight: 900;
+  border: 2px solid #e01835;
+  border-radius: 999px;
+  background: rgb(8 28 55 / 82%);
+  box-shadow: 0 0 0 8px rgb(224 24 53 / 12%);
+}
+
+.return-timer small {
+  color: #c7d2e4;
+  font-weight: 800;
 }
 
 .unregistered-layout {
@@ -2720,6 +2787,26 @@ td small {
   width: min(980px, 100%);
 }
 
+.enrollment-intro-layout {
+  grid-template-columns: 160px minmax(0, 1fr);
+  width: min(760px, 100%);
+}
+
+.enrollment-qr-layout {
+  grid-template-columns: 160px minmax(0, 1fr);
+  width: min(680px, 100%);
+}
+
+.enrollment-qr-copy {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.enrollment-intro-timer {
+  margin-top: 0;
+}
+
 .enrollment-symbol svg:last-child {
   position: absolute;
   right: 22px;
@@ -2768,15 +2855,15 @@ td small {
 .qr-panel {
   display: grid;
   justify-items: center;
-  gap: 14px;
+  gap: 8px;
   color: #c7d2e4;
   text-align: center;
 }
 
 .qr-panel img {
-  width: 260px;
-  height: 260px;
-  padding: 18px;
+  width: 172px;
+  height: 172px;
+  padding: 10px;
   object-fit: contain;
   border-radius: 8px;
   background: #ffffff;
@@ -2787,10 +2874,10 @@ td small {
 
 .qr-panel small {
   display: block;
-  max-width: 280px;
+  max-width: 240px;
   overflow-wrap: anywhere;
   color: #ffffff;
-  font-size: 0.78rem;
+  font-size: 0.68rem;
   line-height: 1.35;
 }
 

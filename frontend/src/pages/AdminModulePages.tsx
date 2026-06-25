@@ -85,6 +85,7 @@ type EnrollmentRequest = {
   email?: string | null;
   full_name: string;
   id: number;
+  rfid_uid: string | null;
   request_code: string;
   request_type: string;
   status: 'Pending' | 'Approved' | 'Rejected';
@@ -105,7 +106,6 @@ type UserRecord = {
   is_archived?: boolean;
   phone: string | null;
   rfid_uid: string | null;
-  role: string;
   updated_at: string;
 };
 
@@ -122,7 +122,6 @@ type UserDisplayRow = {
   lastUpdated: string;
   name: string;
   online: boolean;
-  role: string;
 };
 
 function isEnrollmentRequest(value: unknown): value is EnrollmentRequest {
@@ -433,7 +432,7 @@ function getAvatarTone(index: number) {
 }
 
 function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
-  const hasBiometric = Boolean(user.fingerprint_id || user.rfid_uid);
+  const hasBiometric = Boolean(user.fingerprint_id);
 
   return {
     accessStatus: user.is_active ? 'Active' : 'Disabled',
@@ -448,7 +447,6 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     lastUpdated: formatUserTimestamp(user.updated_at || user.created_at),
     name: user.full_name,
     online: user.is_active,
-    role: user.role || 'Employee',
   };
 }
 
@@ -499,7 +497,8 @@ export function AttendanceManagementPage() {
   const [usersErrorMessage, setUsersErrorMessage] = useState('');
   const [userActionMessage, setUserActionMessage] = useState('');
   const [userSearch, setUserSearch] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('All Departments');
+  const [departmentFilter, setDepartmentFilter] = useState('All Roles');
+  const [statusFilter, setStatusFilter] = useState('All Status');
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
 
@@ -670,23 +669,23 @@ export function AttendanceManagementPage() {
         !normalizedSearch ||
         user.full_name.toLowerCase().includes(normalizedSearch) ||
         user.employee_id.toLowerCase().includes(normalizedSearch) ||
-        (user.department || '').toLowerCase().includes(normalizedSearch) ||
-        user.role.toLowerCase().includes(normalizedSearch);
+        (user.department || '').toLowerCase().includes(normalizedSearch);
       const matchesDepartment =
-        departmentFilter === 'All Departments' || user.department === departmentFilter;
+        departmentFilter === 'All Roles' || user.department === departmentFilter;
+      const matchesStatus =
+        statusFilter === 'All Status' ||
+        (statusFilter === 'Active' ? user.is_active : !user.is_active);
 
-      return matchesSearch && matchesDepartment;
+      return matchesSearch && matchesDepartment && matchesStatus;
     });
-  }, [departmentFilter, userSearch, users]);
+  }, [departmentFilter, statusFilter, userSearch, users]);
 
   const visibleUsers = useMemo(
     () => filteredUsers.slice(0, rowsPerPage).map(toUserDisplayRow),
     [filteredUsers, rowsPerPage],
   );
 
-  const registeredBiometricCount = users.filter(
-    (user) => user.fingerprint_id || user.rfid_uid,
-  ).length;
+  const registeredBiometricCount = users.filter((user) => user.fingerprint_id).length;
   const missingBiometricCount = users.length - registeredBiometricCount;
   const inactiveUserCount = users.filter((user) => !user.is_active).length;
   const attendanceMetrics = [
@@ -722,7 +721,8 @@ export function AttendanceManagementPage() {
 
   function clearUserFilters() {
     setUserSearch('');
-    setDepartmentFilter('All Departments');
+    setDepartmentFilter('All Roles');
+    setStatusFilter('All Status');
   }
 
   return (
@@ -773,18 +773,28 @@ export function AttendanceManagementPage() {
             <Search size={19} aria-hidden="true" />
             <input
               onChange={(event) => setUserSearch(event.target.value)}
-              placeholder="Search by name, ID, department..."
+              placeholder="Search by name, ID, role..."
               type="search"
               value={userSearch}
             />
           </label>
 
           <select
-            aria-label="Filter by department"
+            aria-label="Filter by user status"
+            onChange={(event) => setStatusFilter(event.target.value)}
+            value={statusFilter}
+          >
+            <option>All Status</option>
+            <option>Active</option>
+            <option>Disabled</option>
+          </select>
+
+          <select
+            aria-label="Filter by role"
             onChange={(event) => setDepartmentFilter(event.target.value)}
             value={departmentFilter}
           >
-            <option>All Departments</option>
+            <option>All Roles</option>
             {departmentOptions.map((department) => (
               <option key={department}>{department}</option>
             ))}
@@ -811,7 +821,6 @@ export function AttendanceManagementPage() {
               <tr>
                 <th>User</th>
                 <th>Role</th>
-                <th>Department</th>
                 <th>Biometric Status</th>
                 <th>Access Status</th>
                 <th>Last Updated</th>
@@ -821,19 +830,19 @@ export function AttendanceManagementPage() {
             <tbody>
               {isLoadingUsers ? (
                 <tr>
-                  <td className="module-table-message" colSpan={7}>
+                  <td className="module-table-message" colSpan={6}>
                     Loading users...
                   </td>
                 </tr>
               ) : usersErrorMessage ? (
                 <tr>
-                  <td className="module-table-message error" colSpan={7}>
+                  <td className="module-table-message error" colSpan={6}>
                     {usersErrorMessage}
                   </td>
                 </tr>
               ) : visibleUsers.length === 0 ? (
                 <tr>
-                  <td className="module-table-message" colSpan={7}>
+                  <td className="module-table-message" colSpan={6}>
                     No users found.
                   </td>
                 </tr>
@@ -852,7 +861,6 @@ export function AttendanceManagementPage() {
                         </span>
                       </span>
                     </td>
-                    <td>{user.role}</td>
                     <td>{user.department}</td>
                     <td>
                       <span className={`user-status-pill ${user.biometricTone}`}>
@@ -1094,6 +1102,7 @@ export function EnrollmentRequestsPage() {
         request.full_name,
         request.employee_id,
         request.department,
+        request.rfid_uid || '-',
         request.request_type,
         formatSubmittedDate(request.submitted_at),
         request.status,
@@ -1137,6 +1146,7 @@ export function EnrollmentRequestsPage() {
           'Name',
           'Employee ID',
           'Department',
+          'RFID UID',
           'Request Type',
           'Submitted',
           'Status',
