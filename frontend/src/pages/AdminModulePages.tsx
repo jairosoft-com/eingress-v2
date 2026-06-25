@@ -85,6 +85,7 @@ type EnrollmentRequest = {
   email?: string | null;
   full_name: string;
   id: number;
+  rfid_uid: string | null;
   request_code: string;
   request_type: string;
   status: 'Pending' | 'Approved' | 'Rejected';
@@ -431,7 +432,7 @@ function getAvatarTone(index: number) {
 }
 
 function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
-  const hasBiometric = Boolean(user.fingerprint_id || user.rfid_uid);
+  const hasBiometric = Boolean(user.fingerprint_id);
 
   return {
     accessStatus: user.is_active ? 'Active' : 'Disabled',
@@ -684,9 +685,7 @@ export function AttendanceManagementPage() {
     [filteredUsers, rowsPerPage],
   );
 
-  const registeredBiometricCount = users.filter(
-    (user) => user.fingerprint_id || user.rfid_uid,
-  ).length;
+  const registeredBiometricCount = users.filter((user) => user.fingerprint_id).length;
   const missingBiometricCount = users.length - registeredBiometricCount;
   const inactiveUserCount = users.filter((user) => !user.is_active).length;
   const attendanceMetrics = [
@@ -1103,6 +1102,7 @@ export function EnrollmentRequestsPage() {
         request.full_name,
         request.employee_id,
         request.department,
+        request.rfid_uid || '-',
         request.request_type,
         formatSubmittedDate(request.submitted_at),
         request.status,
@@ -1146,6 +1146,7 @@ export function EnrollmentRequestsPage() {
           'Name',
           'Employee ID',
           'Department',
+          'RFID UID',
           'Request Type',
           'Submitted',
           'Status',

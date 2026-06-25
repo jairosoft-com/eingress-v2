@@ -1,8 +1,8 @@
 import express from 'express';
 
 import {
-  clearPendingEnrollmentFingerprintId,
-  getPendingEnrollmentFingerprintId,
+  clearPendingEnrollmentRfidUid,
+  getPendingEnrollmentRfidUid,
 } from '../enrollmentSession.js';
 import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -71,15 +71,41 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       return res.status(409).json({ error: 'Existing user. This name is already registered or pending enrollment.' });
     }
 
+    const rfidUid = getPendingEnrollmentRfidUid();
+
+    if (!rfidUid) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'RFID UID must be captured before submitting registration.' });
+    }
+
+    const existingRfid = await client.query(
+      `SELECT rfid_uid
+       FROM (
+         SELECT rfid_uid FROM users WHERE rfid_uid IS NOT NULL
+         UNION ALL
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL
+       ) existing_rfids
+       WHERE LOWER(TRIM(rfid_uid)) = LOWER(TRIM($1))
+       LIMIT 1`,
+      [rfidUid],
+    );
+
+    if (existingRfid.rowCount > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Existing RFID. This ID is already registered or pending enrollment.',
+        field: 'rfidUid',
+      });
+    }
+
     const employeeId = await getNextEmployeeId(client);
-    const fingerprintId = getPendingEnrollmentFingerprintId();
     await resetEnrollmentSequencesIfEmpty(client);
 
     const result = await client.query(
       `INSERT INTO enrollment_requests
-        (employee_id, full_name, department, request_type, email, phone, fingerprint_template)
+        (employee_id, full_name, department, request_type, email, phone, rfid_uid)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, request_code, employee_id, full_name, department, request_type, email, phone, fingerprint_template, status, submitted_at`,
+       RETURNING id, request_code, employee_id, full_name, department, request_type, email, phone, rfid_uid, status, submitted_at`,
       [
         employeeId,
         fullName.trim(),
@@ -87,18 +113,18 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
         'New Enrollment',
         email.trim(),
         phone.trim(),
-        fingerprintId,
+        rfidUid,
       ],
     );
 
     await client.query('COMMIT');
-    clearPendingEnrollmentFingerprintId();
+    clearPendingEnrollmentRfidUid();
 
     broadcastMessage({
       type: 'enrollment:submitted',
       payload: {
         employeeId: result.rows[0].employee_id,
-        fingerprintId: result.rows[0].fingerprint_template,
+        rfidUid: result.rows[0].rfid_uid,
         fullName: result.rows[0].full_name,
         requestCode: result.rows[0].request_code,
       },
@@ -119,7 +145,7 @@ enrollmentRequestsRouter.get('/', async (req, res, next) => {
   try {
     const result = await query(
       `SELECT id, request_code, employee_id, full_name, department, request_type, email, status,
-        submitted_at, reviewed_at, reviewed_by, rejection_reason
+        rfid_uid, submitted_at, reviewed_at, reviewed_by, rejection_reason
        FROM enrollment_requests
        ORDER BY submitted_at DESC`,
     );
@@ -192,6 +218,13 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
     const request = requestResult.rows[0];
 
     if (status === 'Approved') {
+      const rfidUid = request.rfid_uid?.trim() || null;
+
+      if (!rfidUid) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'RFID UID is required before approving enrollment.' });
+      }
+
       await client.query(
         `INSERT INTO users
           (employee_id, full_name, email, phone, department, fingerprint_id, rfid_uid)
@@ -211,7 +244,7 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
           request.phone,
           request.department,
           request.fingerprint_template,
-          request.rfid_uid,
+          rfidUid,
         ],
       );
     }
