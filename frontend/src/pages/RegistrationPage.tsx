@@ -111,11 +111,19 @@ export function RegistrationPage() {
 
       const data = (await response.json().catch(() => null)) as {
         error?: string;
+        field?: string;
         request_code?: string;
       } | null;
 
       if (!response.ok) {
         if (response.status === 409) {
+          if (data?.field === 'rfidUid') {
+            setErrors({
+              form: data.error || 'Existing RFID. This ID is already registered.',
+            });
+            return;
+          }
+
           setErrors({
             fullName: data?.error || 'Existing user. This name is already registered.',
           });
