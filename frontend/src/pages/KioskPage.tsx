@@ -194,6 +194,47 @@ export function KioskPage() {
     [enterUnregisteredState],
   );
 
+  const scanFingerprint = useCallback(
+    (fingerprintId: string) => {
+      setKioskState('processing');
+      setDoorAlert('');
+
+      window.setTimeout(() => {
+        void fetch(`${API_BASE_URL}/kiosk/fingerprint-scan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ fingerprintId }),
+        })
+          .then(async (response) => {
+            const data = (await response.json().catch(() => null)) as KioskScanResponse | null;
+            const isRegistered = response.ok && data?.result === 'Granted';
+
+            if (isRegistered) {
+              setRecognizedUser({
+                department: data.department ?? 'Unassigned',
+                employeeId: data.employeeId,
+                name: data.userName,
+              });
+              setDoorAlert('The door is unlocked!');
+              setRecognizedCountdown(5);
+              setKioskState('recognized');
+              return;
+            }
+
+            setDoorAlert('Door locked');
+            enterUnregisteredState();
+          })
+          .catch(() => {
+            setDoorAlert('Door locked');
+            enterUnregisteredState();
+          });
+      }, 1200);
+    },
+    [enterUnregisteredState],
+  );
+
   const scanAdminRfid = useCallback(
     (rfidUid: string, inputNonce: number) => {
       if (!isUnrecognizedUser) {
@@ -330,14 +371,10 @@ export function KioskPage() {
             return;
           }
 
-          if (biometricCaptured) {
-            return;
-          }
-
-          const idleRfidUid = rfidUid || fingerprintId;
-
-          if (idleRfidUid) {
-            scanRfid(idleRfidUid);
+          if (rfidUid) {
+            scanRfid(rfidUid);
+          } else if (fingerprintId) {
+            scanFingerprint(fingerprintId);
           }
         })
         .catch(() => {
@@ -352,6 +389,7 @@ export function KioskPage() {
     isBiometricEnrollment,
     isUnrecognizedUser,
     scanAdminRfid,
+    scanFingerprint,
     scanRfid,
   ]);
 
