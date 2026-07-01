@@ -62,14 +62,18 @@ async function processKioskScan(req, res) {
   );
 
   if (result === 'Granted') {
-    const today = new Date().toISOString().slice(0, 10);
     await query(
       `INSERT INTO attendance_records (user_id, attendance_date, check_in_at, status, location)
-       VALUES ($1, $2, NOW(), 'Present', 'Kiosk')
+       VALUES ($1, CURRENT_DATE, NOW(), 'Present', 'Kiosk')
        ON CONFLICT (user_id, attendance_date)
        DO UPDATE SET check_out_at = NOW(), updated_at = NOW()`,
-      [user.id, today],
+      [user.id],
     );
+
+    broadcastMessage({
+      type: 'attendance:changed',
+      payload: { userId: user.id },
+    });
   }
 
   const log = {

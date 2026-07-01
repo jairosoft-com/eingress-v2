@@ -12,8 +12,28 @@ import {
   UserPlus,
   UsersRound,
 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
-const metrics = [
+import { useAuth } from '../auth/useAuth';
+import { API_BASE_URL } from '../lib/api';
+
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
+
+async function fetchTodaysAttendance(accessToken: string, signal?: AbortSignal) {
+  const response = await fetch(`${API_BASE_URL}/dashboard`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal,
+  });
+  const data = (await response.json().catch(() => null)) as {
+    metrics?: { todays_attendance?: number };
+  } | null;
+
+  return response.ok && typeof data?.metrics?.todays_attendance === 'number'
+    ? data.metrics.todays_attendance
+    : null;
+}
+
+const metricDefinitions = [
   {
     label: 'Total Users',
     value: '1,248',
@@ -24,9 +44,8 @@ const metrics = [
   },
   {
     label: "Today's Attendance",
-    value: '856',
-    delta: '8.3%',
-    trend: 'up',
+    value: '—',
+    description: 'Unique users scanned today',
     Icon: Fingerprint,
     tone: 'blue',
   },
@@ -132,6 +151,70 @@ const quickActions = [
 ];
 
 export function DashboardPage() {
+  const { session } = useAuth();
+  const [todaysAttendance, setTodaysAttendance] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!session?.accessToken) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    void fetchTodaysAttendance(session.accessToken, controller.signal)
+      .then((count) => {
+        if (!controller.signal.aborted && count !== null) {
+          setTodaysAttendance(count);
+        }
+      })
+      .catch(() => {
+        // Keep the loading placeholder when the dashboard cannot be reached.
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken]);
+
+  useEffect(() => {
+    if (!session?.accessToken) {
+      return;
+    }
+
+    const accessToken = session.accessToken;
+    const socket = new WebSocket(WS_BASE_URL);
+    socket.addEventListener('message', (event) => {
+      try {
+        const message = JSON.parse(event.data as string) as { type?: string };
+
+        if (message.type === 'attendance:changed') {
+          void fetchTodaysAttendance(accessToken)
+            .then((count) => {
+              if (count !== null) {
+                setTodaysAttendance(count);
+              }
+            })
+            .catch(() => {
+              // Keep the last known count if a realtime refresh fails.
+            });
+        }
+      } catch {
+        // Ignore realtime messages that are not JSON.
+      }
+    });
+
+    return () => socket.close();
+  }, [session?.accessToken]);
+
+  const metrics = metricDefinitions.map((metric) =>
+    metric.label === "Today's Attendance"
+      ? { ...metric, value: todaysAttendance === null ? '—' : todaysAttendance.toLocaleString() }
+      : metric,
+  );
+  const todayLabel = new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date());
+
   return (
     <section className="dashboard-page" aria-labelledby="dashboard-title">
       <header className="dashboard-header">
@@ -142,12 +225,12 @@ export function DashboardPage() {
 
         <button className="date-button" type="button">
           <CalendarDays size={20} />
-          <span>May 17, 2026 (Today)</span>
+          <span>{todayLabel} (Today)</span>
         </button>
       </header>
 
       <div className="stats-grid">
-        {metrics.map(({ Icon, delta, label, tone, trend, value }) => {
+        {metrics.map(({ Icon, delta, description, label, tone, trend, value }) => {
           const TrendIcon = trend === 'up' ? TrendingUp : TrendingDown;
 
           return (
@@ -158,12 +241,14 @@ export function DashboardPage() {
               <div>
                 <span>{label}</span>
                 <strong>{value}</strong>
-                <small>vs yesterday</small>
+                <small>{description ?? 'vs yesterday'}</small>
               </div>
-              <span className={`stat-delta ${trend}`}>
-                <TrendIcon size={16} />
-                {delta}
-              </span>
+              {delta && trend ? (
+                <span className={`stat-delta ${trend}`}>
+                  <TrendIcon size={16} />
+                  {delta}
+                </span>
+              ) : null}
             </article>
           );
         })}

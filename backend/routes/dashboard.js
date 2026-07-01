@@ -8,17 +8,14 @@ dashboardRouter.use(authMiddleware);
 
 dashboardRouter.get('/', async (req, res, next) => {
   try {
-    const today = new Date().toISOString().slice(0, 10);
-
     const [metrics, recentEvents, devices, attendanceTrend] = await Promise.all([
       query(
         `SELECT
           (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE) AS total_users,
-          (SELECT COUNT(DISTINCT user_id)::int FROM attendance_records WHERE attendance_date = $1 AND status <> 'Absent') AS todays_attendance,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = $1) AS total_access,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = $1 AND result = 'Denied') AS failed_attempts,
+          (SELECT COUNT(DISTINCT user_id)::int FROM attendance_records WHERE attendance_date = CURRENT_DATE AND status <> 'Absent') AS todays_attendance,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE) AS total_access,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Denied') AS failed_attempts,
           (SELECT COUNT(*)::int FROM devices WHERE status = 'Online') AS active_devices`,
-        [today],
       ),
       query(
         `SELECT al.id, al.authentication_method, al.result, al.access_time, al.area, d.device_name,
