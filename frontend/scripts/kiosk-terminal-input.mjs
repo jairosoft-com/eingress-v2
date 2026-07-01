@@ -7,7 +7,7 @@ const publicDir = new URL('../public/', import.meta.url);
 const kioskInputFile = new URL('kiosk-input.json', publicDir);
 let nonce = Date.now();
 
-async function writeKioskInput({ biometricCaptured = false, fingerprintId = null, rfidUid = null } = {}) {
+async function writeKioskInput({ rfidUid = null } = {}) {
   nonce += 1;
 
   await mkdir(publicDir, { recursive: true });
@@ -15,8 +15,6 @@ async function writeKioskInput({ biometricCaptured = false, fingerprintId = null
     kioskInputFile,
     `${JSON.stringify(
       {
-        biometricCaptured,
-        fingerprintId,
         rfidUid,
         nonce,
         updatedAt: new Date().toISOString(),
@@ -31,10 +29,10 @@ await writeKioskInput();
 
 const terminal = createInterface({ input, output });
 
-console.log('Kiosk fingerprint terminal input');
-console.log('Enter a fingerprint ID from the database, such as FP01 or FP-EMP001.');
-console.log('After an unrecognized fingerprint, enter the admin RFID or rfid:<admin-rfid>.');
-console.log('After admin RFID is accepted, enter rfid:<new-user-rfid> to capture the RFID UID.');
+console.log('Kiosk RFID terminal input');
+console.log('Enter an RFID UID from the database, such as RFID-EMP001.');
+console.log('After an unrecognized RFID, enter the admin RFID or rfid:<admin-rfid>.');
+console.log('After admin RFID is accepted, enter rfid:<new-user-rfid> to capture the new RFID UID.');
 console.log('Type q to quit.');
 
 async function handleAnswer(value) {
@@ -45,7 +43,7 @@ async function handleAnswer(value) {
   }
 
   if (!scanValue) {
-    console.log('Invalid input. Enter a fingerprint ID, admin RFID, or rfid:<rfid-uid>.');
+    console.log('Invalid input. Enter an RFID UID or rfid:<rfid-uid>.');
     return true;
   }
 
@@ -62,8 +60,8 @@ async function handleAnswer(value) {
     return true;
   }
 
-  await writeKioskInput({ fingerprintId: scanValue });
-  console.log(`Sent fingerprint ID: ${scanValue}`);
+  await writeKioskInput({ rfidUid: scanValue });
+  console.log(`Sent RFID UID: ${scanValue}`);
 
   return true;
 }

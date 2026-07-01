@@ -19,18 +19,73 @@ import { API_BASE_URL } from '../lib/api';
 
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
-async function fetchTodaysAttendance(accessToken: string, signal?: AbortSignal) {
+type DashboardMetrics = {
+  active_devices?: number;
+  failed_attempts?: number;
+  todays_attendance?: number;
+  total_access?: number;
+  total_users?: number;
+};
+
+type RecentActivityEvent = {
+  area?: string | null;
+  device?: string | null;
+  device_name?: string | null;
+  employee_id?: string | null;
+  employeeId?: string | null;
+  event?: string;
+  event_time?: string;
+  id: number | string;
+  result?: string;
+  status?: string;
+  time?: string;
+  user?: string | null;
+  user_name?: string | null;
+};
+
+type DashboardData = {
+  metrics?: DashboardMetrics;
+  recentEvents?: RecentActivityEvent[];
+};
+
+async function fetchDashboardData(accessToken: string, signal?: AbortSignal) {
   const response = await fetch(`${API_BASE_URL}/dashboard`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     signal,
   });
-  const data = (await response.json().catch(() => null)) as {
-    metrics?: { todays_attendance?: number };
-  } | null;
+  const data = (await response.json().catch(() => null)) as DashboardData | null;
 
-  return response.ok && typeof data?.metrics?.todays_attendance === 'number'
-    ? data.metrics.todays_attendance
-    : null;
+  return response.ok && data ? data : null;
+}
+
+function toAccessEvent(event: RecentActivityEvent) {
+  const status = event.status ?? event.result ?? 'Info';
+  const eventTimestamp = event.time ?? event.event_time ?? new Date().toISOString();
+
+  return {
+    user: event.user ?? event.user_name ?? 'Unknown',
+    id: event.employeeId ?? event.employee_id ?? String(event.id),
+    event: event.event ?? (status === 'Granted' ? 'Access Granted' : 'Access Denied'),
+    area: event.area ?? 'System',
+    device: event.device ?? event.device_name ?? 'EIngress',
+    sortTime: eventTimestamp,
+    time: new Date(eventTimestamp).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    status:
+      status === 'Granted' || status === 'Success'
+        ? 'Success'
+        : status === 'Denied' || status === 'Failed'
+          ? 'Failed'
+          : 'Info',
+  };
+}
+
+function sortAccessEventsByTime(events: ReturnType<typeof toAccessEvent>[]) {
+  return [...events].sort(
+    (eventA, eventB) => new Date(eventB.sortTime).getTime() - new Date(eventA.sortTime).getTime(),
+  );
 }
 
 const metricDefinitions = [
@@ -75,53 +130,7 @@ const metricDefinitions = [
   },
 ];
 
-const accessEvents = [
-  {
-    user: 'Juan Dela Cruz',
-    id: 'EMP-000123',
-    event: 'Access Granted',
-    area: 'Main Entrance',
-    device: 'Door Controller 01',
-    time: '08:21 AM',
-    status: 'Success',
-  },
-  {
-    user: 'Maria Santos',
-    id: 'EMP-000124',
-    event: 'Access Granted',
-    area: 'Side Entrance',
-    device: 'Door Controller 02',
-    time: '08:18 AM',
-    status: 'Success',
-  },
-  {
-    user: 'Peter Reyes',
-    id: 'EMP-000125',
-    event: 'Access Denied',
-    area: 'Main Entrance',
-    device: 'Door Controller 01',
-    time: '08:15 AM',
-    status: 'Failed',
-  },
-  {
-    user: 'Anna Garcia',
-    id: 'EMP-000126',
-    event: 'Access Granted',
-    area: 'Back Entrance',
-    device: 'Door Controller 03',
-    time: '08:12 AM',
-    status: 'Success',
-  },
-  {
-    user: 'John Mercado',
-    id: 'EMP-000127',
-    event: 'Access Granted',
-    area: 'Main Entrance',
-    device: 'Door Controller 01',
-    time: '08:09 AM',
-    status: 'Success',
-  },
-];
+const initialAccessEvents: ReturnType<typeof toAccessEvent>[] = [];
 
 const devices = [
   ['Door Controller 01', 'Main Entrance', 'Online'],
@@ -152,7 +161,8 @@ const quickActions = [
 
 export function DashboardPage() {
   const { session } = useAuth();
-  const [todaysAttendance, setTodaysAttendance] = useState<number | null>(null);
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
+  const [accessEvents, setAccessEvents] = useState(initialAccessEvents);
 
   useEffect(() => {
     if (!session?.accessToken) {
@@ -161,14 +171,15 @@ export function DashboardPage() {
 
     const controller = new AbortController();
 
-    void fetchTodaysAttendance(session.accessToken, controller.signal)
-      .then((count) => {
-        if (!controller.signal.aborted && count !== null) {
-          setTodaysAttendance(count);
+    void fetchDashboardData(session.accessToken, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted && data) {
+          setDashboardMetrics(data.metrics ?? null);
+          setAccessEvents(sortAccessEventsByTime((data.recentEvents ?? []).map(toAccessEvent)));
         }
       })
       .catch(() => {
-        // Keep the loading placeholder when the dashboard cannot be reached.
+        // Keep placeholders when the dashboard cannot be reached.
       });
 
     return () => controller.abort();
@@ -179,22 +190,32 @@ export function DashboardPage() {
       return;
     }
 
-    const accessToken = session.accessToken;
     const socket = new WebSocket(WS_BASE_URL);
     socket.addEventListener('message', (event) => {
       try {
-        const message = JSON.parse(event.data as string) as { type?: string };
+        const message = JSON.parse(event.data as string) as {
+          payload?: RecentActivityEvent;
+          type?: string;
+        };
 
         if (message.type === 'attendance:changed') {
-          void fetchTodaysAttendance(accessToken)
-            .then((count) => {
-              if (count !== null) {
-                setTodaysAttendance(count);
+          void fetchDashboardData(session.accessToken)
+            .then((data) => {
+              if (data) {
+                setDashboardMetrics(data.metrics ?? null);
               }
             })
             .catch(() => {
-              // Keep the last known count if a realtime refresh fails.
+              // Keep the last known metrics if a realtime refresh fails.
             });
+        }
+
+        const activityEvent = message.payload;
+
+        if (message.type === 'activity:event' && activityEvent) {
+          setAccessEvents((currentEvents) =>
+            sortAccessEventsByTime([toAccessEvent(activityEvent), ...currentEvents]).slice(0, 8),
+          );
         }
       } catch {
         // Ignore realtime messages that are not JSON.
@@ -204,6 +225,7 @@ export function DashboardPage() {
     return () => socket.close();
   }, [session?.accessToken]);
 
+  const todaysAttendance = dashboardMetrics?.todays_attendance ?? null;
   const metrics = metricDefinitions.map((metric) =>
     metric.label === "Today's Attendance"
       ? { ...metric, value: todaysAttendance === null ? '—' : todaysAttendance.toLocaleString() }
