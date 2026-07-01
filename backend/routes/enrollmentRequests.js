@@ -7,6 +7,7 @@ import {
 import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
+import { broadcastActivityEvent } from '../activityEvents.js';
 
 export const enrollmentRequestsRouter = express.Router();
 
@@ -83,7 +84,11 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
        FROM (
          SELECT rfid_uid FROM users WHERE rfid_uid IS NOT NULL
          UNION ALL
+<<<<<<< HEAD
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
+=======
          SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL
+>>>>>>> origin/qa
        ) existing_rfids
        WHERE LOWER(TRIM(rfid_uid)) = LOWER(TRIM($1))
        LIMIT 1`,
@@ -128,6 +133,15 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
         fullName: result.rows[0].full_name,
         requestCode: result.rows[0].request_code,
       },
+    });
+    broadcastActivityEvent({
+      user: result.rows[0].full_name,
+      employeeId: result.rows[0].employee_id,
+      event: 'Enrollment Submitted',
+      area: 'Registration',
+      device: 'Public Form',
+      status: 'Info',
+      time: result.rows[0].submitted_at,
     });
 
     res.status(201).json(result.rows[0]);
@@ -180,6 +194,15 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
 
     await client.query('COMMIT');
 
+    broadcastActivityEvent({
+      user: result.rows[0].full_name,
+      employeeId: result.rows[0].employee_id,
+      event: 'Enrollment Request Created',
+      area: 'Enrollment',
+      device: 'Admin Portal',
+      status: 'Info',
+      time: result.rows[0].submitted_at,
+    });
     res.status(201).json(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
@@ -261,6 +284,35 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
 
     await client.query('COMMIT');
 
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        req.user.adminId || null,
+        `${status} Enrollment`,
+        'Enrollment',
+        `${status} ${request.request_code} for ${request.full_name}`,
+        req.ip,
+      ],
+    );
+    broadcastActivityEvent({
+      user: request.full_name,
+      employeeId: request.employee_id,
+      event: `Enrollment ${status}`,
+      area: 'Enrollment',
+      device: 'Admin Portal',
+      status: status === 'Approved' ? 'Success' : status === 'Rejected' ? 'Failed' : 'Info',
+      time: result.rows[0].reviewed_at || result.rows[0].updated_at,
+    });
+    broadcastMessage({
+      type: 'enrollment:reviewed',
+      payload: {
+        employeeId: request.employee_id,
+        fullName: request.full_name,
+        requestCode: request.request_code,
+        status,
+      },
+    });
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});

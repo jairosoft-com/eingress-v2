@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { broadcastActivityEvent } from '../activityEvents.js';
 
 export const usersRouter = express.Router();
 usersRouter.use(authMiddleware);
@@ -44,6 +45,21 @@ usersRouter.post('/', async (req, res) => {
        RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
       [employeeId, fullName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive],
     );
+    const user = result.rows[0];
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.user.adminId || null, 'Added User', 'User Management', `Added ${user.employee_id} (${user.full_name})`, req.ip],
+    );
+    broadcastActivityEvent({
+      user: user.full_name,
+      employeeId: user.employee_id,
+      event: 'User Added',
+      area: 'User Management',
+      device: 'Admin Portal',
+      status: 'Info',
+      time: user.created_at,
+    });
     res.status(201).json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -80,6 +96,21 @@ usersRouter.patch('/:id', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const user = result.rows[0];
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.user.adminId || null, 'Updated User', 'User Management', `Updated ${user.employee_id} (${user.full_name})`, req.ip],
+    );
+    broadcastActivityEvent({
+      user: user.full_name,
+      employeeId: user.employee_id,
+      event: 'User Updated',
+      area: 'User Management',
+      device: 'Admin Portal',
+      status: 'Info',
+      time: user.updated_at,
+    });
     res.json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -109,6 +140,22 @@ usersRouter.patch('/:id/status', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const user = result.rows[0];
+    const action = isActive ? 'Activated User' : 'Disabled User';
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.user.adminId || null, action, 'User Management', `${action} ${user.employee_id} (${user.full_name})`, req.ip],
+    );
+    broadcastActivityEvent({
+      user: user.full_name,
+      employeeId: user.employee_id,
+      event: isActive ? 'User Activated' : 'User Disabled',
+      area: 'User Management',
+      device: 'Admin Portal',
+      status: isActive ? 'Success' : 'Failed',
+      time: user.updated_at,
+    });
     res.json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -138,6 +185,21 @@ usersRouter.patch('/:id/archive', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const user = result.rows[0];
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.user.adminId || null, isArchived ? 'Archived User' : 'Restored User', 'User Management', `${isArchived ? 'Archived' : 'Restored'} ${user.employee_id} (${user.full_name})`, req.ip],
+    );
+    broadcastActivityEvent({
+      user: user.full_name,
+      employeeId: user.employee_id,
+      event: isArchived ? 'User Archived' : 'User Restored',
+      area: 'User Management',
+      device: 'Admin Portal',
+      status: isArchived ? 'Failed' : 'Success',
+      time: user.updated_at,
+    });
     res.json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });

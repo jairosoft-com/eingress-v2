@@ -3,14 +3,15 @@ import { setPendingEnrollmentRfidUid } from '../enrollmentSession.js';
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
+import { broadcastActivityEvent } from '../activityEvents.js';
 
 export const kioskRouter = express.Router();
 
 async function processKioskScan(req, res) {
-  const { userId, employeeId, rfidUid, fingerprintId, authenticationMethod, deviceId } = req.body;
+  const { userId, employeeId, rfidUid, authenticationMethod, deviceId } = req.body;
 
-  if (!userId && !employeeId && !rfidUid && !fingerprintId) {
-    return res.status(400).json({ error: 'A userId, employeeId, rfidUid, or fingerprintId is required' });
+  if (!userId && !employeeId && !rfidUid) {
+    return res.status(400).json({ error: 'A userId, employeeId, or rfidUid is required' });
   }
 
   const params = [];
@@ -31,13 +32,8 @@ async function processKioskScan(req, res) {
     predicates.push(`rfid_uid = $${params.length}`);
   }
 
-  if (fingerprintId) {
-    params.push(fingerprintId);
-    predicates.push(`fingerprint_id = $${params.length}`);
-  }
-
   const userResult = await query(
-    `SELECT id, employee_id, full_name, department, is_active FROM users WHERE ${predicates.join(' OR ')} AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
+    `SELECT id, employee_id, full_name, department, is_active FROM users WHERE (${predicates.join(' OR ')}) AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
     params,
   );
 
@@ -47,12 +43,20 @@ async function processKioskScan(req, res) {
        VALUES ($1, $2, $3, $4)`,
       [deviceId || null, authenticationMethod || 'Unknown', 'Denied', 'Kiosk'],
     );
+    broadcastActivityEvent({
+      user: 'Unknown RFID',
+      employeeId: rfidUid || '',
+      event: 'Access Denied',
+      area: 'Kiosk',
+      device: 'RFID Reader',
+      status: 'Failed',
+    });
     return res.status(404).json({ error: 'User not found' });
   }
 
   const user = userResult.rows[0];
   const result = user.is_active ? 'Granted' : 'Denied';
-  const method = authenticationMethod || (fingerprintId ? 'Fingerprint' : 'RFID');
+  const method = authenticationMethod || 'RFID';
 
   const logResult = await query(
     `INSERT INTO access_logs (user_id, device_id, authentication_method, result, area)
@@ -62,14 +66,18 @@ async function processKioskScan(req, res) {
   );
 
   if (result === 'Granted') {
-    const today = new Date().toISOString().slice(0, 10);
     await query(
       `INSERT INTO attendance_records (user_id, attendance_date, check_in_at, status, location)
-       VALUES ($1, $2, NOW(), 'Present', 'Kiosk')
+       VALUES ($1, CURRENT_DATE, NOW(), 'Present', 'Kiosk')
        ON CONFLICT (user_id, attendance_date)
        DO UPDATE SET check_out_at = NOW(), updated_at = NOW()`,
-      [user.id, today],
+      [user.id],
     );
+
+    broadcastMessage({
+      type: 'attendance:changed',
+      payload: { userId: user.id },
+    });
   }
 
   const log = {
@@ -84,18 +92,18 @@ async function processKioskScan(req, res) {
   };
 
   broadcastMessage({ type: 'access-log', payload: log });
+  broadcastActivityEvent({
+    id: log.id,
+    user: log.userName,
+    employeeId: log.employeeId,
+    event: result === 'Granted' ? 'Access Granted' : 'Access Denied',
+    area: 'Kiosk',
+    device: 'RFID Reader',
+    status: result === 'Granted' ? 'Success' : 'Failed',
+    time: log.accessTime,
+  });
   res.json(log);
 }
-
-kioskRouter.post('/fingerprint-scan', async (req, res) => {
-  req.body = {
-    fingerprintId: req.body.fingerprintId,
-    authenticationMethod: 'Fingerprint',
-    deviceId: req.body.deviceId,
-  };
-
-  return processKioskScan(req, res);
-});
 
 kioskRouter.post('/rfid-scan', async (req, res) => {
   req.body = {
@@ -134,6 +142,13 @@ kioskRouter.post('/admin-rfid-scan', async (req, res, next) => {
        VALUES ($1, $2, $3, $4, $5)`,
       [admin.id, 'Authorize Enrollment', 'Kiosk', 'Admin RFID authorized kiosk enrollment', req.ip],
     );
+    broadcastActivityEvent({
+      user: admin.username,
+      event: 'Admin RFID Authorized Enrollment',
+      area: 'Kiosk',
+      device: 'RFID Reader',
+      status: 'Success',
+    });
 
     return res.json({
       authorized: true,
@@ -145,8 +160,8 @@ kioskRouter.post('/admin-rfid-scan', async (req, res, next) => {
   }
 });
 
-kioskRouter.post('/enrollment-fingerprint', async (req, res, next) => {
-  const rfidUid = String(req.body.fingerprintNumber || req.body.rfidUid || '').trim();
+kioskRouter.post('/enrollment-rfid', async (req, res, next) => {
+  const rfidUid = String(req.body.rfidUid || '').trim();
 
   if (!rfidUid) {
     return res.status(400).json({ error: 'rfidUid is required' });
@@ -158,7 +173,7 @@ kioskRouter.post('/enrollment-fingerprint', async (req, res, next) => {
        FROM (
          SELECT rfid_uid FROM users WHERE rfid_uid IS NOT NULL
          UNION ALL
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
        ) existing_rfids
        WHERE LOWER(TRIM(rfid_uid)) = LOWER(TRIM($1))
        LIMIT 1`,
@@ -177,6 +192,14 @@ kioskRouter.post('/enrollment-fingerprint', async (req, res, next) => {
     broadcastMessage({
       type: 'enrollment:rfid-captured',
       payload: { rfidUid },
+    });
+    broadcastActivityEvent({
+      user: 'Pending Enrollment',
+      employeeId: rfidUid,
+      event: 'RFID Captured for Enrollment',
+      area: 'Kiosk',
+      device: 'RFID Reader',
+      status: 'Info',
     });
 
     return res.json({ rfidUid });
