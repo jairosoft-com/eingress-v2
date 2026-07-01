@@ -2389,7 +2389,8 @@ td small {
 .kiosk-brand small,
 .kiosk-clock small {
   color: #b9c7dd;
-  font-size: 0.66rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .kiosk-logo {
@@ -2407,8 +2408,10 @@ td small {
 }
 
 .kiosk-clock strong {
-  margin-bottom: 4px;
-  font-size: 0.9rem;
+  margin-bottom: 5px;
+  font-size: 1.16rem;
+  font-weight: 900;
+  line-height: 1.1;
 }
 
 .kiosk-door-alert {
@@ -3070,6 +3073,14 @@ td small {
   .kiosk-body {
     min-height: 470px;
     padding: 0 22px 34px;
+  }
+
+  .kiosk-clock strong {
+    font-size: 1.04rem;
+  }
+
+  .kiosk-clock small {
+    font-size: 0.72rem;
   }
 
   .admin-sidebar {

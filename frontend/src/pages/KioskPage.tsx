@@ -1,4 +1,4 @@
-import { Check, CircleUserRound, Fingerprint, IdCard, Info, Plus, X } from 'lucide-react';
+import { Check, CircleUserRound, IdCard, Info, Plus, X } from 'lucide-react';
 import QRCode from 'qrcode';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -8,7 +8,7 @@ type KioskState =
   | 'recognized'
   | 'unregistered'
   | 'enrollmentIntro'
-  | 'biometricEnrollment'
+  | 'rfidEnrollment'
   | 'enrollment';
 type RecognizedUser = {
   department: string;
@@ -16,9 +16,7 @@ type RecognizedUser = {
   name: string;
 };
 type KioskTerminalInput = {
-  biometricCaptured?: boolean;
-  fingerprintId: string | null;
-  rfidUid?: string | null;
+  rfidUid: string | null;
   nonce: number;
 };
 type KioskScanResponse = {
@@ -31,7 +29,7 @@ type AdminRfidResponse = {
   adminName: string;
   authorized: boolean;
 };
-type EnrollmentFingerprintResponse = {
+type EnrollmentRfidResponse = {
   rfidUid: string;
 };
 type RealtimeMessage = {
@@ -65,6 +63,15 @@ function getApiBaseUrl() {
 const API_BASE_URL = getApiBaseUrl();
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 const QR_CODE_SIZE = 260;
+const kioskTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: 'numeric',
+  minute: '2-digit',
+});
+const kioskDateFormatter = new Intl.DateTimeFormat(undefined, {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
 const fallbackRecognizedUser = {
   name: 'Juan Dela Cruz',
   employeeId: 'EMP-000123',
@@ -115,7 +122,7 @@ const modeCopy = {
   unregistered: {
     eyebrow: 'Unregistered',
     title: 'Unrecognized',
-    description: "We couldn't verify your fingerprint. Please contact an administrator.",
+    description: "We couldn't verify your RFID. Please contact an administrator.",
   },
   enrollment: {
     eyebrow: 'Enrollment Mode',
@@ -127,17 +134,18 @@ const modeCopy = {
     title: 'Register New User',
     description: 'Follow the steps below to complete your registration.',
   },
-  biometricEnrollment: {
-    eyebrow: 'Biometric Enrollment',
-    title: 'Scan New Fingerprint',
-    description: 'Admin authorized registration. Scan the user fingerprint to continue.',
+  rfidEnrollment: {
+    eyebrow: 'RFID Enrollment',
+    title: 'Place the New RFID',
+    description: 'Admin authorized registration. Place the new RFID on the scanner.',
   },
 };
 
 export function KioskPage() {
   const [kioskState, setKioskState] = useState<KioskState>('idle');
   const [recognizedUser, setRecognizedUser] = useState<RecognizedUser>(fallbackRecognizedUser);
-  const [, setEnrollmentFingerprintId] = useState('');
+  const [, setEnrollmentRfidUid] = useState('');
+  const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
   const [doorAlert, setDoorAlert] = useState('');
   const [recognizedCountdown, setRecognizedCountdown] = useState(5);
   const [enrollmentIntroCountdown, setEnrollmentIntroCountdown] = useState(5);
@@ -146,11 +154,21 @@ export function KioskPage() {
   const adminRfidAcceptedNonce = useRef(0);
   const isUnrecognizedUser = kioskState === 'unregistered';
   const isEnrollmentIntro = kioskState === 'enrollmentIntro';
-  const isBiometricEnrollment = kioskState === 'biometricEnrollment';
+  const isRfidEnrollment = kioskState === 'rfidEnrollment';
+  const currentTimeLabel = kioskTimeFormatter.format(currentDateTime);
+  const currentDateLabel = kioskDateFormatter.format(currentDateTime);
 
   const enterUnregisteredState = useCallback(() => {
     setUnregisteredCountdown(8);
     setKioskState('unregistered');
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setCurrentDateTime(new Date());
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   const scanRfid = useCallback(
@@ -165,47 +183,6 @@ export function KioskPage() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ rfidUid }),
-        })
-          .then(async (response) => {
-            const data = (await response.json().catch(() => null)) as KioskScanResponse | null;
-            const isRegistered = response.ok && data?.result === 'Granted';
-
-            if (isRegistered) {
-              setRecognizedUser({
-                department: data.department ?? 'Unassigned',
-                employeeId: data.employeeId,
-                name: data.userName,
-              });
-              setDoorAlert('The door is unlocked!');
-              setRecognizedCountdown(5);
-              setKioskState('recognized');
-              return;
-            }
-
-            setDoorAlert('Door locked');
-            enterUnregisteredState();
-          })
-          .catch(() => {
-            setDoorAlert('Door locked');
-            enterUnregisteredState();
-          });
-      }, 1200);
-    },
-    [enterUnregisteredState],
-  );
-
-  const scanFingerprint = useCallback(
-    (fingerprintId: string) => {
-      setKioskState('processing');
-      setDoorAlert('');
-
-      window.setTimeout(() => {
-        void fetch(`${API_BASE_URL}/kiosk/fingerprint-scan`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ fingerprintId }),
         })
           .then(async (response) => {
             const data = (await response.json().catch(() => null)) as KioskScanResponse | null;
@@ -270,13 +247,13 @@ export function KioskPage() {
     [isUnrecognizedUser],
   );
 
-  const registerEnrollmentFingerprint = useCallback(
+  const registerEnrollmentRfid = useCallback(
     (rfidUid: string) => {
-      if (!isBiometricEnrollment) {
+      if (!isRfidEnrollment) {
         return;
       }
 
-      void fetch(`${API_BASE_URL}/kiosk/enrollment-fingerprint`, {
+      void fetch(`${API_BASE_URL}/kiosk/enrollment-rfid`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -285,7 +262,7 @@ export function KioskPage() {
       })
         .then(async (response) => {
           const data = (await response.json().catch(() => null)) as
-            | EnrollmentFingerprintResponse
+            | EnrollmentRfidResponse
             | { error?: string }
             | null;
           const capturedRfidUid = data && 'rfidUid' in data ? data.rfidUid : null;
@@ -297,7 +274,7 @@ export function KioskPage() {
             return;
           }
 
-          setEnrollmentFingerprintId(capturedRfidUid);
+          setEnrollmentRfidUid(capturedRfidUid);
           setDoorAlert('');
           setKioskState('enrollment');
         })
@@ -305,14 +282,14 @@ export function KioskPage() {
           setDoorAlert('Unable to capture RFID.');
         });
     },
-    [isBiometricEnrollment],
+    [isRfidEnrollment],
   );
 
-  const capturePlaceholderBiometrics = useCallback(
+  const captureEnrollmentRfid = useCallback(
     (rfidUid: string) => {
-      registerEnrollmentFingerprint(rfidUid);
+      registerEnrollmentRfid(rfidUid);
     },
-    [registerEnrollmentFingerprint],
+    [registerEnrollmentRfid],
   );
 
   useEffect(() => {
@@ -326,13 +303,7 @@ export function KioskPage() {
           return response.json() as Promise<KioskTerminalInput>;
         })
         .then((input) => {
-          const fingerprintId = input?.fingerprintId?.trim();
           const rfidUid = input?.rfidUid?.trim();
-          const enrollmentRfidUid =
-            rfidUid || (isBiometricEnrollment || isEnrollmentIntro ? fingerprintId : undefined);
-          const biometricCaptured =
-            input?.biometricCaptured === true ||
-            (isBiometricEnrollment && Boolean(enrollmentRfidUid));
 
           if (!input || input.nonce <= lastProcessedNonce.current) {
             return;
@@ -344,37 +315,26 @@ export function KioskPage() {
 
           lastProcessedNonce.current = input.nonce;
 
-          if (
-            isBiometricEnrollment &&
-            enrollmentRfidUid &&
-            input.nonce > adminRfidAcceptedNonce.current
-          ) {
-            capturePlaceholderBiometrics(enrollmentRfidUid);
+          if (isRfidEnrollment && rfidUid && input.nonce > adminRfidAcceptedNonce.current) {
+            captureEnrollmentRfid(rfidUid);
             return;
           }
 
-          // Only treat an admin RFID when we're in the unregistered state and
-          // a real RFID UID was provided. Do NOT treat a fingerprint scan as
-          // an admin RFID candidate — that caused accidental enrollment flows.
           if (isUnrecognizedUser) {
-            const adminRfidCandidate = rfidUid || (!biometricCaptured ? fingerprintId : null);
-
-            if (adminRfidCandidate) {
-              scanAdminRfid(adminRfidCandidate, input.nonce);
+            if (rfidUid) {
+              scanAdminRfid(rfidUid, input.nonce);
             }
 
             return;
           }
 
-          if (isBiometricEnrollment) {
+          if (isRfidEnrollment) {
             setDoorAlert('Place the new RFID on the scanner.');
             return;
           }
 
           if (rfidUid) {
             scanRfid(rfidUid);
-          } else if (fingerprintId) {
-            scanFingerprint(fingerprintId);
           }
         })
         .catch(() => {
@@ -384,12 +344,11 @@ export function KioskPage() {
 
     return () => window.clearInterval(intervalId);
   }, [
-    capturePlaceholderBiometrics,
+    captureEnrollmentRfid,
     isEnrollmentIntro,
-    isBiometricEnrollment,
+    isRfidEnrollment,
     isUnrecognizedUser,
     scanAdminRfid,
-    scanFingerprint,
     scanRfid,
   ]);
 
@@ -409,7 +368,7 @@ export function KioskPage() {
             return;
           }
 
-          setEnrollmentFingerprintId('');
+          setEnrollmentRfidUid('');
           setKioskState('idle');
         } catch {
           // Ignore realtime messages that are not JSON.
@@ -487,7 +446,7 @@ export function KioskPage() {
     }, 1000);
 
     const timeoutId = window.setTimeout(() => {
-      setKioskState('biometricEnrollment');
+      setKioskState('rfidEnrollment');
     }, 5000);
 
     return () => {
@@ -514,7 +473,7 @@ export function KioskPage() {
         <header className="kiosk-header">
           <div className="kiosk-brand">
             <span className="kiosk-logo" aria-hidden="true">
-              <Fingerprint size={20} />
+              <IdCard size={20} />
             </span>
             <span>
               <strong>EINGRESS</strong>
@@ -523,8 +482,8 @@ export function KioskPage() {
           </div>
 
           <div className="kiosk-clock" aria-label="Current kiosk time">
-            <strong>10:30 AM</strong>
-            <small>May 17, 2026</small>
+            <strong>{currentTimeLabel}</strong>
+            <small>{currentDateLabel}</small>
           </div>
         </header>
 
@@ -535,14 +494,13 @@ export function KioskPage() {
             <UnregisteredState countdown={unregisteredCountdown} />
           ) : isEnrollmentIntro ? (
             <EnrollmentIntroState countdown={enrollmentIntroCountdown} />
-          ) : isBiometricEnrollment ? (
-            <BiometricEnrollmentState />
+          ) : isRfidEnrollment ? (
+            <RfidEnrollmentState />
           ) : kioskState === 'enrollment' ? (
             <EnrollmentState />
           ) : (
             <FingerprintPrompt
               description={modeCopy[kioskState].description}
-              icon={kioskState === 'idle' ? 'id' : 'fingerprint'}
               isProcessing={kioskState === 'processing'}
               title={modeCopy[kioskState].title}
             />
@@ -563,25 +521,19 @@ export function KioskPage() {
 
 function FingerprintPrompt({
   description,
-  icon,
   isProcessing,
   title,
 }: {
   description: string;
-  icon: 'fingerprint' | 'id';
   isProcessing: boolean;
   title: string;
 }) {
   return (
     <section className="fingerprint-prompt" aria-live="polite">
       <div className={isProcessing ? 'fingerprint-orb processing' : 'fingerprint-orb'}>
-        {icon === 'id' ? (
-          <span className="id-tap-symbol" aria-hidden="true">
-            <span />
-          </span>
-        ) : (
-          <Fingerprint size={78} strokeWidth={1.7} />
-        )}
+        <span className="id-tap-symbol" aria-hidden="true">
+          <span />
+        </span>
       </div>
       <h2>{title}</h2>
       <p>{description}</p>
@@ -696,10 +648,10 @@ function EnrollmentIntroState({ countdown }: { countdown: number }) {
       <div
         className="return-timer enrollment-intro-timer"
         role="timer"
-        aria-label={`Starting biometric enrollment in ${countdown} seconds`}
+        aria-label={`Starting RFID enrollment in ${countdown} seconds`}
       >
         <span>{countdown}</span>
-        <small>Starting biometric enrollment in seconds</small>
+        <small>Starting RFID enrollment in seconds</small>
       </div>
 
       <div className="enrollment-help">
@@ -710,7 +662,7 @@ function EnrollmentIntroState({ countdown }: { countdown: number }) {
   );
 }
 
-function BiometricEnrollmentState() {
+function RfidEnrollmentState() {
   return (
     <section className="fingerprint-prompt" aria-live="polite">
       <div className="fingerprint-orb">
