@@ -20,10 +20,12 @@ type KioskTerminalInput = {
   nonce: number;
 };
 type KioskScanResponse = {
-  department: string | null;
-  employeeId: string;
-  result: 'Granted' | 'Denied';
-  userName: string;
+  department?: string | null;
+  employeeId?: string;
+  failedAttempts?: number;
+  result?: 'Granted' | 'Denied';
+  totalAccess?: number;
+  userName?: string;
 };
 type AdminRfidResponse = {
   adminName: string;
@@ -147,6 +149,7 @@ export function KioskPage() {
   const [, setEnrollmentRfidUid] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
   const [doorAlert, setDoorAlert] = useState('');
+  const [totalAccessCount, setTotalAccessCount] = useState<number | null>(null);
   const [recognizedCountdown, setRecognizedCountdown] = useState(5);
   const [enrollmentIntroCountdown, setEnrollmentIntroCountdown] = useState(5);
   const [unregisteredCountdown, setUnregisteredCountdown] = useState(8);
@@ -188,11 +191,15 @@ export function KioskPage() {
             const data = (await response.json().catch(() => null)) as KioskScanResponse | null;
             const isRegistered = response.ok && data?.result === 'Granted';
 
+            if (typeof data?.totalAccess === 'number') {
+              setTotalAccessCount(data.totalAccess);
+            }
+
             if (isRegistered) {
               setRecognizedUser({
                 department: data.department ?? 'Unassigned',
-                employeeId: data.employeeId,
-                name: data.userName,
+                employeeId: data.employeeId ?? 'Unknown',
+                name: data.userName ?? 'Recognized User',
               });
               setDoorAlert('The door is unlocked!');
               setRecognizedCountdown(5);
@@ -489,9 +496,16 @@ export function KioskPage() {
 
         <div className="kiosk-body">
           {kioskState === 'recognized' ? (
-            <RecognizedState countdown={recognizedCountdown} user={recognizedUser} />
+            <RecognizedState
+              countdown={recognizedCountdown}
+              totalAccessCount={totalAccessCount}
+              user={recognizedUser}
+            />
           ) : isUnrecognizedUser ? (
-            <UnregisteredState countdown={unregisteredCountdown} />
+            <UnregisteredState
+              countdown={unregisteredCountdown}
+              totalAccessCount={totalAccessCount}
+            />
           ) : isEnrollmentIntro ? (
             <EnrollmentIntroState countdown={enrollmentIntroCountdown} />
           ) : isRfidEnrollment ? (
@@ -542,7 +556,24 @@ function FingerprintPrompt({
   );
 }
 
-function RecognizedState({ countdown, user }: { countdown: number; user: RecognizedUser }) {
+function AccessCountCard({ totalAccessCount }: { totalAccessCount: number | null }) {
+  return (
+    <div className="access-count-card" aria-label="Total access count today">
+      <span>Total Access Today</span>
+      <strong>{totalAccessCount === null ? '-' : totalAccessCount.toLocaleString()}</strong>
+    </div>
+  );
+}
+
+function RecognizedState({
+  countdown,
+  totalAccessCount,
+  user,
+}: {
+  countdown: number;
+  totalAccessCount: number | null;
+  user: RecognizedUser;
+}) {
   return (
     <section className="recognized-layout" aria-live="polite">
       <div className="kiosk-portrait">
@@ -569,6 +600,8 @@ function RecognizedState({ countdown, user }: { countdown: number; user: Recogni
           </div>
         </dl>
 
+        <AccessCountCard totalAccessCount={totalAccessCount} />
+
         <div className="attendance-success">
           <Check size={20} />
           <span>
@@ -590,7 +623,13 @@ function RecognizedState({ countdown, user }: { countdown: number; user: Recogni
   );
 }
 
-function UnregisteredState({ countdown }: { countdown: number }) {
+function UnregisteredState({
+  countdown,
+  totalAccessCount,
+}: {
+  countdown: number;
+  totalAccessCount: number | null;
+}) {
   return (
     <section className="unregistered-layout" aria-live="polite">
       <div className="unregistered-symbol">
@@ -604,6 +643,8 @@ function UnregisteredState({ countdown }: { countdown: number }) {
         <h2>Unrecognized</h2>
         <p>We couldn't verify your RFID. Scan an admin RFID to open registration.</p>
       </div>
+
+      <AccessCountCard totalAccessCount={totalAccessCount} />
 
       <div className="admin-rfid-card">
         <IdCard size={26} />

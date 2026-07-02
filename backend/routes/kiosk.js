@@ -7,6 +7,19 @@ import { broadcastActivityEvent } from '../activityEvents.js';
 
 export const kioskRouter = express.Router();
 
+async function getTodaysAccessMetrics() {
+  const result = await query(
+    `SELECT
+       COUNT(*)::int AS total_access,
+       COUNT(*) FILTER (WHERE result = 'Granted')::int AS successful_attempts,
+       COUNT(*) FILTER (WHERE result = 'Denied')::int AS failed_attempts
+     FROM access_logs
+     WHERE access_time::date = CURRENT_DATE`,
+  );
+
+  return result.rows[0];
+}
+
 async function processKioskScan(req, res) {
   const { userId, employeeId, rfidUid, authenticationMethod, deviceId } = req.body;
 
@@ -38,20 +51,34 @@ async function processKioskScan(req, res) {
   );
 
   if (userResult.rowCount === 0) {
-    await query(
+    const logResult = await query(
       `INSERT INTO access_logs (device_id, authentication_method, result, area)
-       VALUES ($1, $2, $3, $4)`,
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, access_time`,
       [deviceId || null, authenticationMethod || 'Unknown', 'Denied', 'Kiosk'],
     );
+    const accessMetrics = await getTodaysAccessMetrics();
+
+    broadcastMessage({
+      type: 'dashboard:metrics-changed',
+      payload: accessMetrics,
+    });
     broadcastActivityEvent({
+      id: logResult.rows[0].id,
       user: 'Unknown RFID',
       employeeId: rfidUid || '',
       event: 'Access Denied',
       area: 'Kiosk',
       device: 'RFID Reader',
       status: 'Failed',
+      time: logResult.rows[0].access_time,
     });
-    return res.status(404).json({ error: 'User not found' });
+    return res.status(404).json({
+      error: 'User not found',
+      failedAttempts: accessMetrics.failed_attempts,
+      successfulAttempts: accessMetrics.successful_attempts,
+      totalAccess: accessMetrics.total_access,
+    });
   }
 
   const user = userResult.rows[0];
@@ -80,6 +107,8 @@ async function processKioskScan(req, res) {
     });
   }
 
+  const accessMetrics = await getTodaysAccessMetrics();
+
   const log = {
     id: logResult.rows[0].id,
     userId: user.id,
@@ -89,8 +118,15 @@ async function processKioskScan(req, res) {
     authenticationMethod: method,
     result,
     accessTime: logResult.rows[0].access_time,
+    failedAttempts: accessMetrics.failed_attempts,
+    successfulAttempts: accessMetrics.successful_attempts,
+    totalAccess: accessMetrics.total_access,
   };
 
+  broadcastMessage({
+    type: 'dashboard:metrics-changed',
+    payload: accessMetrics,
+  });
   broadcastMessage({ type: 'access-log', payload: log });
   broadcastActivityEvent({
     id: log.id,
@@ -210,3 +246,4 @@ kioskRouter.post('/enrollment-rfid', async (req, res, next) => {
 
 kioskRouter.use(authMiddleware);
 kioskRouter.post('/scan', processKioskScan);
+
