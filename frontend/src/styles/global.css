@@ -2624,6 +2624,7 @@ td small {
 
 .user-detail-card,
 .attendance-success,
+.access-count-card,
 .admin-rfid-card,
 .enrollment-help {
   border: 1px solid #213b61;
@@ -2655,6 +2656,31 @@ td small {
 .user-detail-card dd {
   margin: 0;
   font-weight: 800;
+}
+
+.access-count-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 16px 18px;
+}
+
+.access-count-card span,
+.access-count-card strong {
+  display: block;
+}
+
+.access-count-card span {
+  color: #aebbd0;
+  font-weight: 800;
+}
+
+.access-count-card strong {
+  color: #ffffff;
+  font-size: 1.65rem;
+  line-height: 1;
 }
 
 .attendance-success {

@@ -194,9 +194,23 @@ export function DashboardPage() {
     socket.addEventListener('message', (event) => {
       try {
         const message = JSON.parse(event.data as string) as {
-          payload?: RecentActivityEvent;
+          payload?: DashboardMetrics | RecentActivityEvent;
           type?: string;
         };
+
+        if (message.type === 'dashboard:metrics-changed' && message.payload) {
+          const metricsPayload = message.payload as DashboardMetrics;
+
+          setDashboardMetrics((currentMetrics) => ({
+            ...(currentMetrics ?? {}),
+            active_devices: metricsPayload.active_devices ?? currentMetrics?.active_devices,
+            failed_attempts: metricsPayload.failed_attempts ?? currentMetrics?.failed_attempts,
+            todays_attendance:
+              metricsPayload.todays_attendance ?? currentMetrics?.todays_attendance,
+            total_access: metricsPayload.total_access ?? currentMetrics?.total_access,
+            total_users: metricsPayload.total_users ?? currentMetrics?.total_users,
+          }));
+        }
 
         if (message.type === 'attendance:changed') {
           void fetchDashboardData(session.accessToken)
@@ -210,7 +224,7 @@ export function DashboardPage() {
             });
         }
 
-        const activityEvent = message.payload;
+        const activityEvent = message.payload as RecentActivityEvent | undefined;
 
         if (message.type === 'activity:event' && activityEvent) {
           setAccessEvents((currentEvents) =>
@@ -225,12 +239,21 @@ export function DashboardPage() {
     return () => socket.close();
   }, [session?.accessToken]);
 
-  const todaysAttendance = dashboardMetrics?.todays_attendance ?? null;
-  const metrics = metricDefinitions.map((metric) =>
-    metric.label === "Today's Attendance"
-      ? { ...metric, value: todaysAttendance === null ? '—' : todaysAttendance.toLocaleString() }
-      : metric,
-  );
+  const metricValues: Record<string, number | null> = {
+    'Active Devices': dashboardMetrics?.active_devices ?? null,
+    'Failed Attempts': dashboardMetrics?.failed_attempts ?? null,
+    "Today's Attendance": dashboardMetrics?.todays_attendance ?? null,
+    'Total Access': dashboardMetrics?.total_access ?? null,
+    'Total Users': dashboardMetrics?.total_users ?? null,
+  };
+  const metrics = metricDefinitions.map((metric) => {
+    const liveValue = metricValues[metric.label];
+
+    return {
+      ...metric,
+      value: liveValue === null ? '-' : liveValue.toLocaleString(),
+    };
+  });
   const todayLabel = new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
     month: 'long',
