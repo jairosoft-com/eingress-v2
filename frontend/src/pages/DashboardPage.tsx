@@ -5,6 +5,7 @@ import {
   Fingerprint,
   MonitorSmartphone,
   Settings,
+  ShieldCheck,
   ShieldAlert,
   Smartphone,
   TrendingDown,
@@ -22,6 +23,7 @@ const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws')
 type DashboardMetrics = {
   active_devices?: number;
   failed_attempts?: number;
+  successful_attempts?: number;
   todays_attendance?: number;
   total_access?: number;
   total_users?: number;
@@ -113,6 +115,13 @@ const metricDefinitions = [
     tone: 'purple',
   },
   {
+    label: 'Successful Attempts',
+    value: '0',
+    description: 'Granted scans today',
+    Icon: ShieldCheck,
+    tone: 'green',
+  },
+  {
     label: 'Failed Attempts',
     value: '23',
     delta: '15.4%',
@@ -194,9 +203,25 @@ export function DashboardPage() {
     socket.addEventListener('message', (event) => {
       try {
         const message = JSON.parse(event.data as string) as {
-          payload?: RecentActivityEvent;
+          payload?: DashboardMetrics | RecentActivityEvent;
           type?: string;
         };
+
+        if (message.type === 'dashboard:metrics-changed' && message.payload) {
+          const metricsPayload = message.payload as DashboardMetrics;
+
+          setDashboardMetrics((currentMetrics) => ({
+            ...(currentMetrics ?? {}),
+            active_devices: metricsPayload.active_devices ?? currentMetrics?.active_devices,
+            failed_attempts: metricsPayload.failed_attempts ?? currentMetrics?.failed_attempts,
+            successful_attempts:
+              metricsPayload.successful_attempts ?? currentMetrics?.successful_attempts,
+            todays_attendance:
+              metricsPayload.todays_attendance ?? currentMetrics?.todays_attendance,
+            total_access: metricsPayload.total_access ?? currentMetrics?.total_access,
+            total_users: metricsPayload.total_users ?? currentMetrics?.total_users,
+          }));
+        }
 
         if (message.type === 'attendance:changed') {
           void fetchDashboardData(session.accessToken)
@@ -210,7 +235,7 @@ export function DashboardPage() {
             });
         }
 
-        const activityEvent = message.payload;
+        const activityEvent = message.payload as RecentActivityEvent | undefined;
 
         if (message.type === 'activity:event' && activityEvent) {
           setAccessEvents((currentEvents) =>
@@ -225,12 +250,22 @@ export function DashboardPage() {
     return () => socket.close();
   }, [session?.accessToken]);
 
-  const todaysAttendance = dashboardMetrics?.todays_attendance ?? null;
-  const metrics = metricDefinitions.map((metric) =>
-    metric.label === "Today's Attendance"
-      ? { ...metric, value: todaysAttendance === null ? '—' : todaysAttendance.toLocaleString() }
-      : metric,
-  );
+  const metricValues: Record<string, number | null> = {
+    'Active Devices': dashboardMetrics?.active_devices ?? null,
+    'Successful Attempts': dashboardMetrics?.successful_attempts ?? null,
+    'Failed Attempts': dashboardMetrics?.failed_attempts ?? null,
+    "Today's Attendance": dashboardMetrics?.todays_attendance ?? null,
+    'Total Access': dashboardMetrics?.total_access ?? null,
+    'Total Users': dashboardMetrics?.total_users ?? null,
+  };
+  const metrics = metricDefinitions.map((metric) => {
+    const liveValue = metricValues[metric.label];
+
+    return {
+      ...metric,
+      value: liveValue === null ? '-' : liveValue.toLocaleString(),
+    };
+  });
   const todayLabel = new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
     month: 'long',
