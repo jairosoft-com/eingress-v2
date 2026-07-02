@@ -7,6 +7,8 @@ import {
   ChevronRight,
   Clock3,
   Download,
+  Eye,
+  EyeOff,
   Filter,
   Fingerprint,
   HardDrive,
@@ -18,12 +20,13 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '../auth/useAuth';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
 const deviceRows = [
   ['DEV-001', 'Main Entrance', 'RFID Reader', 'Office', '192.168.1.10', 'Online', 'May 20'],
@@ -106,6 +109,7 @@ type UserRecord = {
   is_archived?: boolean;
   phone: string | null;
   rfid_uid: string | null;
+  role: string | null;
   updated_at: string;
 };
 
@@ -116,12 +120,30 @@ type UserDisplayRow = {
   avatarTone: string;
   biometricStatus: 'Registered' | 'Missing';
   biometricTone: 'success' | 'danger';
-  department: string;
   employeeId: string;
   id: number;
-  lastUpdated: string;
   name: string;
   online: boolean;
+  rfidUid: string;
+  role: string;
+};
+
+type UserEditForm = {
+  fullName: string;
+  rfidUid: string;
+  role: string;
+};
+
+type KioskInput = {
+  nonce?: number;
+  rfidUid?: string;
+};
+
+type RfidRealtimeMessage = {
+  payload?: {
+    rfidUid?: string;
+  };
+  type?: string;
 };
 
 function isEnrollmentRequest(value: unknown): value is EnrollmentRequest {
@@ -392,26 +414,6 @@ function toDateInputValue(value: string) {
   return date.toISOString().slice(0, 10);
 }
 
-function formatUserTimestamp(value: string | null | undefined) {
-  if (!value) {
-    return '-';
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
-}
-
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
 
@@ -431,6 +433,16 @@ function getAvatarTone(index: number) {
   return tones[index % tones.length];
 }
 
+const USER_ROLE_OPTIONS = ['Employee', 'Student', 'Staff', 'Intern'];
+
+function maskRfid(value: string) {
+  if (!value || value === '-') {
+    return '-';
+  }
+
+  return '••••••••';
+}
+
 function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
   const hasBiometric = Boolean(user.fingerprint_id);
 
@@ -441,12 +453,12 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     avatarTone: getAvatarTone(index),
     biometricStatus: hasBiometric ? 'Registered' : 'Missing',
     biometricTone: hasBiometric ? 'success' : 'danger',
-    department: user.department || '-',
     employeeId: user.employee_id,
     id: user.id,
-    lastUpdated: formatUserTimestamp(user.updated_at || user.created_at),
     name: user.full_name,
     online: user.is_active,
+    rfidUid: user.rfid_uid || '-',
+    role: user.role || 'Employee',
   };
 }
 
@@ -495,12 +507,23 @@ export function AttendanceManagementPage() {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [usersErrorMessage, setUsersErrorMessage] = useState('');
-  const [userActionMessage, setUserActionMessage] = useState('');
   const [userSearch, setUserSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('All Roles');
   const [statusFilter, setStatusFilter] = useState('All Status');
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
+  const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
+  const [editForm, setEditForm] = useState<UserEditForm>({
+    fullName: '',
+    rfidUid: '',
+    role: 'Employee',
+  });
+  const [editFormError, setEditFormError] = useState('');
+  const [isRfidScannerOpen, setIsRfidScannerOpen] = useState(false);
+  const [isFingerprintScannerOpen, setIsFingerprintScannerOpen] = useState(false);
+  const [rfidScanInput, setRfidScanInput] = useState('');
+  const [rfidScanBaselineNonce, setRfidScanBaselineNonce] = useState(0);
+  const [visibleRfidUserIds, setVisibleRfidUserIds] = useState<Set<number>>(() => new Set());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -555,6 +578,98 @@ export function AttendanceManagementPage() {
     };
   }, [session?.accessToken]);
 
+  useEffect(() => {
+    if (!isRfidScannerOpen) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function readKioskInput() {
+      try {
+        const response = await fetch(`/kiosk-input.json?t=${Date.now()}`, { cache: 'no-store' });
+        const input = (await response.json().catch(() => null)) as KioskInput | null;
+        const rfidUid = input?.rfidUid?.trim();
+        const nonce = Number(input?.nonce ?? 0);
+
+        if (!isCancelled && rfidUid && nonce > rfidScanBaselineNonce) {
+          setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+          setRfidScanInput('');
+          setIsRfidScannerOpen(false);
+        }
+      } catch {
+        // The scanner bridge may be unavailable while no hardware tap is present.
+      }
+    }
+
+    const intervalId = window.setInterval(() => {
+      void readKioskInput();
+    }, 650);
+
+    void readKioskInput();
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [isRfidScannerOpen, rfidScanBaselineNonce]);
+
+  useEffect(() => {
+    if (!isRfidScannerOpen) {
+      return;
+    }
+
+    let socket: WebSocket | null = null;
+    let shouldReconnect = true;
+    let reconnectTimeoutId: number | null = null;
+
+    function captureRfidUid(rfidUid: string) {
+      setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+      setRfidScanInput('');
+      setIsRfidScannerOpen(false);
+    }
+
+    function connectRealtimeSocket() {
+      socket = new WebSocket(WS_BASE_URL);
+
+      socket.addEventListener('message', (event) => {
+        try {
+          const message = JSON.parse(event.data as string) as RfidRealtimeMessage;
+          const rfidUid = message.payload?.rfidUid?.trim();
+
+          if (
+            (message.type === 'rfid:scanned' || message.type === 'enrollment:rfid-captured') &&
+            rfidUid
+          ) {
+            captureRfidUid(rfidUid);
+          }
+        } catch {
+          // Ignore realtime messages that are not RFID scan payloads.
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        if (!shouldReconnect) {
+          return;
+        }
+
+        reconnectTimeoutId = window.setTimeout(connectRealtimeSocket, 1200);
+      });
+    }
+
+    connectRealtimeSocket();
+
+    return () => {
+      shouldReconnect = false;
+
+      if (reconnectTimeoutId) {
+        window.clearTimeout(reconnectTimeoutId);
+      }
+
+      socket?.close();
+    };
+  }, [isRfidScannerOpen]);
+
   async function updateUserStatus(id: number, isActive: boolean) {
     if (!session?.accessToken) {
       setUsersErrorMessage('Please sign in again to update users.');
@@ -564,7 +679,6 @@ export function AttendanceManagementPage() {
     try {
       setUpdatingUserId(id);
       setUsersErrorMessage('');
-      setUserActionMessage('');
 
       const response = await fetch(`${API_BASE_URL}/users/${id}/status`, {
         method: 'PATCH',
@@ -593,9 +707,7 @@ export function AttendanceManagementPage() {
           user.id === id ? { ...user, is_active: isActive, is_archived: false } : user,
         ),
       );
-      setUserActionMessage(
-        isActive ? 'User reactivated successfully.' : 'User deactivated successfully.',
-      );
+      window.alert(isActive ? 'User reactivated successfully.' : 'User deactivated successfully.');
     } catch (error) {
       setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to update user.');
     } finally {
@@ -612,7 +724,6 @@ export function AttendanceManagementPage() {
     try {
       setUpdatingUserId(id);
       setUsersErrorMessage('');
-      setUserActionMessage('');
 
       const response = await fetch(`${API_BASE_URL}/users/${id}/archive`, {
         method: 'PATCH',
@@ -641,7 +752,7 @@ export function AttendanceManagementPage() {
           user.id === id ? { ...user, is_active: false, is_archived: true } : user,
         ),
       );
-      setUserActionMessage('User archived successfully.');
+      window.alert('User archived successfully.');
     } catch (error) {
       setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to archive user.');
     } finally {
@@ -649,13 +760,130 @@ export function AttendanceManagementPage() {
     }
   }
 
-  const departmentOptions = useMemo(
-    () =>
-      Array.from(new Set(users.map((user) => user.department).filter(Boolean) as string[])).sort(
-        (departmentA, departmentB) => departmentA.localeCompare(departmentB),
-      ),
-    [users],
-  );
+  function openUserEditor(userId: number) {
+    const user = users.find((currentUser) => currentUser.id === userId);
+
+    if (!user) {
+      return;
+    }
+
+    setEditingUser(user);
+    setEditForm({
+      fullName: user.full_name,
+      rfidUid: user.rfid_uid || '',
+      role: user.role || 'Employee',
+    });
+    setEditFormError('');
+    setIsRfidScannerOpen(false);
+    setIsFingerprintScannerOpen(false);
+    setUsersErrorMessage('');
+  }
+
+  function closeUserEditor() {
+    if (updatingUserId !== null) {
+      return;
+    }
+
+    setEditingUser(null);
+    setEditFormError('');
+    setRfidScanInput('');
+    setIsRfidScannerOpen(false);
+    setIsFingerprintScannerOpen(false);
+  }
+
+  function captureTypedRfid() {
+    const rfidUid = rfidScanInput.trim();
+
+    if (!rfidUid) {
+      return;
+    }
+
+    setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+    setRfidScanInput('');
+    setIsRfidScannerOpen(false);
+  }
+
+  async function openRfidScanner() {
+    try {
+      const response = await fetch(`/kiosk-input.json?t=${Date.now()}`, { cache: 'no-store' });
+      const input = (await response.json().catch(() => null)) as KioskInput | null;
+
+      setRfidScanBaselineNonce(Number(input?.nonce ?? 0));
+    } catch {
+      setRfidScanBaselineNonce(Date.now());
+    }
+
+    setIsRfidScannerOpen(true);
+    setIsFingerprintScannerOpen(false);
+    setRfidScanInput('');
+  }
+
+  function openFingerprintScanner() {
+    setIsRfidScannerOpen(false);
+    setIsFingerprintScannerOpen(true);
+  }
+
+  async function saveUserDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!editingUser) {
+      return;
+    }
+
+    if (!session?.accessToken) {
+      setEditFormError('Please sign in again to update users.');
+      return;
+    }
+
+    const fullName = editForm.fullName.trim();
+    const rfidUid = editForm.rfidUid.trim();
+    const role = editForm.role.trim();
+
+    if (!fullName) {
+      setEditFormError('User name is required.');
+      return;
+    }
+
+    try {
+      setUpdatingUserId(editingUser.id);
+      setEditFormError('');
+      setUsersErrorMessage('');
+
+      const response = await fetch(`${API_BASE_URL}/users/${editingUser.id}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fullName, role, rfidUid: rfidUid || null }),
+      });
+
+      const data = (await response.json().catch(() => null)) as
+        | UserRecord
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !('id' in (data ?? {}))) {
+        throw new Error(
+          data && typeof data === 'object' && 'error' in data
+            ? data.error
+            : 'Unable to save user details.',
+        );
+      }
+
+      setUsers((currentUsers) =>
+        currentUsers.map((user) => (user.id === editingUser.id ? (data as UserRecord) : user)),
+      );
+      setEditingUser(null);
+      window.alert('User details saved successfully.');
+    } catch (error) {
+      setEditFormError(error instanceof Error ? error.message : 'Unable to save user details.');
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
+  const roleOptions = USER_ROLE_OPTIONS;
 
   const filteredUsers = useMemo(() => {
     const normalizedSearch = userSearch.trim().toLowerCase();
@@ -669,9 +897,8 @@ export function AttendanceManagementPage() {
         !normalizedSearch ||
         user.full_name.toLowerCase().includes(normalizedSearch) ||
         user.employee_id.toLowerCase().includes(normalizedSearch) ||
-        (user.department || '').toLowerCase().includes(normalizedSearch);
-      const matchesDepartment =
-        departmentFilter === 'All Roles' || user.department === departmentFilter;
+        (user.role || '').toLowerCase().includes(normalizedSearch);
+      const matchesDepartment = departmentFilter === 'All Roles' || user.role === departmentFilter;
       const matchesStatus =
         statusFilter === 'All Status' ||
         (statusFilter === 'Active' ? user.is_active : !user.is_active);
@@ -723,6 +950,20 @@ export function AttendanceManagementPage() {
     setUserSearch('');
     setDepartmentFilter('All Roles');
     setStatusFilter('All Status');
+  }
+
+  function toggleRfidVisibility(userId: number) {
+    setVisibleRfidUserIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+
+      if (nextIds.has(userId)) {
+        nextIds.delete(userId);
+      } else {
+        nextIds.add(userId);
+      }
+
+      return nextIds;
+    });
   }
 
   return (
@@ -795,8 +1036,8 @@ export function AttendanceManagementPage() {
             value={departmentFilter}
           >
             <option>All Roles</option>
-            {departmentOptions.map((department) => (
-              <option key={department}>{department}</option>
+            {roleOptions.map((role) => (
+              <option key={role}>{role}</option>
             ))}
           </select>
 
@@ -809,12 +1050,6 @@ export function AttendanceManagementPage() {
           </button>
         </div>
 
-        {userActionMessage ? (
-          <p className="module-table-message success" role="status">
-            {userActionMessage}
-          </p>
-        ) : null}
-
         <div className="user-table-wrap">
           <table className="user-management-table">
             <thead>
@@ -823,7 +1058,7 @@ export function AttendanceManagementPage() {
                 <th>Role</th>
                 <th>Biometric Status</th>
                 <th>Access Status</th>
-                <th>Last Updated</th>
+                <th>RFID</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -861,7 +1096,7 @@ export function AttendanceManagementPage() {
                         </span>
                       </span>
                     </td>
-                    <td>{user.department}</td>
+                    <td>{user.role}</td>
                     <td>
                       <span className={`user-status-pill ${user.biometricTone}`}>
                         {attendanceStatusIcon(user.biometricStatus)}
@@ -874,11 +1109,34 @@ export function AttendanceManagementPage() {
                         {user.accessStatus}
                       </span>
                     </td>
-                    <td>{user.lastUpdated}</td>
+                    <td>
+                      <span className="rfid-mask-cell">
+                        <span>
+                          {visibleRfidUserIds.has(user.id) ? user.rfidUid : maskRfid(user.rfidUid)}
+                        </span>
+                        {user.rfidUid !== '-' ? (
+                          <button
+                            aria-label={
+                              visibleRfidUserIds.has(user.id)
+                                ? `Hide RFID for ${user.name}`
+                                : `Show RFID for ${user.name}`
+                            }
+                            onClick={() => toggleRfidVisibility(user.id)}
+                            type="button"
+                          >
+                            {visibleRfidUserIds.has(user.id) ? (
+                              <EyeOff size={13} />
+                            ) : (
+                              <Eye size={13} />
+                            )}
+                          </button>
+                        ) : null}
+                      </span>
+                    </td>
                     <td>
                       <span className="user-row-actions">
                         <button
-                          className={user.accessStatus === 'Disabled' ? 'activate' : 'deactivate'}
+                          className={user.accessStatus === 'Active' ? 'activate' : 'deactivate'}
                           type="button"
                           aria-label={
                             user.accessStatus === 'Disabled'
@@ -901,7 +1159,13 @@ export function AttendanceManagementPage() {
                         >
                           <Archive size={15} />
                         </button>
-                        <button className="edit" type="button" aria-label={`Edit ${user.name}`}>
+                        <button
+                          className="edit"
+                          type="button"
+                          aria-label={`Edit ${user.name}`}
+                          disabled={updatingUserId === user.id}
+                          onClick={() => openUserEditor(user.id)}
+                        >
                           <Pencil size={15} />
                         </button>
                       </span>
@@ -947,6 +1211,292 @@ export function AttendanceManagementPage() {
           </label>
         </footer>
       </section>
+
+      {editingUser ? (
+        <div className="user-edit-backdrop" role="presentation" onMouseDown={closeUserEditor}>
+          <form
+            aria-labelledby="user-edit-title"
+            className="user-edit-dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => void saveUserDetails(event)}
+          >
+            <header>
+              <div>
+                <h2 id="user-edit-title">Edit User</h2>
+                <p>Update user credentials, RFID details, and biometric summary.</p>
+              </div>
+              <button
+                aria-label="Close edit user form"
+                className="user-edit-close"
+                disabled={updatingUserId === editingUser.id}
+                onClick={closeUserEditor}
+                type="button"
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <section className="user-edit-section" aria-labelledby="user-edit-credentials-title">
+              <h3 id="user-edit-credentials-title">
+                <span>1</span>
+                User Credentials
+              </h3>
+              <div className="user-edit-grid two-columns">
+                <label className="user-edit-field">
+                  <span>Employee / User ID *</span>
+                  <input readOnly value={editingUser.employee_id} />
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Full Name *</span>
+                  <input
+                    autoFocus
+                    onChange={(event) =>
+                      setEditForm((currentForm) => ({
+                        ...currentForm,
+                        fullName: event.target.value,
+                      }))
+                    }
+                    value={editForm.fullName}
+                  />
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Role *</span>
+                  <select
+                    onChange={(event) =>
+                      setEditForm((currentForm) => ({ ...currentForm, role: event.target.value }))
+                    }
+                    value={editForm.role}
+                  >
+                    {roleOptions.map((role) => (
+                      <option key={role}>{role}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="user-edit-grid three-columns">
+                <label className="user-edit-field">
+                  <span>RFID UID</span>
+                  <input readOnly value={editForm.rfidUid} placeholder="Enter RFID UID" />
+                </label>
+
+                <button
+                  className="user-edit-scan-button"
+                  onClick={() => void openRfidScanner()}
+                  type="button"
+                >
+                  R<span>Scan RFID</span>
+                </button>
+
+                <label className="user-edit-field">
+                  <span>Account Status *</span>
+                  <select disabled value={editingUser.is_active ? 'Active' : 'Disabled'}>
+                    <option>Active</option>
+                    <option>Disabled</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section className="user-edit-section" aria-labelledby="user-edit-fingerprint-title">
+              <h3 id="user-edit-fingerprint-title">
+                <span>2</span>
+                Fingerprint Registration
+              </h3>
+              <p>Scan the user's fingerprint to complete biometric setup.</p>
+              <div className="user-edit-fingerprint-row">
+                <div>
+                  <strong>Fingerprint Status:</strong>
+                  <span
+                    className={`user-status-pill ${
+                      editingUser.fingerprint_id ? 'success' : 'danger'
+                    }`}
+                  >
+                    {editingUser.fingerprint_id ? 'Registered' : 'Missing'}
+                  </span>
+                </div>
+                <button
+                  className="primary-action-button user-edit-scan-fingerprint"
+                  onClick={openFingerprintScanner}
+                  type="button"
+                >
+                  <Fingerprint size={18} />
+                  <span>Scan Fingerprint</span>
+                </button>
+              </div>
+            </section>
+
+            <section className="user-edit-section" aria-labelledby="user-edit-summary-title">
+              <h3 id="user-edit-summary-title">
+                <span>3</span>
+                Registration Summary
+              </h3>
+              <div className="user-edit-summary">
+                <div>
+                  <strong>D</strong>
+                  <span>
+                    Device
+                    <small>-</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>U</strong>
+                  <span>
+                    Assigned User
+                    <small>{editForm.fullName || '-'}</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>B</strong>
+                  <span>
+                    Department
+                    <small>{editingUser.department || '-'}</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>R</strong>
+                  <span>
+                    RFID Status
+                    <small>{editForm.rfidUid ? 'Registered' : 'Pending'}</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>F</strong>
+                  <span>
+                    Biometric Status
+                    <small>{editingUser.fingerprint_id ? 'Registered' : 'Missing'}</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>S</strong>
+                  <span>
+                    Device Status
+                    <small>Pending Setup</small>
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            {editFormError ? (
+              <p className="module-table-message error" role="alert">
+                {editFormError}
+              </p>
+            ) : null}
+
+            <footer>
+              <button
+                className="soft-action-button"
+                disabled={updatingUserId === editingUser.id}
+                onClick={closeUserEditor}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-action-button"
+                disabled={updatingUserId === editingUser.id}
+                type="submit"
+              >
+                {updatingUserId === editingUser.id ? 'Saving...' : 'Save'}
+              </button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
+
+      {editingUser && isRfidScannerOpen ? (
+        <div className="rfid-scan-backdrop" role="presentation">
+          <section className="rfid-scan-modal" aria-labelledby="rfid-scan-title" role="dialog">
+            <header>
+              <div className="rfid-scan-brand">
+                <span aria-hidden="true">ID</span>
+                <div>
+                  <strong>EINGRESS</strong>
+                  <small>ATTENDANCE KIOSK</small>
+                </div>
+              </div>
+              <button
+                aria-label="Close RFID scanner"
+                onClick={() => setIsRfidScannerOpen(false)}
+                type="button"
+              >
+                X
+              </button>
+            </header>
+
+            <div className="rfid-scan-visual" aria-hidden="true">
+              <span className="rfid-id-card-symbol">
+                <i />
+                <span>
+                  <b />
+                  <b />
+                  <b />
+                </span>
+              </span>
+            </div>
+
+            <h2 id="rfid-scan-title">Place new ID</h2>
+            <p>Your ID is being registered... Please wait.</p>
+            <label className="rfid-scan-input">
+              <span>RFID Number</span>
+              <input
+                autoFocus
+                inputMode="numeric"
+                onChange={(event) => setRfidScanInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    captureTypedRfid();
+                  }
+                }}
+                placeholder="Tap card or enter RFID"
+                value={rfidScanInput}
+              />
+            </label>
+            <button className="rfid-scan-capture-button" onClick={captureTypedRfid} type="button">
+              Use RFID
+            </button>
+            <div className="rfid-scan-dots" aria-hidden="true" />
+          </section>
+        </div>
+      ) : null}
+
+      {editingUser && isFingerprintScannerOpen ? (
+        <div className="rfid-scan-backdrop" role="presentation">
+          <section
+            aria-labelledby="fingerprint-scan-title"
+            className="rfid-scan-modal fingerprint-scan-modal"
+            role="dialog"
+          >
+            <header>
+              <div className="rfid-scan-brand">
+                <span aria-hidden="true">ID</span>
+                <div>
+                  <strong>EINGRESS</strong>
+                  <small>ATTENDANCE KIOSK</small>
+                </div>
+              </div>
+              <button
+                aria-label="Close fingerprint scanner"
+                onClick={() => setIsFingerprintScannerOpen(false)}
+                type="button"
+              >
+                X
+              </button>
+            </header>
+
+            <div className="rfid-scan-visual fingerprint-scan-visual" aria-hidden="true">
+              <Fingerprint size={76} strokeWidth={2.2} />
+            </div>
+
+            <h2 id="fingerprint-scan-title">Scan Your Fingerprint</h2>
+            <p>Place finger on the scanner.</p>
+            <div className="rfid-scan-dots" aria-hidden="true" />
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

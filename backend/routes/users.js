@@ -16,6 +16,46 @@ async function ensureUserStatusColumns() {
 
 void ensureUserStatusColumns();
 
+function getDuplicateUserMessage(error) {
+  if (error?.code !== '23505') {
+    return null;
+  }
+
+  const constraint = error.constraint ?? '';
+
+  if (constraint.includes('rfid_uid')) {
+    return {
+      error: 'Existing RFID. This RFID UID is already assigned to another user.',
+      field: 'rfidUid',
+    };
+  }
+
+  if (constraint.includes('email')) {
+    return {
+      error: 'Existing email. This email address is already assigned to another user.',
+      field: 'email',
+    };
+  }
+
+  if (constraint.includes('employee_id')) {
+    return {
+      error: 'Existing employee ID. This employee ID is already assigned to another user.',
+      field: 'employeeId',
+    };
+  }
+
+  if (constraint.includes('fingerprint_id')) {
+    return {
+      error: 'Existing fingerprint. This fingerprint is already assigned to another user.',
+      field: 'fingerprintId',
+    };
+  }
+
+  return {
+    error: 'Existing user details. One of these values is already assigned to another user.',
+  };
+}
+
 usersRouter.get('/', async (req, res) => {
   try {
     const result = await query(
@@ -62,6 +102,12 @@ usersRouter.post('/', async (req, res) => {
     });
     res.status(201).json(result.rows[0]);
   } catch (error) {
+    const duplicateError = getDuplicateUserMessage(error);
+
+    if (duplicateError) {
+      return res.status(409).json(duplicateError);
+    }
+
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -75,6 +121,34 @@ usersRouter.patch('/:id', async (req, res) => {
   }
 
   try {
+    if (fullName) {
+      const existingName = await query(
+        `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1`,
+        [fullName, id],
+      );
+
+      if (existingName.rowCount > 0) {
+        return res.status(409).json({
+          error: 'Existing user. This name is already assigned to another user.',
+          field: 'fullName',
+        });
+      }
+    }
+
+    if (rfidUid) {
+      const existingRfid = await query(
+        `SELECT id FROM users WHERE LOWER(TRIM(rfid_uid)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1`,
+        [rfidUid, id],
+      );
+
+      if (existingRfid.rowCount > 0) {
+        return res.status(409).json({
+          error: 'Existing RFID. This RFID UID is already assigned to another user.',
+          field: 'rfidUid',
+        });
+      }
+    }
+
     const result = await query(
       `UPDATE users
        SET full_name = COALESCE($1, full_name),
@@ -113,6 +187,12 @@ usersRouter.patch('/:id', async (req, res) => {
     });
     res.json(result.rows[0]);
   } catch (error) {
+    const duplicateError = getDuplicateUserMessage(error);
+
+    if (duplicateError) {
+      return res.status(409).json(duplicateError);
+    }
+
     res.status(500).json({ error: 'Internal server error' });
   }
 });

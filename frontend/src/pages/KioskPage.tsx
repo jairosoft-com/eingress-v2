@@ -24,7 +24,6 @@ type KioskScanResponse = {
   employeeId?: string;
   failedAttempts?: number;
   result?: 'Granted' | 'Denied';
-  totalAccess?: number;
   userName?: string;
 };
 type AdminRfidResponse = {
@@ -149,7 +148,6 @@ export function KioskPage() {
   const [, setEnrollmentRfidUid] = useState('');
   const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
   const [doorAlert, setDoorAlert] = useState('');
-  const [totalAccessCount, setTotalAccessCount] = useState<number | null>(null);
   const [recognizedCountdown, setRecognizedCountdown] = useState(5);
   const [enrollmentIntroCountdown, setEnrollmentIntroCountdown] = useState(5);
   const [unregisteredCountdown, setUnregisteredCountdown] = useState(8);
@@ -190,10 +188,6 @@ export function KioskPage() {
           .then(async (response) => {
             const data = (await response.json().catch(() => null)) as KioskScanResponse | null;
             const isRegistered = response.ok && data?.result === 'Granted';
-
-            if (typeof data?.totalAccess === 'number') {
-              setTotalAccessCount(data.totalAccess);
-            }
 
             if (isRegistered) {
               setRecognizedUser({
@@ -496,16 +490,9 @@ export function KioskPage() {
 
         <div className="kiosk-body">
           {kioskState === 'recognized' ? (
-            <RecognizedState
-              countdown={recognizedCountdown}
-              totalAccessCount={totalAccessCount}
-              user={recognizedUser}
-            />
+            <RecognizedState countdown={recognizedCountdown} user={recognizedUser} />
           ) : isUnrecognizedUser ? (
-            <UnregisteredState
-              countdown={unregisteredCountdown}
-              totalAccessCount={totalAccessCount}
-            />
+            <UnregisteredState countdown={unregisteredCountdown} />
           ) : isEnrollmentIntro ? (
             <EnrollmentIntroState countdown={enrollmentIntroCountdown} />
           ) : isRfidEnrollment ? (
@@ -546,7 +533,14 @@ function FingerprintPrompt({
     <section className="fingerprint-prompt" aria-live="polite">
       <div className={isProcessing ? 'fingerprint-orb processing' : 'fingerprint-orb'}>
         <span className="id-tap-symbol" aria-hidden="true">
-          <span />
+          <span className="rfid-id-card-symbol">
+            <i />
+            <span>
+              <b />
+              <b />
+              <b />
+            </span>
+          </span>
         </span>
       </div>
       <h2>{title}</h2>
@@ -556,24 +550,7 @@ function FingerprintPrompt({
   );
 }
 
-function AccessCountCard({ totalAccessCount }: { totalAccessCount: number | null }) {
-  return (
-    <div className="access-count-card" aria-label="Total access count today">
-      <span>Total Access Today</span>
-      <strong>{totalAccessCount === null ? '-' : totalAccessCount.toLocaleString()}</strong>
-    </div>
-  );
-}
-
-function RecognizedState({
-  countdown,
-  totalAccessCount,
-  user,
-}: {
-  countdown: number;
-  totalAccessCount: number | null;
-  user: RecognizedUser;
-}) {
+function RecognizedState({ countdown, user }: { countdown: number; user: RecognizedUser }) {
   return (
     <section className="recognized-layout" aria-live="polite">
       <div className="kiosk-portrait">
@@ -599,9 +576,6 @@ function RecognizedState({
             <dd>{user.department}</dd>
           </div>
         </dl>
-
-        <AccessCountCard totalAccessCount={totalAccessCount} />
-
         <div className="attendance-success">
           <Check size={20} />
           <span>
@@ -623,13 +597,7 @@ function RecognizedState({
   );
 }
 
-function UnregisteredState({
-  countdown,
-  totalAccessCount,
-}: {
-  countdown: number;
-  totalAccessCount: number | null;
-}) {
+function UnregisteredState({ countdown }: { countdown: number }) {
   return (
     <section className="unregistered-layout" aria-live="polite">
       <div className="unregistered-symbol">
@@ -643,9 +611,6 @@ function UnregisteredState({
         <h2>Unrecognized</h2>
         <p>We couldn't verify your RFID. Scan an admin RFID to open registration.</p>
       </div>
-
-      <AccessCountCard totalAccessCount={totalAccessCount} />
-
       <div className="admin-rfid-card">
         <IdCard size={26} />
         <span>
@@ -708,7 +673,14 @@ function RfidEnrollmentState() {
     <section className="fingerprint-prompt" aria-live="polite">
       <div className="fingerprint-orb">
         <span className="id-tap-symbol" aria-hidden="true">
-          <span />
+          <span className="rfid-id-card-symbol">
+            <i />
+            <span>
+              <b />
+              <b />
+              <b />
+            </span>
+          </span>
         </span>
       </div>
       <h2>Place the New RFID</h2>
