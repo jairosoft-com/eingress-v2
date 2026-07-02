@@ -27,6 +27,13 @@ async function processKioskScan(req, res) {
     return res.status(400).json({ error: 'A userId, employeeId, or rfidUid is required' });
   }
 
+  if (rfidUid) {
+    broadcastMessage({
+      type: 'rfid:scanned',
+      payload: { rfidUid },
+    });
+  }
+
   const params = [];
   const predicates = [];
 
