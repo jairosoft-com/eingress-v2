@@ -1795,6 +1795,38 @@ td small {
   background: #fff0f1;
 }
 
+.rfid-mask-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 118px;
+}
+
+.rfid-mask-cell > span {
+  min-width: 76px;
+  color: #17223f;
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.rfid-mask-cell button {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  color: #516078;
+  border: 1px solid #dce3ee;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+.rfid-mask-cell button:hover {
+  color: #071435;
+  border-color: #aeb8c7;
+  background: #f7f9fc;
+}
+
 .user-row-actions {
   display: inline-flex;
   align-items: center;
@@ -1819,9 +1851,9 @@ td small {
 }
 
 .user-row-actions button.deactivate {
-  color: #f97316;
-  border-color: #fed7aa;
-  background: #fff7ed;
+  color: #e01835;
+  border-color: #f3bdc6;
+  background: #fff7f8;
 }
 
 .user-row-actions button.archive {
@@ -1877,6 +1909,558 @@ td small {
   justify-self: end;
   gap: 14px;
   white-space: nowrap;
+}
+
+.user-edit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(7 20 53 / 18%);
+  backdrop-filter: blur(1px);
+}
+
+.user-edit-dialog {
+  display: grid;
+  width: min(820px, 100%);
+  min-height: 100vh;
+  max-height: 100vh;
+  padding: 26px 34px 22px;
+  overflow-y: auto;
+  border: 0;
+  border-left: 1px solid #dfe6f0;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: -22px 0 48px rgb(7 20 53 / 18%);
+}
+
+.user-edit-dialog header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 28px;
+}
+
+.user-edit-dialog h2 {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  color: #071435;
+  font-size: 1.45rem;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+.user-edit-dialog p {
+  margin: 8px 0 0;
+  color: #667089;
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.user-edit-close {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #071435;
+  border: 0;
+  background: transparent;
+}
+
+.user-edit-section {
+  padding: 0 0 26px;
+  border-bottom: 1px solid #d9e1ec;
+}
+
+.user-edit-section + .user-edit-section {
+  padding-top: 24px;
+}
+
+.user-edit-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 22px;
+  color: #071435;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.user-edit-section h3 span {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  color: #ffffff;
+  font-size: 0.68rem;
+  border-radius: 999px;
+  background: #c5162e;
+}
+
+.user-edit-grid {
+  display: grid;
+  gap: 20px;
+  align-items: end;
+}
+
+.user-edit-grid + .user-edit-grid {
+  margin-top: 24px;
+}
+
+.user-edit-grid.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.user-edit-grid.two-columns .user-edit-field:last-child {
+  grid-column: 1 / 2;
+}
+
+.user-edit-grid.three-columns {
+  grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1.6fr);
+}
+
+.user-edit-field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 0;
+  color: #263650;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.user-edit-field input,
+.user-edit-field select {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  color: #071435;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  border: 1px solid #dce3ee;
+  border-radius: 6px;
+  outline: 0;
+  background: #ffffff;
+}
+
+.user-edit-field input[readonly],
+.user-edit-field select:disabled {
+  color: #5f6d83;
+  background: #fbfcfe;
+}
+
+.user-edit-field input::placeholder {
+  color: #8a96aa;
+}
+
+.user-edit-field input:focus,
+.user-edit-field select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 14%);
+}
+
+.user-edit-scan-button,
+.user-edit-scan-fingerprint {
+  display: inline-flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: #071435;
+  font-size: 0.74rem;
+  font-weight: 900;
+  border: 1px solid #dce3ee;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.user-edit-scan-button > span,
+.user-edit-scan-fingerprint > span,
+.user-edit-dialog footer button {
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.user-edit-scan-button:disabled,
+.user-edit-scan-fingerprint:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.user-edit-fingerprint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.user-edit-fingerprint-row > div {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #263650;
+  font-size: 0.76rem;
+}
+
+.user-edit-fingerprint-row .user-status-pill {
+  min-width: 88px;
+  color: #e01835;
+  background: #ffe7ec;
+}
+
+.user-edit-scan-fingerprint {
+  min-width: 168px;
+  color: #ffffff;
+  border: 0;
+  background: #c5162e;
+  box-shadow: none;
+}
+
+.user-edit-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid #dce3ee;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.user-edit-summary div {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 58px;
+  align-items: center;
+  padding: 12px 28px;
+}
+
+.user-edit-summary div:nth-child(odd) {
+  border-right: 1px solid #dce3ee;
+}
+
+.user-edit-summary strong {
+  color: #071435;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.user-edit-summary span {
+  display: grid;
+  gap: 5px;
+  color: #071435;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.user-edit-summary small {
+  color: #17223f;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.user-edit-dialog footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.user-edit-dialog .soft-action-button,
+.user-edit-dialog .primary-action-button {
+  min-width: 0;
+  min-height: 54px;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.user-edit-dialog footer .primary-action-button {
+  color: #e01835;
+  background: #f6c6cc;
+}
+
+.user-edit-dialog button:disabled,
+.user-row-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.rfid-scan-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgb(7 20 53 / 36%);
+}
+
+.rfid-scan-modal {
+  position: relative;
+  width: min(760px, 100%);
+  min-height: 440px;
+  overflow: hidden;
+  padding: 24px 28px 62px;
+  color: #ffffff;
+  border-radius: 6px;
+  background:
+    radial-gradient(circle at 14% 10%, rgb(31 82 140 / 28%), transparent 32%),
+    radial-gradient(circle at 82% 70%, rgb(224 24 53 / 12%), transparent 24%),
+    linear-gradient(145deg, #071936 0%, #020d20 100%);
+  box-shadow: 0 26px 72px rgb(0 0 0 / 34%);
+}
+
+.rfid-scan-modal header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.rfid-scan-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rfid-scan-brand > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: #ffffff;
+  font-size: 0.65rem;
+  font-weight: 900;
+  border-radius: 9px;
+  background: #ff2445;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+
+.rfid-scan-brand strong,
+.rfid-scan-brand small {
+  display: block;
+}
+
+.rfid-scan-brand strong {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.rfid-scan-brand small {
+  margin-top: 5px;
+  color: #c8d2e2;
+  font-size: 0.68rem;
+}
+
+.rfid-scan-modal header button {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: #ffffff;
+  font-size: 1.6rem;
+  font-weight: 800;
+  border: 0;
+  background: transparent;
+}
+
+.rfid-scan-visual {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 168px;
+  height: 168px;
+  margin: 26px auto 42px;
+  place-items: center;
+  border: 4px solid #e01835;
+  border-left-color: rgb(224 24 53 / 24%);
+  border-radius: 999px;
+  box-shadow: 0 0 0 8px rgb(224 24 53 / 8%);
+}
+
+.rfid-scan-visual::before,
+.rfid-scan-visual::after {
+  position: absolute;
+  inset: 12px;
+  content: '';
+  border: 3px solid transparent;
+  border-top-color: #ff4057;
+  border-right-color: #ff4057;
+  border-radius: inherit;
+  animation: rfidScanRingSpin 1.8s linear infinite;
+}
+
+.rfid-scan-visual::after {
+  inset: 18px;
+  border-top-color: transparent;
+  border-bottom-color: #ff4057;
+  border-left-color: transparent;
+  animation-duration: 2.4s;
+  animation-direction: reverse;
+}
+
+.fingerprint-scan-modal {
+  min-height: 420px;
+  padding-bottom: 86px;
+}
+
+.fingerprint-scan-visual {
+  margin-bottom: 42px;
+  color: #f3f6ff;
+}
+
+.fingerprint-scan-visual svg {
+  position: relative;
+  z-index: 1;
+}
+
+.rfid-id-card-symbol {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 92px;
+  height: 60px;
+  border: 2px solid #f3f6ff;
+  background: rgb(6 20 44 / 26%);
+  box-shadow: 0 0 18px rgb(255 255 255 / 8%);
+}
+
+.rfid-id-card-symbol i {
+  position: absolute;
+  top: 10px;
+  left: 15px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #f3f6ff;
+  border-radius: 999px;
+}
+
+.rfid-id-card-symbol::before {
+  position: absolute;
+  top: 30px;
+  left: 10px;
+  width: 28px;
+  height: 18px;
+  content: '';
+  border: 2px solid #f3f6ff;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  border-bottom: 0;
+}
+
+.rfid-id-card-symbol > span {
+  position: absolute;
+  top: 15px;
+  right: 10px;
+  display: grid;
+  gap: 7px;
+}
+
+.rfid-id-card-symbol b {
+  display: block;
+  width: 34px;
+  height: 2px;
+  background: #f3f6ff;
+}
+
+.rfid-id-card-symbol b:first-child {
+  width: 24px;
+}
+
+@keyframes rfidScanRingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rfid-scan-modal h2,
+.rfid-scan-modal p {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  text-align: center;
+}
+
+.rfid-scan-modal h2 {
+  font-size: 1.75rem;
+  line-height: 1.1;
+}
+
+.rfid-scan-modal p {
+  margin-top: 10px;
+  color: #c7d2e4;
+  font-size: 1rem;
+}
+
+.rfid-scan-input {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  width: min(360px, 100%);
+  margin: 26px auto 0;
+  color: #c7d2e4;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.rfid-scan-input input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 16px;
+  color: #ffffff;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 800;
+  text-align: center;
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 6px;
+  outline: 0;
+  background: rgb(255 255 255 / 8%);
+}
+
+.rfid-scan-input input:focus {
+  border-color: #ff4057;
+  box-shadow: 0 0 0 4px rgb(224 24 53 / 18%);
+}
+
+.rfid-scan-input input::placeholder {
+  color: #8fa0b8;
+}
+
+.rfid-scan-capture-button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 130px;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  margin: 14px auto 0;
+  color: #ffffff;
+  font-weight: 900;
+  border: 0;
+  border-radius: 6px;
+  background: #e01835;
+}
+
+.rfid-scan-dots {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  height: 120px;
+  opacity: 0.48;
+  background-image: radial-gradient(circle, rgb(224 24 53 / 70%) 1px, transparent 1px);
+  background-size: 20px 18px;
+  mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
 }
 
 .rows-per-page select {
@@ -2490,7 +3074,6 @@ td small {
   border: 2px solid #e01835;
   border-radius: 999px;
   background: #18213b;
-  animation: idTapRotate 2.8s linear infinite;
 }
 
 .id-tap-symbol::before,
@@ -2501,7 +3084,7 @@ td small {
   border: 3px solid #ff2145;
   border-left-color: transparent;
   border-radius: inherit;
-  transform: rotate(7deg);
+  animation: idTapRotate 1.8s linear infinite;
 }
 
 .id-tap-symbol::after {
@@ -2509,10 +3092,11 @@ td small {
   border-width: 2px;
   border-top-color: transparent;
   border-right-color: transparent;
-  transform: rotate(-8deg);
+  animation-duration: 2.4s;
+  animation-direction: reverse;
 }
 
-.id-tap-symbol span {
+.id-tap-symbol > span:not(.rfid-id-card-symbol) {
   position: relative;
   z-index: 1;
   width: 36px;
@@ -2559,17 +3143,22 @@ td small {
 
 .recognized-layout {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-  gap: 34px;
-  align-items: center;
-  width: min(760px, 100%);
+  grid-template-columns: 1fr;
+  justify-items: center;
+  gap: 24px;
+  width: min(520px, 100%);
+  text-align: center;
 }
 
 .kiosk-portrait {
   position: relative;
   width: 150px;
   height: 190px;
-  margin-left: auto;
+  margin: 0 auto;
+}
+
+.recognized-details {
+  width: min(420px, 100%);
 }
 
 .kiosk-portrait .face {
@@ -2629,7 +3218,6 @@ td small {
 
 .user-detail-card,
 .attendance-success,
-.access-count-card,
 .admin-rfid-card,
 .enrollment-help {
   border: 1px solid #213b61;
@@ -2661,31 +3249,6 @@ td small {
 .user-detail-card dd {
   margin: 0;
   font-weight: 800;
-}
-
-.access-count-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 16px;
-  padding: 16px 18px;
-}
-
-.access-count-card span,
-.access-count-card strong {
-  display: block;
-}
-
-.access-count-card span {
-  color: #aebbd0;
-  font-weight: 800;
-}
-
-.access-count-card strong {
-  color: #ffffff;
-  font-size: 1.65rem;
-  line-height: 1;
 }
 
 .attendance-success {
