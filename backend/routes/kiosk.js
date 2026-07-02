@@ -246,4 +246,3 @@ kioskRouter.post('/enrollment-rfid', async (req, res, next) => {
 
 kioskRouter.use(authMiddleware);
 kioskRouter.post('/scan', processKioskScan);
-
