@@ -5,6 +5,7 @@ import {
   Fingerprint,
   MonitorSmartphone,
   Settings,
+  ShieldCheck,
   ShieldAlert,
   Smartphone,
   TrendingDown,
@@ -22,6 +23,7 @@ const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws')
 type DashboardMetrics = {
   active_devices?: number;
   failed_attempts?: number;
+  successful_attempts?: number;
   todays_attendance?: number;
   total_access?: number;
   total_users?: number;
@@ -111,6 +113,13 @@ const metricDefinitions = [
     trend: 'up',
     Icon: MonitorSmartphone,
     tone: 'purple',
+  },
+  {
+    label: 'Successful Attempts',
+    value: '0',
+    description: 'Granted scans today',
+    Icon: ShieldCheck,
+    tone: 'green',
   },
   {
     label: 'Failed Attempts',
@@ -205,6 +214,8 @@ export function DashboardPage() {
             ...(currentMetrics ?? {}),
             active_devices: metricsPayload.active_devices ?? currentMetrics?.active_devices,
             failed_attempts: metricsPayload.failed_attempts ?? currentMetrics?.failed_attempts,
+            successful_attempts:
+              metricsPayload.successful_attempts ?? currentMetrics?.successful_attempts,
             todays_attendance:
               metricsPayload.todays_attendance ?? currentMetrics?.todays_attendance,
             total_access: metricsPayload.total_access ?? currentMetrics?.total_access,
@@ -241,6 +252,7 @@ export function DashboardPage() {
 
   const metricValues: Record<string, number | null> = {
     'Active Devices': dashboardMetrics?.active_devices ?? null,
+    'Successful Attempts': dashboardMetrics?.successful_attempts ?? null,
     'Failed Attempts': dashboardMetrics?.failed_attempts ?? null,
     "Today's Attendance": dashboardMetrics?.todays_attendance ?? null,
     'Total Access': dashboardMetrics?.total_access ?? null,

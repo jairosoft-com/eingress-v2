@@ -1053,7 +1053,7 @@ button {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
 }
 
@@ -1100,6 +1100,11 @@ button {
 .stat-icon.amber {
   color: #f97316;
   background: #fff4e8;
+}
+
+.stat-icon.green {
+  color: #16a34a;
+  background: #ecfdf3;
 }
 
 .stat-card span,

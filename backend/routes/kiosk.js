@@ -11,6 +11,7 @@ async function getTodaysAccessMetrics() {
   const result = await query(
     `SELECT
        COUNT(*)::int AS total_access,
+       COUNT(*) FILTER (WHERE result = 'Granted')::int AS successful_attempts,
        COUNT(*) FILTER (WHERE result = 'Denied')::int AS failed_attempts
      FROM access_logs
      WHERE access_time::date = CURRENT_DATE`,
@@ -75,6 +76,7 @@ async function processKioskScan(req, res) {
     return res.status(404).json({
       error: 'User not found',
       failedAttempts: accessMetrics.failed_attempts,
+      successfulAttempts: accessMetrics.successful_attempts,
       totalAccess: accessMetrics.total_access,
     });
   }
@@ -117,6 +119,7 @@ async function processKioskScan(req, res) {
     result,
     accessTime: logResult.rows[0].access_time,
     failedAttempts: accessMetrics.failed_attempts,
+    successfulAttempts: accessMetrics.successful_attempts,
     totalAccess: accessMetrics.total_access,
   };
 
@@ -243,3 +246,4 @@ kioskRouter.post('/enrollment-rfid', async (req, res, next) => {
 
 kioskRouter.use(authMiddleware);
 kioskRouter.post('/scan', processKioskScan);
+
