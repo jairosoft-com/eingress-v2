@@ -1238,6 +1238,103 @@ button {
   overflow-x: auto;
 }
 
+.attendance-table-panel {
+  grid-column: 1 / -1;
+}
+
+.attendance-table-wrapper {
+  overflow-x: auto;
+}
+
+.attendance-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+}
+
+.attendance-table th,
+.attendance-table td {
+  padding: 16px 14px;
+  text-align: left;
+  border-bottom: 1px solid #edf0f5;
+  vertical-align: middle;
+}
+
+.attendance-table thead {
+  background: #f8fafc;
+}
+
+.attendance-table th {
+  color: #667089;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.attendance-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.attendance-table td {
+  color: #1c2947;
+  font-size: 0.95rem;
+}
+
+.attendance-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 84px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.attendance-status.present {
+  color: #166534;
+  background: #ecfdf3;
+}
+
+.attendance-status.late {
+  color: #b45309;
+  background: #fef3c7;
+}
+
+.attendance-status.absent {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.attendance-status.info {
+  color: #0f172a;
+  background: #e2e8f0;
+}
+
+.read-only-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  color: #667089;
+  font-size: 0.8rem;
+  font-weight: 800;
+  border-radius: 999px;
+  background: #f4f6fa;
+}
+
+.empty-state {
+  margin: 0;
+  color: #667089;
+  font-size: 0.95rem;
+}
+
+.empty-state-row {
+  text-align: center;
+  color: #667089;
+  padding: 24px 0;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

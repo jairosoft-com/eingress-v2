@@ -45,9 +45,22 @@ type RecentActivityEvent = {
   user_name?: string | null;
 };
 
+type DashboardAttendanceRecord = {
+  employee_id?: string | null;
+  name?: string | null;
+  department?: string | null;
+  role?: string | null;
+  attendance_date?: string | null;
+  check_in_at?: string | null;
+  check_out_at?: string | null;
+  status?: string | null;
+  location?: string | null;
+};
+
 type DashboardData = {
   metrics?: DashboardMetrics;
   recentEvents?: RecentActivityEvent[];
+  attendanceRecords?: DashboardAttendanceRecord[];
 };
 
 async function fetchDashboardData(accessToken: string, signal?: AbortSignal) {
@@ -88,6 +101,21 @@ function sortAccessEventsByTime(events: ReturnType<typeof toAccessEvent>[]) {
   return [...events].sort(
     (eventA, eventB) => new Date(eventB.sortTime).getTime() - new Date(eventA.sortTime).getTime(),
   );
+}
+
+function formatAttendanceTime(value?: string | null) {
+  if (!value) {
+    return '';
+  }
+
+  try {
+    return new Date(value).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
 }
 
 const metricDefinitions = [
@@ -172,6 +200,7 @@ export function DashboardPage() {
   const { session } = useAuth();
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [accessEvents, setAccessEvents] = useState(initialAccessEvents);
+  const [attendanceRecords, setAttendanceRecords] = useState<DashboardAttendanceRecord[]>([]);
 
   useEffect(() => {
     if (!session?.accessToken) {
@@ -185,6 +214,7 @@ export function DashboardPage() {
         if (!controller.signal.aborted && data) {
           setDashboardMetrics(data.metrics ?? null);
           setAccessEvents(sortAccessEventsByTime((data.recentEvents ?? []).map(toAccessEvent)));
+          setAttendanceRecords(data.attendanceRecords ?? []);
         }
       })
       .catch(() => {
@@ -228,6 +258,7 @@ export function DashboardPage() {
             .then((data) => {
               if (data) {
                 setDashboardMetrics(data.metrics ?? null);
+                setAttendanceRecords(data.attendanceRecords ?? []);
               }
             })
             .catch(() => {
@@ -310,6 +341,61 @@ export function DashboardPage() {
           );
         })}
       </div>
+
+      <section
+        className="panel attendance-table-panel"
+        aria-labelledby="dashboard-attendance-title"
+      >
+        <div className="panel-heading">
+          <h2 id="dashboard-attendance-title">Today's Attendance</h2>
+          <button className="text-button" type="button">
+            View all
+          </button>
+        </div>
+
+        <div className="attendance-table-wrapper">
+          <table className="attendance-table">
+            <thead>
+              <tr>
+                <th>Employee ID</th>
+                <th>Name</th>
+                <th>Department</th>
+                <th>Check In</th>
+                <th>Check Out</th>
+                <th>Status</th>
+                <th>Location</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attendanceRecords.length > 0 ? (
+                attendanceRecords.map((record, index) => (
+                  <tr key={`${record.employee_id ?? 'record'}-${index}`}>
+                    <td>{record.employee_id ?? '—'}</td>
+                    <td>{record.name ?? 'Unknown user'}</td>
+                    <td>{record.department ?? '—'}</td>
+                    <td>{formatAttendanceTime(record.check_in_at) || '—'}</td>
+                    <td>{formatAttendanceTime(record.check_out_at) || '—'}</td>
+                    <td>
+                      <span
+                        className={`attendance-status ${record.status?.toLowerCase() ?? 'present'}`}
+                      >
+                        {record.status ?? 'Present'}
+                      </span>
+                    </td>
+                    <td>{record.location ?? 'Office'}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="empty-state-row">
+                    No attendance records are available for today yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div className="dashboard-grid">
         <section className="panel chart-panel" aria-labelledby="attendance-overview-title">
