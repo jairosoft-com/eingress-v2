@@ -33,11 +33,11 @@ attendanceRouter.get('/', async (req, res, next) => {
 
     const result = await query(
       `SELECT ar.id, ar.attendance_date, ar.check_in_at, ar.check_out_at, ar.status, ar.location,
-        u.employee_id, u.full_name, u.department
+        u.employee_id, u.full_name, u.department, u.role
        FROM attendance_records ar
        JOIN users u ON u.id = ar.user_id
        WHERE ${where.join(' AND ')}
-       ORDER BY u.full_name`,
+       ORDER BY ar.attendance_date DESC, ar.check_in_at DESC NULLS LAST, u.full_name`,
       params,
     );
 

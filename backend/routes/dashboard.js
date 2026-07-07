@@ -8,7 +8,7 @@ dashboardRouter.use(authMiddleware);
 
 dashboardRouter.get('/', async (req, res, next) => {
   try {
-    const [metrics, recentEvents, devices, attendanceTrend] = await Promise.all([
+    const [metrics, recentEvents, devices, attendanceTrend, attendanceRecords] = await Promise.all([
       query(
         `SELECT
           (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE) AS total_users,
@@ -67,6 +67,21 @@ dashboardRouter.get('/', async (req, res, next) => {
          GROUP BY attendance_date
          ORDER BY attendance_date`,
       ),
+      query(
+        `SELECT u.employee_id,
+          u.full_name AS name,
+          u.department,
+          u.role,
+          ar.check_in_at,
+          ar.check_out_at,
+          COALESCE(ar.status::text, 'Present') AS status,
+          COALESCE(ar.location, 'Office') AS location
+         FROM attendance_records ar
+         JOIN users u ON u.id = ar.user_id
+         WHERE ar.attendance_date = CURRENT_DATE
+         ORDER BY ar.check_in_at DESC NULLS LAST, u.full_name
+         LIMIT 10`,
+      ),
     ]);
 
     res.json({
@@ -74,6 +89,7 @@ dashboardRouter.get('/', async (req, res, next) => {
       recentEvents: recentEvents.rows,
       devices: devices.rows,
       attendanceTrend: attendanceTrend.rows,
+      attendanceRecords: attendanceRecords.rows,
     });
   } catch (error) {
     next(error);
