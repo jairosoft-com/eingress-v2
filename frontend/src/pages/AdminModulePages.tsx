@@ -122,6 +122,7 @@ type UserRecord = {
   department: string | null;
   email: string | null;
   employee_id: string;
+  expiration_date?: string | null;
   fingerprint_id: string | null;
   full_name: string;
   id: number;
@@ -141,7 +142,9 @@ type UserDisplayRow = {
   biometricStatus: 'Registered' | 'Missing';
   biometricTone: 'success' | 'danger';
   employeeId: string;
+  expirationDate: string | null;
   id: number;
+  isExpired: boolean;
   name: string;
   online: boolean;
   rfidUid: string;
@@ -522,6 +525,9 @@ function maskRfid(value: string) {
 
 function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
   const hasBiometric = Boolean(user.fingerprint_id);
+  const isStudent = (user.role || '').trim().toLowerCase() === 'student';
+  const expirationDate = isStudent ? (user.expiration_date ?? null) : null;
+  const isExpired = Boolean(expirationDate) && new Date() > new Date(expirationDate as string);
 
   return {
     accessStatus: user.is_active ? 'Active' : 'Disabled',
@@ -531,7 +537,9 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     biometricStatus: hasBiometric ? 'Registered' : 'Missing',
     biometricTone: hasBiometric ? 'success' : 'danger',
     employeeId: user.employee_id,
+    expirationDate,
     id: user.id,
+    isExpired,
     name: user.full_name,
     online: user.is_active,
     rfidUid: user.rfid_uid || '-',
@@ -1334,7 +1342,16 @@ export function UserManagementPage() {
                         </span>
                         <span>
                           <strong>{user.name}</strong>
-                          <small>{user.employeeId}</small>
+                          <small>
+                            {user.employeeId}
+                            {user.expirationDate ? (
+                              <span className={`expiry-badge${user.isExpired ? ' expired' : ''}`}>
+                                {' · '}
+                                {user.isExpired ? 'Expired' : 'Expires'}{' '}
+                                {formatSubmittedDate(user.expirationDate)}
+                              </span>
+                            ) : null}
+                          </small>
                         </span>
                       </span>
                     </td>
