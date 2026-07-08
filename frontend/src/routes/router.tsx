@@ -10,9 +10,11 @@ import {
   EnrollmentRequestsPage,
   ReportsPage,
   SettingsPage,
+  UserManagementPage,
 } from '../pages/AdminModulePages';
 import { DashboardPage } from '../pages/DashboardPage';
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
+import { KioskBioPage } from '../pages/KioskBioPage';
 import { KioskPage } from '../pages/KioskPage';
 import { LoginPage } from '../pages/LoginPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
@@ -41,6 +43,10 @@ export const router = createBrowserRouter([
     element: <KioskPage />,
   },
   {
+    path: '/kioskbio',
+    element: <KioskBioPage />,
+  },
+  {
     element: <ProtectedRoute />,
     children: [
       {
@@ -61,6 +67,10 @@ export const router = createBrowserRouter([
           },
           {
             path: 'attendance-management',
+            element: <UserManagementPage />,
+          },
+          {
+            path: 'attendance',
             element: <AttendanceManagementPage />,
           },
           {

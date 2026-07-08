@@ -1,5 +1,6 @@
 import {
   Bell,
+  CalendarCheck,
   ChevronDown,
   ClipboardList,
   FileText,
@@ -24,6 +25,7 @@ const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws')
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', Icon: Home },
   { label: 'User Management', path: '/attendance-management', Icon: UsersRound },
+  { label: 'Attendance Management', path: '/attendance', Icon: CalendarCheck },
   { label: 'Enrollment Requests', path: '/enrollment-requests', Icon: ClipboardList },
   { label: 'Device Management', path: '/device-management', Icon: Monitor },
   { label: 'Reports', path: '/reports', Icon: FileText },

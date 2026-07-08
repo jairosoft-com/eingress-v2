@@ -93,7 +93,11 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
 <<<<<<< HEAD
          SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
 =======
+<<<<<<< HEAD
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
+=======
          SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL
+>>>>>>> origin/qa
 >>>>>>> origin/qa
 >>>>>>> origin/qa
 >>>>>>> origin/qa

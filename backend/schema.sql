@@ -99,6 +99,10 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   status attendance_status NOT NULL DEFAULT 'Present',
   location VARCHAR(160),
   notes TEXT,
+  employee_id VARCHAR(50),
+  full_name VARCHAR(160),
+  department VARCHAR(120),
+  role VARCHAR(80),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, attendance_date)

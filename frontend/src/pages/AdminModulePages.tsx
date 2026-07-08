@@ -97,11 +97,32 @@ type EnrollmentRequest = {
 
 type EnrollmentStatusFilter = EnrollmentRequest['status'] | 'All';
 
+type AttendanceRecord = {
+  attendance_date: string;
+  check_in_at: string | null;
+  check_out_at: string | null;
+  department: string | null;
+  employee_id: string;
+  full_name: string;
+  id: number;
+  location: string | null;
+  role: string | null;
+  status: string;
+};
+
+type AttendanceSummary = {
+  absent: number;
+  late: number;
+  present: number;
+  total_records: number;
+};
+
 type UserRecord = {
   created_at: string;
   department: string | null;
   email: string | null;
   employee_id: string;
+  expiration_date?: string | null;
   fingerprint_id: string | null;
   full_name: string;
   id: number;
@@ -121,7 +142,9 @@ type UserDisplayRow = {
   biometricStatus: 'Registered' | 'Missing';
   biometricTone: 'success' | 'danger';
   employeeId: string;
+  expirationDate: string | null;
   id: number;
+  isExpired: boolean;
   name: string;
   online: boolean;
   rfidUid: string;
@@ -132,6 +155,19 @@ type UserEditForm = {
   fullName: string;
   rfidUid: string;
   role: string;
+  fingerprintId: string;
+};
+
+type CreateUserForm = {
+  employeeId: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  department: string;
+  role: string;
+  rfidUid: string;
+  fingerprintId: string;
+  scanBiometrics: boolean;
 };
 
 type KioskInput = {
@@ -404,6 +440,50 @@ function formatSubmittedDate(value: string) {
   }).format(date);
 }
 
+function formatClockTime(value: string | null) {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function hasCheckedOut(checkInAt: string | null, checkOutAt: string | null) {
+  if (!checkInAt || !checkOutAt) {
+    return false;
+  }
+
+  const checkInTime = new Date(checkInAt).getTime();
+  const checkOutTime = new Date(checkOutAt).getTime();
+
+  return !Number.isNaN(checkInTime) && !Number.isNaN(checkOutTime) && checkOutTime !== checkInTime;
+}
+
+function formatTotalHours(checkInAt: string | null, checkOutAt: string | null) {
+  if (!hasCheckedOut(checkInAt, checkOutAt)) {
+    return '-';
+  }
+
+  const checkInTime = new Date(checkInAt as string).getTime();
+  const checkOutTime = new Date(checkOutAt as string).getTime();
+
+  if (checkOutTime < checkInTime) {
+    return '-';
+  }
+
+  const totalMinutes = Math.round((checkOutTime - checkInTime) / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${hours} hrs ${minutes} mins`;
+}
+
 function toDateInputValue(value: string) {
   const date = new Date(value);
 
@@ -445,6 +525,9 @@ function maskRfid(value: string) {
 
 function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
   const hasBiometric = Boolean(user.fingerprint_id);
+  const isStudent = (user.role || '').trim().toLowerCase() === 'student';
+  const expirationDate = isStudent ? (user.expiration_date ?? null) : null;
+  const isExpired = Boolean(expirationDate) && new Date() > new Date(expirationDate as string);
 
   return {
     accessStatus: user.is_active ? 'Active' : 'Disabled',
@@ -454,7 +537,9 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     biometricStatus: hasBiometric ? 'Registered' : 'Missing',
     biometricTone: hasBiometric ? 'success' : 'danger',
     employeeId: user.employee_id,
+    expirationDate,
     id: user.id,
+    isExpired,
     name: user.full_name,
     online: user.is_active,
     rfidUid: user.rfid_uid || '-',
@@ -502,7 +587,7 @@ function attendanceStatusIcon(status: string) {
   return <AlertTriangle size={14} />;
 }
 
-export function AttendanceManagementPage() {
+export function UserManagementPage() {
   const { session } = useAuth();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
@@ -517,11 +602,27 @@ export function AttendanceManagementPage() {
     fullName: '',
     rfidUid: '',
     role: 'Employee',
+    fingerprintId: '',
   });
   const [editFormError, setEditFormError] = useState('');
+  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateUserForm>({
+    employeeId: '',
+    fullName: '',
+    email: '',
+    phone: '',
+    department: '',
+    role: 'Employee',
+    rfidUid: '',
+    fingerprintId: '',
+    scanBiometrics: false,
+  });
+  const [createFormError, setCreateFormError] = useState('');
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [isRfidScannerOpen, setIsRfidScannerOpen] = useState(false);
   const [isFingerprintScannerOpen, setIsFingerprintScannerOpen] = useState(false);
   const [rfidScanInput, setRfidScanInput] = useState('');
+  const [fingerprintScanInput, setFingerprintScanInput] = useState('');
   const [rfidScanBaselineNonce, setRfidScanBaselineNonce] = useState(0);
   const [visibleRfidUserIds, setVisibleRfidUserIds] = useState<Set<number>>(() => new Set());
 
@@ -593,7 +694,11 @@ export function AttendanceManagementPage() {
         const nonce = Number(input?.nonce ?? 0);
 
         if (!isCancelled && rfidUid && nonce > rfidScanBaselineNonce) {
-          setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+          if (editingUser) {
+            setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+          } else if (isCreateUserOpen) {
+            setCreateForm((currentForm) => ({ ...currentForm, rfidUid }));
+          }
           setRfidScanInput('');
           setIsRfidScannerOpen(false);
         }
@@ -772,6 +877,7 @@ export function AttendanceManagementPage() {
       fullName: user.full_name,
       rfidUid: user.rfid_uid || '',
       role: user.role || 'Employee',
+      fingerprintId: user.fingerprint_id || '',
     });
     setEditFormError('');
     setIsRfidScannerOpen(false);
@@ -798,7 +904,12 @@ export function AttendanceManagementPage() {
       return;
     }
 
-    setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+    if (editingUser) {
+      setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+    } else if (isCreateUserOpen) {
+      setCreateForm((currentForm) => ({ ...currentForm, rfidUid }));
+    }
+
     setRfidScanInput('');
     setIsRfidScannerOpen(false);
   }
@@ -821,11 +932,27 @@ export function AttendanceManagementPage() {
   function openFingerprintScanner() {
     setIsRfidScannerOpen(false);
     setIsFingerprintScannerOpen(true);
+    setFingerprintScanInput('');
   }
 
-  async function saveUserDetails(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function captureTypedFingerprint() {
+    const fingerprintId = fingerprintScanInput.trim();
 
+    if (!fingerprintId) {
+      return;
+    }
+
+    if (editingUser) {
+      setEditForm((currentForm) => ({ ...currentForm, fingerprintId }));
+    } else if (isCreateUserOpen) {
+      setCreateForm((currentForm) => ({ ...currentForm, fingerprintId }));
+    }
+
+    setFingerprintScanInput('');
+    setIsFingerprintScannerOpen(false);
+  }
+
+  async function submitEditUserDetails() {
     if (!editingUser) {
       return;
     }
@@ -838,6 +965,7 @@ export function AttendanceManagementPage() {
     const fullName = editForm.fullName.trim();
     const rfidUid = editForm.rfidUid.trim();
     const role = editForm.role.trim();
+    const fingerprintId = editForm.fingerprintId.trim();
 
     if (!fullName) {
       setEditFormError('User name is required.');
@@ -855,7 +983,12 @@ export function AttendanceManagementPage() {
           Authorization: `Bearer ${session.accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fullName, role, rfidUid: rfidUid || null }),
+        body: JSON.stringify({
+          fullName,
+          role,
+          rfidUid: rfidUid || null,
+          fingerprintId: fingerprintId || null,
+        }),
       });
 
       const data = (await response.json().catch(() => null)) as
@@ -881,6 +1014,95 @@ export function AttendanceManagementPage() {
     } finally {
       setUpdatingUserId(null);
     }
+  }
+
+  async function submitCreateUserDetails() {
+    if (!session?.accessToken) {
+      setCreateFormError('Please sign in again to create users.');
+      return;
+    }
+
+    const employeeId = createForm.employeeId.trim();
+    const fullName = createForm.fullName.trim();
+    const email = createForm.email.trim();
+    const phone = createForm.phone.trim();
+    const department = createForm.department.trim();
+    const role = createForm.role.trim();
+    const rfidUid = createForm.rfidUid.trim();
+    const fingerprintId = createForm.fingerprintId.trim();
+
+    if (!employeeId || !fullName) {
+      setCreateFormError('Employee ID and user name are required.');
+      return;
+    }
+
+    try {
+      setIsCreatingUser(true);
+      setCreateFormError('');
+      setUsersErrorMessage('');
+
+      const response = await fetch(`${API_BASE_URL}/users`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          employeeId,
+          fullName,
+          email: email || null,
+          phone: phone || null,
+          department: department || null,
+          role: role || 'Employee',
+          rfidUid: rfidUid || null,
+          fingerprintId: fingerprintId || null,
+          isActive: true,
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as
+        | UserRecord
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !('id' in (data ?? {}))) {
+        throw new Error(
+          data && typeof data === 'object' && 'error' in data
+            ? data.error
+            : 'Unable to create user.',
+        );
+      }
+
+      setUsers((currentUsers) => [data as UserRecord, ...currentUsers]);
+      setIsCreateUserOpen(false);
+      setCreateForm({
+        employeeId: '',
+        fullName: '',
+        email: '',
+        phone: '',
+        department: '',
+        role: 'Employee',
+        rfidUid: '',
+        fingerprintId: '',
+        scanBiometrics: false,
+      });
+      window.alert('User created successfully.');
+    } catch (error) {
+      setCreateFormError(error instanceof Error ? error.message : 'Unable to create user.');
+    } finally {
+      setIsCreatingUser(false);
+    }
+  }
+
+  async function saveUserDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (isCreateUserOpen) {
+      await submitCreateUserDetails();
+      return;
+    }
+
+    await submitEditUserDetails();
   }
 
   const roleOptions = USER_ROLE_OPTIONS;
@@ -976,6 +1198,34 @@ export function AttendanceManagementPage() {
           </div>
 
           <div className="dashboard-actions">
+            <button
+              className="primary-action-button"
+              type="button"
+              onClick={() => window.alert('Save Changes functionality is not available yet.')}
+            >
+              Save Changes
+            </button>
+            <button
+              className="primary-action-button"
+              type="button"
+              onClick={() => {
+                setIsCreateUserOpen(true);
+                setCreateFormError('');
+                setCreateForm({
+                  employeeId: '',
+                  fullName: '',
+                  email: '',
+                  phone: '',
+                  department: '',
+                  role: 'Employee',
+                  rfidUid: '',
+                  fingerprintId: '',
+                  scanBiometrics: false,
+                });
+              }}
+            >
+              + Add New User
+            </button>
             <button className="soft-action-button" type="button">
               <Download size={16} />
               Export
@@ -1092,7 +1342,16 @@ export function AttendanceManagementPage() {
                         </span>
                         <span>
                           <strong>{user.name}</strong>
-                          <small>{user.employeeId}</small>
+                          <small>
+                            {user.employeeId}
+                            {user.expirationDate ? (
+                              <span className={`expiry-badge${user.isExpired ? ' expired' : ''}`}>
+                                {' · '}
+                                {user.isExpired ? 'Expired' : 'Expires'}{' '}
+                                {formatSubmittedDate(user.expirationDate)}
+                              </span>
+                            ) : null}
+                          </small>
                         </span>
                       </span>
                     </td>
@@ -1406,7 +1665,264 @@ export function AttendanceManagementPage() {
         </div>
       ) : null}
 
-      {editingUser && isRfidScannerOpen ? (
+      {isCreateUserOpen ? (
+        <div
+          className="user-edit-backdrop"
+          role="presentation"
+          onMouseDown={() => setIsCreateUserOpen(false)}
+        >
+          <form
+            aria-labelledby="create-user-title"
+            className="user-edit-dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => void saveUserDetails(event)}
+          >
+            <header>
+              <div>
+                <h2 id="create-user-title">Add New User</h2>
+                <p>Enter user credentials, RFID UID, and fingerprint tracking details.</p>
+              </div>
+              <button
+                aria-label="Close add user form"
+                className="user-edit-close"
+                disabled={isCreatingUser}
+                onClick={() => setIsCreateUserOpen(false)}
+                type="button"
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <section className="user-edit-section" aria-labelledby="create-user-credentials-title">
+              <h3 id="create-user-credentials-title">
+                <span>1</span>
+                User Credentials
+              </h3>
+              <div className="user-edit-grid two-columns">
+                <label className="user-edit-field">
+                  <span>Employee / User ID *</span>
+                  <input
+                    autoFocus
+                    onChange={(event) =>
+                      setCreateForm((currentForm) => ({
+                        ...currentForm,
+                        employeeId: event.target.value,
+                      }))
+                    }
+                    value={createForm.employeeId}
+                  />
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Full Name *</span>
+                  <input
+                    onChange={(event) =>
+                      setCreateForm((currentForm) => ({
+                        ...currentForm,
+                        fullName: event.target.value,
+                      }))
+                    }
+                    value={createForm.fullName}
+                  />
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Email</span>
+                  <input
+                    onChange={(event) =>
+                      setCreateForm((currentForm) => ({
+                        ...currentForm,
+                        email: event.target.value,
+                      }))
+                    }
+                    value={createForm.email}
+                    type="email"
+                  />
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Phone</span>
+                  <input
+                    onChange={(event) =>
+                      setCreateForm((currentForm) => ({
+                        ...currentForm,
+                        phone: event.target.value,
+                      }))
+                    }
+                    value={createForm.phone}
+                    type="tel"
+                  />
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Role *</span>
+                  <select
+                    onChange={(event) =>
+                      setCreateForm((currentForm) => ({
+                        ...currentForm,
+                        role: event.target.value,
+                      }))
+                    }
+                    value={createForm.role}
+                  >
+                    {roleOptions.map((role) => (
+                      <option key={role}>{role}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Department</span>
+                  <input
+                    onChange={(event) =>
+                      setCreateForm((currentForm) => ({
+                        ...currentForm,
+                        department: event.target.value,
+                      }))
+                    }
+                    value={createForm.department}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="user-edit-section" aria-labelledby="create-user-peripherals-title">
+              <h3 id="create-user-peripherals-title">
+                <span>2</span>
+                Hardware Enrollment
+              </h3>
+              <div className="user-edit-grid three-columns">
+                <label className="user-edit-field">
+                  <span>RFID UID</span>
+                  <input readOnly value={createForm.rfidUid} placeholder="Scan or enter RFID UID" />
+                </label>
+
+                <button
+                  className="user-edit-scan-button"
+                  onClick={() => {
+                    void openRfidScanner();
+                  }}
+                  type="button"
+                >
+                  R<span>Scan RFID</span>
+                </button>
+
+                <label className="user-edit-field">
+                  <span>Fingerprint ID</span>
+                  <input
+                    readOnly
+                    value={createForm.fingerprintId}
+                    placeholder="Scan or enter fingerprint"
+                  />
+                </label>
+              </div>
+              <div className="user-edit-grid two-columns" style={{ marginTop: '16px' }}>
+                <label
+                  className="user-edit-field"
+                  style={{ alignItems: 'center', gridTemplateColumns: 'auto 1fr' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={createForm.scanBiometrics}
+                    onChange={(event) =>
+                      setCreateForm((currentForm) => ({
+                        ...currentForm,
+                        scanBiometrics: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span style={{ marginLeft: '12px' }}>
+                    Scan Biometrics
+                    <small
+                      style={{
+                        display: 'block',
+                        marginTop: '4px',
+                        color: '#667089',
+                        fontWeight: 400,
+                      }}
+                    >
+                      Biometrics scanning is not available yet; status will remain Missing.
+                    </small>
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section className="user-edit-section" aria-labelledby="create-user-summary-title">
+              <h3 id="create-user-summary-title">
+                <span>3</span>
+                Registration Summary
+              </h3>
+              <div className="user-edit-summary">
+                <div>
+                  <strong>D</strong>
+                  <span>
+                    Device
+                    <small>-</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>U</strong>
+                  <span>
+                    Assigned User
+                    <small>{createForm.fullName || '-'}</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>B</strong>
+                  <span>
+                    Department
+                    <small>{createForm.department || '-'}</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>R</strong>
+                  <span>
+                    RFID Status
+                    <small>{createForm.rfidUid ? 'Registered' : 'Pending'}</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>F</strong>
+                  <span>
+                    Biometric Status
+                    <small>{createForm.fingerprintId ? 'Registered' : 'Missing'}</small>
+                  </span>
+                </div>
+                <div>
+                  <strong>S</strong>
+                  <span>
+                    Device Status
+                    <small>Pending Setup</small>
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            {createFormError ? (
+              <p className="module-table-message error" role="alert">
+                {createFormError}
+              </p>
+            ) : null}
+
+            <footer>
+              <button
+                className="soft-action-button"
+                disabled={isCreatingUser}
+                onClick={() => setIsCreateUserOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button className="primary-action-button" disabled={isCreatingUser} type="submit">
+                {isCreatingUser ? 'Saving...' : 'Save'}
+              </button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
+
+      {(editingUser || isCreateUserOpen) && isRfidScannerOpen ? (
         <div className="rfid-scan-backdrop" role="presentation">
           <section className="rfid-scan-modal" aria-labelledby="rfid-scan-title" role="dialog">
             <header>
@@ -1463,7 +1979,7 @@ export function AttendanceManagementPage() {
         </div>
       ) : null}
 
-      {editingUser && isFingerprintScannerOpen ? (
+      {(editingUser || isCreateUserOpen) && isFingerprintScannerOpen ? (
         <div className="rfid-scan-backdrop" role="presentation">
           <section
             aria-labelledby="fingerprint-scan-title"
@@ -1492,11 +2008,183 @@ export function AttendanceManagementPage() {
             </div>
 
             <h2 id="fingerprint-scan-title">Scan Your Fingerprint</h2>
-            <p>Place finger on the scanner.</p>
+            <p>Place finger on the scanner or enter fingerprint ID.</p>
+            <label className="rfid-scan-input">
+              <span>Fingerprint ID</span>
+              <input
+                autoFocus
+                onChange={(event) => setFingerprintScanInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    captureTypedFingerprint();
+                  }
+                }}
+                placeholder="Enter fingerprint ID"
+                value={fingerprintScanInput}
+              />
+            </label>
+            <button
+              className="rfid-scan-capture-button"
+              onClick={captureTypedFingerprint}
+              type="button"
+            >
+              Use Fingerprint ID
+            </button>
             <div className="rfid-scan-dots" aria-hidden="true" />
           </section>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+export function AttendanceManagementPage() {
+  const { session } = useAuth();
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [summary, setSummary] = useState<AttendanceSummary | null>(null);
+  const [totalUsers, setTotalUsers] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadAttendance() {
+      if (!session?.accessToken) {
+        setErrorMessage('Please sign in again to view attendance records.');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setErrorMessage('');
+
+        const headers = { Authorization: `Bearer ${session.accessToken}` };
+        const [recordsResponse, summaryResponse, usersResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/attendance`, { headers, signal: controller.signal }),
+          fetch(`${API_BASE_URL}/attendance/summary`, { headers, signal: controller.signal }),
+          fetch(`${API_BASE_URL}/users`, { headers, signal: controller.signal }),
+        ]);
+
+        const recordsData = (await recordsResponse.json().catch(() => null)) as
+          | AttendanceRecord[]
+          | { error?: string }
+          | null;
+
+        if (!recordsResponse.ok || !Array.isArray(recordsData)) {
+          throw new Error(
+            !Array.isArray(recordsData) && recordsData?.error
+              ? recordsData.error
+              : 'Unable to load attendance records.',
+          );
+        }
+
+        const summaryData = (await summaryResponse
+          .json()
+          .catch(() => null)) as AttendanceSummary | null;
+        const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
+
+        setRecords(recordsData);
+        setSummary(summaryResponse.ok ? summaryData : null);
+        setTotalUsers(
+          Array.isArray(usersData) ? usersData.filter((user) => !user.is_archived).length : null,
+        );
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        setErrorMessage(
+          error instanceof Error ? error.message : 'Unable to load attendance records.',
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadAttendance();
+
+    return () => {
+      controller.abort();
+    };
+  }, [session?.accessToken]);
+
+  const attendanceRows = useMemo(
+    () =>
+      records.map((record) => [
+        record.employee_id,
+        record.full_name,
+        formatClockTime(record.check_in_at),
+        hasCheckedOut(record.check_in_at, record.check_out_at)
+          ? formatClockTime(record.check_out_at)
+          : '-',
+        record.status,
+        formatTotalHours(record.check_in_at, record.check_out_at),
+      ]),
+    [records],
+  );
+
+  const attendanceMetrics = [
+    {
+      label: 'Total Users',
+      value: totalUsers,
+      Icon: UsersRound,
+      tone: 'green',
+    },
+    {
+      label: "Today's Attendance",
+      value: summary ? summary.present + summary.late : null,
+      Icon: Fingerprint,
+      tone: 'blue',
+    },
+    {
+      label: 'Late',
+      value: summary?.late ?? null,
+      Icon: AlertTriangle,
+      tone: 'amber',
+    },
+    {
+      label: 'Absent',
+      value: summary?.absent ?? null,
+      Icon: Archive,
+      tone: 'red',
+    },
+  ];
+
+  return (
+    <section className="module-page">
+      <PageHeader
+        title="Attendance Management"
+        description="Monitor and manage attendance records in real-time."
+      />
+
+      <div className="module-stats-grid">
+        {attendanceMetrics.map(({ Icon, label, tone, value }) => (
+          <article className="module-stat-card" key={label}>
+            <span className={`stat-icon ${tone}`}>
+              <Icon size={30} />
+            </span>
+            <div>
+              <span>{label}</span>
+              <strong>{value === null ? '-' : value.toLocaleString()}</strong>
+              <small>Today</small>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <ModuleTable
+        title="Today's Attendance"
+        columns={['Employee ID', 'Name', 'Time In', 'Time Out', 'Status', 'Total Hours']}
+        rows={attendanceRows}
+        isLoading={isLoading}
+        errorMessage={errorMessage}
+        emptyMessage="No attendance records found for today."
+      />
     </section>
   );
 }
