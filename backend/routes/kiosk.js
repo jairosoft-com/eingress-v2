@@ -20,11 +20,21 @@ async function getTodaysAccessMetrics() {
   return result.rows[0];
 }
 
-async function processKioskScan(req, res) {
-  const { userId, employeeId, rfidUid, authenticationMethod, deviceId } = req.body;
+async function processKioskScan(req, res, next) {
+  try {
+    return await processKioskScanUnsafe(req, res);
+  } catch (error) {
+    return next(error);
+  }
+}
 
-  if (!userId && !employeeId && !rfidUid) {
-    return res.status(400).json({ error: 'A userId, employeeId, or rfidUid is required' });
+async function processKioskScanUnsafe(req, res) {
+  const { userId, employeeId, rfidUid, fingerprintId, authenticationMethod, deviceId } = req.body;
+
+  if (!userId && !employeeId && !rfidUid && !fingerprintId) {
+    return res
+      .status(400)
+      .json({ error: 'A userId, employeeId, rfidUid, or fingerprintId is required' });
   }
 
   if (rfidUid) {
@@ -52,8 +62,16 @@ async function processKioskScan(req, res) {
     predicates.push(`rfid_uid = $${params.length}`);
   }
 
+  if (fingerprintId) {
+    params.push(fingerprintId);
+    predicates.push(`fingerprint_id = $${params.length}`);
+  }
+
+  const method = authenticationMethod || 'RFID';
+  const deviceLabel = method === 'Fingerprint' ? 'Fingerprint Scanner' : 'RFID Reader';
+
   const userResult = await query(
-    `SELECT id, employee_id, full_name, department, is_active FROM users WHERE (${predicates.join(' OR ')}) AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
+    `SELECT id, employee_id, full_name, department, role, is_active FROM users WHERE (${predicates.join(' OR ')}) AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
     params,
   );
 
@@ -62,7 +80,7 @@ async function processKioskScan(req, res) {
       `INSERT INTO access_logs (device_id, authentication_method, result, area)
        VALUES ($1, $2, $3, $4)
        RETURNING id, access_time`,
-      [deviceId || null, authenticationMethod || 'Unknown', 'Denied', 'Kiosk'],
+      [deviceId || null, method, 'Denied', 'Kiosk'],
     );
     const accessMetrics = await getTodaysAccessMetrics();
 
@@ -72,11 +90,11 @@ async function processKioskScan(req, res) {
     });
     broadcastActivityEvent({
       id: logResult.rows[0].id,
-      user: 'Unknown RFID',
-      employeeId: rfidUid || '',
+      user: fingerprintId ? 'Unknown Fingerprint' : 'Unknown RFID',
+      employeeId: rfidUid || fingerprintId || '',
       event: 'Access Denied',
       area: 'Kiosk',
-      device: 'RFID Reader',
+      device: deviceLabel,
       status: 'Failed',
       time: logResult.rows[0].access_time,
     });
@@ -90,7 +108,6 @@ async function processKioskScan(req, res) {
 
   const user = userResult.rows[0];
   const result = user.is_active ? 'Granted' : 'Denied';
-  const method = authenticationMethod || 'RFID';
 
   const logResult = await query(
     `INSERT INTO access_logs (user_id, device_id, authentication_method, result, area)
@@ -99,14 +116,29 @@ async function processKioskScan(req, res) {
     [user.id, deviceId || null, method, result, 'Kiosk'],
   );
 
+  let timeType = null;
+
   if (result === 'Granted') {
-    await query(
-      `INSERT INTO attendance_records (user_id, attendance_date, check_in_at, status, location)
-       VALUES ($1, CURRENT_DATE, NOW(), 'Present', 'Kiosk')
+    const attendanceResult = await query(
+      `INSERT INTO attendance_records
+         (user_id, attendance_date, check_in_at, check_out_at, status, location, employee_id, full_name, department, role)
+       SELECT $1, CURRENT_DATE, MIN(access_time), MAX(access_time),
+         (CASE
+           WHEN (MIN(access_time) AT TIME ZONE 'Asia/Manila')::time > TIME '08:00:00' THEN 'Late'
+           ELSE 'Present'
+         END)::attendance_status,
+         'Kiosk', $2, $3, $4, $5
+       FROM access_logs
+       WHERE user_id = $1 AND access_time::date = CURRENT_DATE AND result = 'Granted'
        ON CONFLICT (user_id, attendance_date)
-       DO UPDATE SET check_out_at = NOW(), updated_at = NOW()`,
-      [user.id],
+       DO UPDATE SET
+         check_in_at = LEAST(attendance_records.check_in_at, EXCLUDED.check_in_at),
+         check_out_at = GREATEST(attendance_records.check_out_at, EXCLUDED.check_out_at),
+         updated_at = NOW()
+       RETURNING (xmax = 0) AS just_checked_in`,
+      [user.id, user.employee_id, user.full_name, user.department, user.role],
     );
+    timeType = attendanceResult.rows[0].just_checked_in ? 'in' : 'out';
 
     broadcastMessage({
       type: 'attendance:changed',
@@ -122,8 +154,10 @@ async function processKioskScan(req, res) {
     employeeId: user.employee_id,
     userName: user.full_name,
     department: user.department,
+    role: user.role,
     authenticationMethod: method,
     result,
+    timeType,
     accessTime: logResult.rows[0].access_time,
     failedAttempts: accessMetrics.failed_attempts,
     successfulAttempts: accessMetrics.successful_attempts,
@@ -141,21 +175,31 @@ async function processKioskScan(req, res) {
     employeeId: log.employeeId,
     event: result === 'Granted' ? 'Access Granted' : 'Access Denied',
     area: 'Kiosk',
-    device: 'RFID Reader',
+    device: deviceLabel,
     status: result === 'Granted' ? 'Success' : 'Failed',
     time: log.accessTime,
   });
   res.json(log);
 }
 
-kioskRouter.post('/rfid-scan', async (req, res) => {
+kioskRouter.post('/rfid-scan', async (req, res, next) => {
   req.body = {
     rfidUid: req.body.rfidUid,
     authenticationMethod: 'RFID',
     deviceId: req.body.deviceId,
   };
 
-  return processKioskScan(req, res);
+  return processKioskScan(req, res, next);
+});
+
+kioskRouter.post('/fingerprint-scan', async (req, res, next) => {
+  req.body = {
+    fingerprintId: req.body.fingerprintId,
+    authenticationMethod: 'Fingerprint',
+    deviceId: req.body.deviceId,
+  };
+
+  return processKioskScan(req, res, next);
 });
 
 kioskRouter.post('/admin-rfid-scan', async (req, res, next) => {

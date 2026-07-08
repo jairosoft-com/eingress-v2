@@ -118,6 +118,17 @@ function formatAttendanceTime(value?: string | null) {
   }
 }
 
+function hasCheckedOut(checkInAt?: string | null, checkOutAt?: string | null) {
+  if (!checkInAt || !checkOutAt) {
+    return false;
+  }
+
+  const checkInTime = new Date(checkInAt).getTime();
+  const checkOutTime = new Date(checkOutAt).getTime();
+
+  return !Number.isNaN(checkInTime) && !Number.isNaN(checkOutTime) && checkOutTime !== checkInTime;
+}
+
 const metricDefinitions = [
   {
     label: 'Total Users',
@@ -360,8 +371,8 @@ export function DashboardPage() {
                 <th>Employee ID</th>
                 <th>Name</th>
                 <th>Department</th>
-                <th>Check In</th>
-                <th>Check Out</th>
+                <th>Time In</th>
+                <th>Time Out</th>
                 <th>Status</th>
                 <th>Location</th>
               </tr>
@@ -374,7 +385,11 @@ export function DashboardPage() {
                     <td>{record.name ?? 'Unknown user'}</td>
                     <td>{record.department ?? '—'}</td>
                     <td>{formatAttendanceTime(record.check_in_at) || '—'}</td>
-                    <td>{formatAttendanceTime(record.check_out_at) || '—'}</td>
+                    <td>
+                      {hasCheckedOut(record.check_in_at, record.check_out_at)
+                        ? formatAttendanceTime(record.check_out_at)
+                        : '—'}
+                    </td>
                     <td>
                       <span
                         className={`attendance-status ${record.status?.toLowerCase() ?? 'present'}`}
@@ -407,8 +422,8 @@ export function DashboardPage() {
           </div>
 
           <div className="line-legend" aria-hidden="true">
-            <span className="checkins">Check-ins</span>
-            <span className="checkouts">Check-outs</span>
+            <span className="checkins">Time-ins</span>
+            <span className="checkouts">Time-outs</span>
             <span className="total">Total</span>
           </div>
 
