@@ -52,11 +52,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.addEventListener(eventName, recordActivity, { passive: true });
     });
 
+    const originalFetch = window.fetch.bind(window);
+
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+
+      if (response.status === 401) {
+        const requestUrl =
+          typeof args[0] === 'string'
+            ? args[0]
+            : args[0] instanceof URL
+              ? args[0].toString()
+              : (args[0] as Request).url;
+
+        if (requestUrl.startsWith(API_BASE_URL) && !requestUrl.includes('/auth/login')) {
+          clearStoredSession();
+          setSession(null);
+        }
+      }
+
+      return response;
+    };
+
     return () => {
       window.clearInterval(intervalId);
       activityEvents.forEach((eventName) => {
         window.removeEventListener(eventName, recordActivity);
       });
+      window.fetch = originalFetch;
     };
   }, [hasSession]);
 
