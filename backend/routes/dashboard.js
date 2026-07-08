@@ -95,4 +95,3 @@ dashboardRouter.get('/', async (req, res, next) => {
     next(error);
   }
 });
-
