@@ -97,6 +97,26 @@ type EnrollmentRequest = {
 
 type EnrollmentStatusFilter = EnrollmentRequest['status'] | 'All';
 
+type AttendanceRecord = {
+  attendance_date: string;
+  check_in_at: string | null;
+  check_out_at: string | null;
+  department: string | null;
+  employee_id: string;
+  full_name: string;
+  id: number;
+  location: string | null;
+  role: string | null;
+  status: string;
+};
+
+type AttendanceSummary = {
+  absent: number;
+  late: number;
+  present: number;
+  total_records: number;
+};
+
 type UserRecord = {
   created_at: string;
   department: string | null;
@@ -417,6 +437,50 @@ function formatSubmittedDate(value: string) {
   }).format(date);
 }
 
+function formatClockTime(value: string | null) {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function hasCheckedOut(checkInAt: string | null, checkOutAt: string | null) {
+  if (!checkInAt || !checkOutAt) {
+    return false;
+  }
+
+  const checkInTime = new Date(checkInAt).getTime();
+  const checkOutTime = new Date(checkOutAt).getTime();
+
+  return !Number.isNaN(checkInTime) && !Number.isNaN(checkOutTime) && checkOutTime !== checkInTime;
+}
+
+function formatTotalHours(checkInAt: string | null, checkOutAt: string | null) {
+  if (!hasCheckedOut(checkInAt, checkOutAt)) {
+    return '-';
+  }
+
+  const checkInTime = new Date(checkInAt as string).getTime();
+  const checkOutTime = new Date(checkOutAt as string).getTime();
+
+  if (checkOutTime < checkInTime) {
+    return '-';
+  }
+
+  const totalMinutes = Math.round((checkOutTime - checkInTime) / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${hours} hrs ${minutes} mins`;
+}
+
 function toDateInputValue(value: string) {
   const date = new Date(value);
 
@@ -515,7 +579,7 @@ function attendanceStatusIcon(status: string) {
   return <AlertTriangle size={14} />;
 }
 
-export function AttendanceManagementPage() {
+export function UserManagementPage() {
   const { session } = useAuth();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
@@ -1954,6 +2018,156 @@ export function AttendanceManagementPage() {
           </section>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+export function AttendanceManagementPage() {
+  const { session } = useAuth();
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [summary, setSummary] = useState<AttendanceSummary | null>(null);
+  const [totalUsers, setTotalUsers] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadAttendance() {
+      if (!session?.accessToken) {
+        setErrorMessage('Please sign in again to view attendance records.');
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setErrorMessage('');
+
+        const headers = { Authorization: `Bearer ${session.accessToken}` };
+        const [recordsResponse, summaryResponse, usersResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/attendance`, { headers, signal: controller.signal }),
+          fetch(`${API_BASE_URL}/attendance/summary`, { headers, signal: controller.signal }),
+          fetch(`${API_BASE_URL}/users`, { headers, signal: controller.signal }),
+        ]);
+
+        const recordsData = (await recordsResponse.json().catch(() => null)) as
+          | AttendanceRecord[]
+          | { error?: string }
+          | null;
+
+        if (!recordsResponse.ok || !Array.isArray(recordsData)) {
+          throw new Error(
+            !Array.isArray(recordsData) && recordsData?.error
+              ? recordsData.error
+              : 'Unable to load attendance records.',
+          );
+        }
+
+        const summaryData = (await summaryResponse
+          .json()
+          .catch(() => null)) as AttendanceSummary | null;
+        const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
+
+        setRecords(recordsData);
+        setSummary(summaryResponse.ok ? summaryData : null);
+        setTotalUsers(
+          Array.isArray(usersData) ? usersData.filter((user) => !user.is_archived).length : null,
+        );
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        setErrorMessage(
+          error instanceof Error ? error.message : 'Unable to load attendance records.',
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadAttendance();
+
+    return () => {
+      controller.abort();
+    };
+  }, [session?.accessToken]);
+
+  const attendanceRows = useMemo(
+    () =>
+      records.map((record) => [
+        record.employee_id,
+        record.full_name,
+        formatClockTime(record.check_in_at),
+        hasCheckedOut(record.check_in_at, record.check_out_at)
+          ? formatClockTime(record.check_out_at)
+          : '-',
+        record.status,
+        formatTotalHours(record.check_in_at, record.check_out_at),
+      ]),
+    [records],
+  );
+
+  const attendanceMetrics = [
+    {
+      label: 'Total Users',
+      value: totalUsers,
+      Icon: UsersRound,
+      tone: 'green',
+    },
+    {
+      label: "Today's Attendance",
+      value: summary ? summary.present + summary.late : null,
+      Icon: Fingerprint,
+      tone: 'blue',
+    },
+    {
+      label: 'Late',
+      value: summary?.late ?? null,
+      Icon: AlertTriangle,
+      tone: 'amber',
+    },
+    {
+      label: 'Absent',
+      value: summary?.absent ?? null,
+      Icon: Archive,
+      tone: 'red',
+    },
+  ];
+
+  return (
+    <section className="module-page">
+      <PageHeader
+        title="Attendance Management"
+        description="Monitor and manage attendance records in real-time."
+      />
+
+      <div className="module-stats-grid">
+        {attendanceMetrics.map(({ Icon, label, tone, value }) => (
+          <article className="module-stat-card" key={label}>
+            <span className={`stat-icon ${tone}`}>
+              <Icon size={30} />
+            </span>
+            <div>
+              <span>{label}</span>
+              <strong>{value === null ? '-' : value.toLocaleString()}</strong>
+              <small>Today</small>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <ModuleTable
+        title="Today's Attendance"
+        columns={['Employee ID', 'Name', 'Time In', 'Time Out', 'Status', 'Total Hours']}
+        rows={attendanceRows}
+        isLoading={isLoading}
+        errorMessage={errorMessage}
+        emptyMessage="No attendance records found for today."
+      />
     </section>
   );
 }

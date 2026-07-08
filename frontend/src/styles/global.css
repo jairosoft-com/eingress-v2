@@ -3375,6 +3375,18 @@ td small {
   color: #c7d2e4;
 }
 
+.return-note {
+  margin: 22px 0 0;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.recognized-detail-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .return-timer {
   grid-column: 1 / -1;
   display: grid;
