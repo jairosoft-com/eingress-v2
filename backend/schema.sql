@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS admins (
   password_hash TEXT NOT NULL,
   rfid_uid VARCHAR(120) NOT NULL UNIQUE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  password_changed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
