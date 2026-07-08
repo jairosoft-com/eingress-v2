@@ -1809,6 +1809,15 @@ td small {
   font-size: 0.68rem;
 }
 
+.expiry-badge {
+  color: #f97316;
+  font-weight: 700;
+}
+
+.expiry-badge.expired {
+  color: #ef4444;
+}
+
 .managed-avatar {
   position: relative;
   display: grid;
