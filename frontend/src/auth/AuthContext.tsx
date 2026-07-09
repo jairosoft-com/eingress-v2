@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   AuthSession,
@@ -11,6 +11,8 @@ import { AuthContext, AuthContextValue, SignInInput } from './context';
 import { API_BASE_URL } from '../lib/api';
 
 const activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
+const FORCE_LOGOUT_STORAGE_KEY = 'eingress.auth.force-logout';
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
 type LoginResponse = {
   accessToken: string;
@@ -19,10 +21,51 @@ type LoginResponse = {
   expiresAt: number;
 };
 
+function decodeAccessTokenAdminId(accessToken: string): string | null {
+  try {
+    const payloadSegment = accessToken.split('.')[1];
+
+    if (!payloadSegment) {
+      return null;
+    }
+
+    const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    const payload = JSON.parse(atob(padded)) as { adminId?: string | number };
+
+    return payload.adminId != null ? String(payload.adminId) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(() => getStoredSession());
   const lastRefreshAt = useRef(0);
   const hasSession = Boolean(session?.accessToken);
+
+  const handleLogout = useCallback(() => {
+    clearStoredSession();
+    setSession(null);
+    window.localStorage.setItem(FORCE_LOGOUT_STORAGE_KEY, `${Date.now()}`);
+    window.dispatchEvent(new Event('auth:force-logout'));
+  }, []);
+
+  useEffect(() => {
+    const handleStorageLogout = (event: StorageEvent) => {
+      if (event.key === FORCE_LOGOUT_STORAGE_KEY) {
+        handleLogout();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageLogout);
+    window.addEventListener('auth:force-logout', handleLogout);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageLogout);
+      window.removeEventListener('auth:force-logout', handleLogout);
+    };
+  }, [handleLogout]);
 
   useEffect(() => {
     if (!hasSession) {
@@ -33,6 +76,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const storedSession = getStoredSession();
       setSession(storedSession);
     };
+
+    const currentAdminId = session?.accessToken
+      ? decodeAccessTokenAdminId(session.accessToken)
+      : null;
+    let socket: WebSocket | null = null;
+    let reconnectTimeoutId: number | null = null;
+    let shouldReconnect = true;
 
     const recordActivity = () => {
       const now = Date.now();
@@ -66,22 +116,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               : (args[0] as Request).url;
 
         if (requestUrl.startsWith(API_BASE_URL) && !requestUrl.includes('/auth/login')) {
-          clearStoredSession();
-          setSession(null);
+          handleLogout();
         }
       }
 
       return response;
     };
 
+    const connectRealtimeSocket = () => {
+      socket = new WebSocket(WS_BASE_URL);
+
+      socket.addEventListener('message', (event) => {
+        try {
+          const message = JSON.parse(event.data as string) as {
+            payload?: { adminId?: string | number };
+            type?: string;
+          };
+
+          if (
+            message.type === 'auth:password-changed' &&
+            currentAdminId != null &&
+            message.payload?.adminId != null &&
+            String(message.payload.adminId) === currentAdminId
+          ) {
+            shouldReconnect = false;
+            socket?.close();
+            handleLogout();
+          }
+        } catch {
+          // Ignore invalid realtime messages.
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        if (!shouldReconnect) {
+          return;
+        }
+
+        reconnectTimeoutId = window.setTimeout(connectRealtimeSocket, 2000);
+      });
+    };
+
+    connectRealtimeSocket();
+
     return () => {
+      shouldReconnect = false;
       window.clearInterval(intervalId);
       activityEvents.forEach((eventName) => {
         window.removeEventListener(eventName, recordActivity);
       });
       window.fetch = originalFetch;
+
+      if (reconnectTimeoutId) {
+        window.clearTimeout(reconnectTimeoutId);
+      }
+
+      socket?.close();
     };
-  }, [hasSession]);
+  }, [handleLogout, hasSession, session?.accessToken]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -124,11 +216,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return createdSession;
       },
       signOut() {
-        clearStoredSession();
-        setSession(null);
+        handleLogout();
       },
     }),
-    [session],
+    [handleLogout, session],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
