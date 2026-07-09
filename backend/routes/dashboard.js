@@ -59,9 +59,9 @@ dashboardRouter.get('/', async (req, res, next) => {
       ),
       query(
         `SELECT attendance_date,
-          COUNT(*) FILTER (WHERE check_in_at IS NOT NULL)::int AS check_ins,
-          COUNT(*) FILTER (WHERE check_out_at IS NOT NULL)::int AS check_outs,
-          COUNT(*)::int AS total
+          COUNT(DISTINCT user_id) FILTER (WHERE check_in_at IS NOT NULL)::int AS check_ins,
+          COUNT(DISTINCT user_id) FILTER (WHERE check_out_at IS NOT NULL)::int AS check_outs,
+          COUNT(DISTINCT user_id)::int AS total
          FROM attendance_records
          WHERE attendance_date >= CURRENT_DATE - INTERVAL '6 days'
          GROUP BY attendance_date
