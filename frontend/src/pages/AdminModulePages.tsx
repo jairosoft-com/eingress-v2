@@ -51,37 +51,6 @@ const reportRows = [
   ['Absenteeism Report', 'Absenteeism', 'Admin', 'May 20', 'Download'],
 ];
 
-const auditRows = [
-  ['May 20 11:45 AM', 'Admin', 'Login', 'Authentication', 'Admin logged in', '192.168.1.100'],
-  [
-    'May 20 11:30 AM',
-    'Admin',
-    'Approved Enrollment',
-    'Enrollment',
-    'Approved REQ-0107',
-    '192.168.1.100',
-  ],
-  ['May 20 11:25 AM', 'Admin', 'Added Device', 'Device Mgmt', 'Added DEV-006', '192.168.1.100'],
-  [
-    'May 20 11:15 AM',
-    'Admin',
-    'Generated Report',
-    'Reports',
-    'Attendance Summary',
-    '192.168.1.100',
-  ],
-  ['May 20 11:05 AM', 'Admin', 'Updated User', 'User Mgmt', 'Updated EMP003', '192.168.1.100'],
-  [
-    'May 20 10:50 AM',
-    'Admin',
-    'Rejected Enrollment',
-    'Enrollment',
-    'Rejected REQ-0108',
-    '192.168.1.100',
-  ],
-  ['May 20 10:35 AM', 'Admin', 'Login', 'Authentication', 'Admin logged in', '192.168.1.100'],
-];
-
 type EnrollmentRequest = {
   department: string;
   employee_id: string;
@@ -149,6 +118,16 @@ type UserDisplayRow = {
   online: boolean;
   rfidUid: string;
   role: string;
+};
+
+type AuditLogRecord = {
+  action: string;
+  admin_name: string | null;
+  created_at: string;
+  details: string | null;
+  id: number | string;
+  ip_address: string | null;
+  module: string;
 };
 
 type UserEditForm = {
@@ -717,7 +696,7 @@ export function UserManagementPage() {
       isCancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [isRfidScannerOpen, rfidScanBaselineNonce]);
+  }, [editingUser, isCreateUserOpen, isRfidScannerOpen, rfidScanBaselineNonce]);
 
   useEffect(() => {
     if (!isRfidScannerOpen) {
@@ -2511,15 +2490,293 @@ export function ReportsPage() {
   );
 }
 
+function formatAuditTimestamp(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function escapeCsvValue(value: string) {
+  const normalized = value.replace(/"/g, '""');
+  return /[",\n]/.test(normalized) ? `"${normalized}"` : normalized;
+}
+
+function buildAuditCsv(rows: string[][]) {
+  const header = ['Date & Time', 'User', 'Action', 'Module', 'Details', 'IP Address'];
+  const content = [header.join(','), ...rows.map((row) => row.map(escapeCsvValue).join(','))].join(
+    '\n',
+  );
+  return content;
+}
+
+function buildAuditPdf(rows: string[][]) {
+  const lines = [
+    'EINGRESS Audit Logs',
+    `Generated ${new Date().toLocaleString()}`,
+    '',
+    'Date & Time | User | Action | Module | Details | IP Address',
+    ...rows.map((row) => row.join(' | ')),
+  ];
+
+  const escapePdfText = (value: string) => value.replace(/([\\()])/g, '\\$1');
+  const content = lines
+    .map((line, index) => `BT /F1 10 Tf 50 ${760 - index * 12} Td (${escapePdfText(line)}) Tj ET`)
+    .join('\n');
+
+  const contentBytes = new TextEncoder().encode(content).length;
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n',
+    `4 0 obj\n<< /Length ${contentBytes} >>\nstream\n${content}\nendstream\nendobj\n`,
+    '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+  ];
+
+  let pdf = '%PDF-1.4\n';
+  const offsets: number[] = [0];
+
+  for (const object of objects) {
+    offsets.push(pdf.length);
+    pdf += object;
+  }
+
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+
+  for (let index = 1; index <= objects.length; index += 1) {
+    pdf += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
+  }
+
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return pdf;
+}
+
 export function AuditLogsPage() {
+  const { session } = useAuth();
+  const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(Boolean(session?.accessToken));
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [draftSearch, setDraftSearch] = useState('');
+  const [draftModule, setDraftModule] = useState('');
+  const [draftAction, setDraftAction] = useState('');
+  const [draftDateFrom, setDraftDateFrom] = useState('');
+  const [draftDateTo, setDraftDateTo] = useState('');
+  const [appliedFilters, setAppliedFilters] = useState({
+    action: '',
+    dateFrom: '',
+    dateTo: '',
+    module: '',
+    search: '',
+  });
+
+  useEffect(() => {
+    const accessToken = session?.accessToken;
+
+    if (!accessToken) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    async function loadAuditLogs() {
+      setIsLoading(true);
+      setErrorMessage(null);
+
+      try {
+        const params = new URLSearchParams();
+
+        if (appliedFilters.search) {
+          params.set('search', appliedFilters.search);
+        }
+
+        if (appliedFilters.module) {
+          params.set('module', appliedFilters.module);
+        }
+
+        if (appliedFilters.action) {
+          params.set('action', appliedFilters.action);
+        }
+
+        if (appliedFilters.dateFrom) {
+          params.set('dateFrom', appliedFilters.dateFrom);
+        }
+
+        if (appliedFilters.dateTo) {
+          params.set('dateTo', appliedFilters.dateTo);
+        }
+
+        params.set('limit', '500');
+
+        const response = await fetch(`${API_BASE_URL}/audit-logs?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error('Unable to load audit logs.');
+        }
+
+        const data = (await response.json()) as AuditLogRecord[];
+        setAuditLogs(data);
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+          return;
+        }
+
+        setErrorMessage('Unable to load audit logs right now.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    void loadAuditLogs();
+
+    return () => controller.abort();
+  }, [appliedFilters, session?.accessToken]);
+
+  const moduleOptions = useMemo(
+    () => Array.from(new Set(auditLogs.map((log) => log.module).filter(Boolean))).sort(),
+    [auditLogs],
+  );
+  const actionOptions = useMemo(
+    () => Array.from(new Set(auditLogs.map((log) => log.action).filter(Boolean))).sort(),
+    [auditLogs],
+  );
+
+  const tableRows = useMemo(
+    () =>
+      auditLogs.map((log) => [
+        formatAuditTimestamp(log.created_at),
+        log.admin_name || 'System',
+        log.action,
+        log.module,
+        log.details || '—',
+      ]),
+    [auditLogs],
+  );
+
+  const onApplyFilters = () => {
+    setAppliedFilters({
+      action: draftAction,
+      dateFrom: draftDateFrom,
+      dateTo: draftDateTo,
+      module: draftModule,
+      search: draftSearch,
+    });
+  };
+
+  const onClearFilters = () => {
+    setDraftSearch('');
+    setDraftModule('');
+    setDraftAction('');
+    setDraftDateFrom('');
+    setDraftDateTo('');
+    setAppliedFilters({
+      action: '',
+      dateFrom: '',
+      dateTo: '',
+      module: '',
+      search: '',
+    });
+  };
+
+  const onExport = (format: 'csv' | 'pdf') => {
+    const blob = new Blob(
+      [format === 'csv' ? buildAuditCsv(tableRows) : buildAuditPdf(tableRows)],
+      { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `audit-logs.${format}`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <section className="module-page">
       <PageHeader title="Audit Logs" description="Track all system activities and changes." />
-      <FilterRow />
+      <div className="module-filter-row enrollment-filter-row">
+        <input
+          aria-label="Search audit logs"
+          onChange={(event) => setDraftSearch(event.target.value)}
+          placeholder="Search by action, module, or details"
+          type="search"
+          value={draftSearch}
+        />
+        <select
+          aria-label="Filter by action"
+          onChange={(event) => setDraftAction(event.target.value)}
+          value={draftAction}
+        >
+          <option value="">All Actions</option>
+          {actionOptions.map((action) => (
+            <option key={action} value={action}>
+              {action}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by module"
+          onChange={(event) => setDraftModule(event.target.value)}
+          value={draftModule}
+        >
+          <option value="">All Modules</option>
+          {moduleOptions.map((module) => (
+            <option key={module} value={module}>
+              {module}
+            </option>
+          ))}
+        </select>
+        <input
+          aria-label="Filter start date"
+          onChange={(event) => setDraftDateFrom(event.target.value)}
+          type="date"
+          value={draftDateFrom}
+        />
+        <input
+          aria-label="Filter end date"
+          onChange={(event) => setDraftDateTo(event.target.value)}
+          type="date"
+          value={draftDateTo}
+        />
+        <button className="filter-button" onClick={onApplyFilters} type="button">
+          Filter
+          <Filter size={16} />
+        </button>
+        <button className="filter-button" onClick={onClearFilters} type="button">
+          Clear
+        </button>
+      </div>
+      <div
+        className="module-filter-row"
+        style={{ marginTop: '12px', gridTemplateColumns: 'repeat(2, max-content)' }}
+      >
+        <button className="dark-action-button" onClick={() => onExport('csv')} type="button">
+          Export CSV
+          <Download size={16} />
+        </button>
+        <button className="dark-action-button" onClick={() => onExport('pdf')} type="button">
+          Export PDF
+          <Download size={16} />
+        </button>
+      </div>
       <ModuleTable
+        emptyMessage="No audit logs match the selected criteria."
+        errorMessage={errorMessage ?? undefined}
+        isLoading={isLoading}
         title="Audit Logs"
-        columns={['Date & Time', 'User', 'Action', 'Module', 'Details', 'IP Address']}
-        rows={auditRows}
+        columns={['Date & Time', 'User', 'Action', 'Module', 'Details']}
+        rows={tableRows}
       />
     </section>
   );

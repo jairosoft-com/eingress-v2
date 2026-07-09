@@ -166,7 +166,7 @@ export function App() {
 
       socket?.close();
     };
-  }, [session?.accessToken]);
+  }, [session?.accessToken, signOut]);
 
   return (
     <div className="admin-shell">

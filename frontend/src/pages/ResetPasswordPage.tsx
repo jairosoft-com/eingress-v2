@@ -12,8 +12,9 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
+import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
 
 const resetFeatures = [
@@ -49,6 +50,8 @@ function validateResetForm(password: string, confirmPassword: string): ResetErro
 
 export function ResetPasswordPage() {
   const params = useParams();
+  const navigate = useNavigate();
+  const { signOut } = useAuth();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') ?? params.token ?? '';
   const [password, setPassword] = useState('');
@@ -129,10 +132,12 @@ export function ResetPasswordPage() {
         throw new Error(data?.error || 'Unable to reset password.');
       }
 
+      signOut();
       setPassword('');
       setConfirmPassword('');
       setIsTokenValid(false);
       setSuccessMessage(data?.message || 'Password has been reset. You can now sign in.');
+      navigate('/login', { replace: true });
     } catch (error) {
       setErrors({
         form: error instanceof Error ? error.message : 'Unable to reset password.',
