@@ -1,16 +1,12 @@
 import {
   CalendarDays,
-  ClipboardList,
-  FileText,
   Fingerprint,
   MonitorSmartphone,
-  Settings,
   ShieldCheck,
   ShieldAlert,
   Smartphone,
   TrendingDown,
   TrendingUp,
-  UserPlus,
   UsersRound,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -57,10 +53,18 @@ type DashboardAttendanceRecord = {
   location?: string | null;
 };
 
+type DashboardAttendanceTrendPoint = {
+  attendance_date?: string | null;
+  check_ins?: number | null;
+  check_outs?: number | null;
+  total?: number | null;
+};
+
 type DashboardData = {
   metrics?: DashboardMetrics;
   recentEvents?: RecentActivityEvent[];
   attendanceRecords?: DashboardAttendanceRecord[];
+  attendanceTrend?: DashboardAttendanceTrendPoint[];
 };
 
 async function fetchDashboardData(accessToken: string, signal?: AbortSignal) {
@@ -115,6 +119,22 @@ function formatAttendanceTime(value?: string | null) {
     });
   } catch {
     return '';
+  }
+}
+
+function formatTrendLabel(value?: string | null) {
+  if (!value) {
+    return '—';
+  }
+
+  try {
+    return new Date(value)
+      .toLocaleDateString([], {
+        weekday: 'short',
+      })
+      .toUpperCase();
+  } catch {
+    return '—';
   }
 }
 
@@ -180,38 +200,12 @@ const metricDefinitions = [
 
 const initialAccessEvents: ReturnType<typeof toAccessEvent>[] = [];
 
-const devices = [
-  ['Door Controller 01', 'Main Entrance', 'Online'],
-  ['Door Controller 02', 'Side Entrance', 'Online'],
-  ['Door Controller 03', 'Back Entrance', 'Online'],
-  ['RFID Reader 01', 'Lobby', 'Maintenance'],
-  ['Fingerprint Scanner 01', 'Server Room', 'Online'],
-];
-
-const bars = [
-  ['May 11', '620'],
-  ['May 12', '780'],
-  ['May 13', '845'],
-  ['May 14', '890'],
-  ['May 15', '912'],
-  ['May 16', '870'],
-  ['May 17', '856'],
-];
-
-const quickActions = [
-  { label: 'Add New User', hint: 'Enroll a new user', Icon: UserPlus },
-  { label: 'View Attendance', hint: 'Check attendance logs', Icon: CalendarDays },
-  { label: 'Access Reports', hint: 'Generate reports', Icon: FileText },
-  { label: 'Manage Devices', hint: 'View and manage devices', Icon: Smartphone },
-  { label: 'System Settings', hint: 'Configure system', Icon: Settings },
-  { label: 'Export Attendance', hint: 'Export attendance data', Icon: ClipboardList },
-];
-
 export function DashboardPage() {
   const { session } = useAuth();
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [accessEvents, setAccessEvents] = useState(initialAccessEvents);
   const [attendanceRecords, setAttendanceRecords] = useState<DashboardAttendanceRecord[]>([]);
+  const [attendanceTrend, setAttendanceTrend] = useState<DashboardAttendanceTrendPoint[]>([]);
 
   useEffect(() => {
     if (!session?.accessToken) {
@@ -226,6 +220,7 @@ export function DashboardPage() {
           setDashboardMetrics(data.metrics ?? null);
           setAccessEvents(sortAccessEventsByTime((data.recentEvents ?? []).map(toAccessEvent)));
           setAttendanceRecords(data.attendanceRecords ?? []);
+          setAttendanceTrend(data.attendanceTrend ?? []);
         }
       })
       .catch(() => {
@@ -270,6 +265,7 @@ export function DashboardPage() {
               if (data) {
                 setDashboardMetrics(data.metrics ?? null);
                 setAttendanceRecords(data.attendanceRecords ?? []);
+                setAttendanceTrend(data.attendanceTrend ?? []);
               }
             })
             .catch(() => {
@@ -306,6 +302,20 @@ export function DashboardPage() {
     return {
       ...metric,
       value: liveValue === null ? '-' : liveValue.toLocaleString(),
+    };
+  });
+  const trendValues = attendanceTrend.map((point) =>
+    Math.max(Number(point.total ?? 0), Number(point.check_ins ?? 0), Number(point.check_outs ?? 0)),
+  );
+  const maxTrendValue = trendValues.length > 0 ? Math.max(...trendValues, 1) : 1;
+  const trendBars = attendanceTrend.map((point) => {
+    const total = Number(point.total ?? 0);
+    const barHeight = Math.max(16, Math.round((total / maxTrendValue) * 130));
+
+    return {
+      label: formatTrendLabel(point.attendance_date),
+      value: total,
+      barHeight,
     };
   });
   const todayLabel = new Intl.DateTimeFormat(undefined, {
@@ -351,6 +361,84 @@ export function DashboardPage() {
             </article>
           );
         })}
+      </div>
+
+      <div className="dashboard-grid">
+        <section className="panel trend-panel" aria-labelledby="attendance-trend-title">
+          <div className="panel-heading">
+            <h2 id="attendance-trend-title">
+              Attendance Trend <span>(Last 7 Days)</span>
+            </h2>
+            <button className="ghost-select" type="button">
+              Last 7 Days
+            </button>
+          </div>
+
+          <div className="bar-chart" aria-label="Attendance trend bar chart">
+            {trendBars.length > 0 ? (
+              trendBars.map((bar) => (
+                <div className="bar-item" key={bar.label}>
+                  <strong>{bar.value}</strong>
+                  <span style={{ height: `${bar.barHeight}px` }} />
+                  <small>{bar.label}</small>
+                </div>
+              ))
+            ) : (
+              <div className="bar-empty-state">No attendance trend data available yet.</div>
+            )}
+          </div>
+        </section>
+
+        <section className="panel events-panel" aria-labelledby="recent-events-title">
+          <div className="panel-heading">
+            <h2 id="recent-events-title">Recent Access Events</h2>
+            <button className="text-button" type="button">
+              View all
+            </button>
+          </div>
+
+          <div className="events-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Event</th>
+                  <th>Device</th>
+                  <th>Time</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accessEvents.map((event) => (
+                  <tr key={event.id}>
+                    <td>
+                      <span className="user-cell">
+                        <span className="mini-avatar">{event.user.charAt(0)}</span>
+                        <span>
+                          <strong>{event.user}</strong>
+                          <small>{event.id}</small>
+                        </span>
+                      </span>
+                    </td>
+                    <td>
+                      <strong className={event.status === 'Failed' ? 'event-failed' : 'event-ok'}>
+                        {event.event}
+                      </strong>
+                      <small>{event.area}</small>
+                    </td>
+                    <td>{event.device}</td>
+                    <td>{event.time}</td>
+                    <td>
+                      <span className={event.status === 'Failed' ? 'status failed' : 'status'}>
+                        {event.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
       <section
@@ -411,158 +499,6 @@ export function DashboardPage() {
           </table>
         </div>
       </section>
-
-      <div className="dashboard-grid">
-        <section className="panel chart-panel" aria-labelledby="attendance-overview-title">
-          <div className="panel-heading">
-            <h2 id="attendance-overview-title">Attendance Overview</h2>
-            <button className="ghost-select" type="button">
-              Today
-            </button>
-          </div>
-
-          <div className="line-legend" aria-hidden="true">
-            <span className="checkins">Time-ins</span>
-            <span className="checkouts">Time-outs</span>
-            <span className="total">Total</span>
-          </div>
-
-          <svg
-            className="line-chart"
-            viewBox="0 0 640 250"
-            role="img"
-            aria-label="Attendance chart"
-          >
-            <g className="chart-grid">
-              <line x1="40" y1="35" x2="610" y2="35" />
-              <line x1="40" y1="90" x2="610" y2="90" />
-              <line x1="40" y1="145" x2="610" y2="145" />
-              <line x1="40" y1="200" x2="610" y2="200" />
-            </g>
-            <polyline
-              className="line total-line"
-              points="40,210 92,160 144,105 196,70 248,52 300,50 352,52 404,54 456,48 508,36 560,25 610,18"
-            />
-            <polyline
-              className="line checkin-line"
-              points="40,212 92,182 144,150 196,120 248,96 300,80 352,78 404,82 456,79 508,62 560,50 610,40"
-            />
-            <polyline
-              className="line checkout-line"
-              points="40,216 92,204 144,190 196,172 248,154 300,142 352,140 404,140 456,125 508,105 560,90 610,78"
-            />
-          </svg>
-        </section>
-
-        <section className="panel events-panel" aria-labelledby="recent-events-title">
-          <div className="panel-heading">
-            <h2 id="recent-events-title">Recent Access Events</h2>
-            <button className="text-button" type="button">
-              View all
-            </button>
-          </div>
-
-          <div className="events-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Event</th>
-                  <th>Device</th>
-                  <th>Time</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accessEvents.map((event) => (
-                  <tr key={event.id}>
-                    <td>
-                      <span className="user-cell">
-                        <span className="mini-avatar">{event.user.charAt(0)}</span>
-                        <span>
-                          <strong>{event.user}</strong>
-                          <small>{event.id}</small>
-                        </span>
-                      </span>
-                    </td>
-                    <td>
-                      <strong className={event.status === 'Failed' ? 'event-failed' : 'event-ok'}>
-                        {event.event}
-                      </strong>
-                      <small>{event.area}</small>
-                    </td>
-                    <td>{event.device}</td>
-                    <td>{event.time}</td>
-                    <td>
-                      <span className={event.status === 'Failed' ? 'status failed' : 'status'}>
-                        {event.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="panel device-panel" aria-labelledby="device-status-title">
-          <div className="panel-heading">
-            <h2 id="device-status-title">Device Status</h2>
-            <button className="text-button" type="button">
-              View all
-            </button>
-          </div>
-
-          <div className="device-list">
-            {devices.map(([name, location, status]) => (
-              <div className="device-row" key={name}>
-                <Smartphone size={20} />
-                <span>
-                  <strong>{name}</strong>
-                  <small>{location}</small>
-                </span>
-                <em className={status === 'Maintenance' ? 'maintenance' : ''}>{status}</em>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel trend-panel" aria-labelledby="attendance-trend-title">
-          <div className="panel-heading">
-            <h2 id="attendance-trend-title">
-              Attendance Trend <span>(This Week)</span>
-            </h2>
-            <button className="ghost-select" type="button">
-              This Week
-            </button>
-          </div>
-
-          <div className="bar-chart" aria-label="Weekly attendance bar chart">
-            {bars.map(([day, value]) => (
-              <div className="bar-item" key={day}>
-                <strong>{value}</strong>
-                <span style={{ height: `${Number(value) / 10}px` }} />
-                <small>{day}</small>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel actions-panel" aria-labelledby="quick-actions-title">
-          <h2 id="quick-actions-title">Quick Actions</h2>
-          <div className="quick-actions">
-            {quickActions.map(({ Icon, hint, label }) => (
-              <button className="quick-action" key={label} type="button">
-                <Icon size={28} />
-                <span>
-                  <strong>{label}</strong>
-                  <small>{hint}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      </div>
     </section>
   );
 }
