@@ -37,9 +37,28 @@ type EnrollmentRequest = {
   status: 'Pending' | 'Approved' | 'Rejected';
 };
 
-type EnrollmentRealtimeMessage = {
+type RealtimeMessage = {
   type?: string;
+  payload?: { adminId?: string | number };
 };
+
+function decodeAccessTokenAdminId(accessToken: string): string | null {
+  try {
+    const payloadSegment = accessToken.split('.')[1];
+
+    if (!payloadSegment) {
+      return null;
+    }
+
+    const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    const payload = JSON.parse(atob(padded)) as { adminId?: string | number };
+
+    return payload.adminId != null ? String(payload.adminId) : null;
+  } catch {
+    return null;
+  }
+}
 
 async function fetchPendingEnrollmentCount(accessToken: string, signal?: AbortSignal) {
   const response = await fetch(`${API_BASE_URL}/enrollment-requests`, {
@@ -89,6 +108,7 @@ export function App() {
     let reconnectTimeoutId: number | null = null;
     let shouldReconnect = true;
     const accessToken = session.accessToken;
+    const currentAdminId = decodeAccessTokenAdminId(accessToken);
 
     function refreshPendingEnrollmentCount() {
       void fetchPendingEnrollmentCount(accessToken).then((count) => {
@@ -103,10 +123,21 @@ export function App() {
 
       socket.addEventListener('message', (event) => {
         try {
-          const message = JSON.parse(event.data as string) as EnrollmentRealtimeMessage;
+          const message = JSON.parse(event.data as string) as RealtimeMessage;
 
           if (message.type === 'enrollment:submitted') {
             refreshPendingEnrollmentCount();
+          }
+
+          if (
+            message.type === 'auth:password-changed' &&
+            currentAdminId != null &&
+            message.payload?.adminId != null &&
+            String(message.payload.adminId) === currentAdminId
+          ) {
+            shouldReconnect = false;
+            socket?.close();
+            signOut();
           }
         } catch {
           // Ignore realtime messages that are not JSON.
@@ -135,7 +166,7 @@ export function App() {
 
       socket?.close();
     };
-  }, [session?.accessToken]);
+  }, [session?.accessToken, signOut]);
 
   return (
     <div className="admin-shell">

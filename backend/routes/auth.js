@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 
 import { pool, query } from '../db.js';
+import { broadcastMessage } from '../ws.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
 const TOKEN_EXPIRES_IN = '1h';
@@ -16,6 +17,16 @@ const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5174').repla
 const MAIL_FROM = process.env.MAIL_FROM || 'EINGRESS Support <no-reply@eingress.local>';
 
 export const authRouter = express.Router();
+
+async function ensureAdminPasswordColumns() {
+  try {
+    await query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ`);
+  } catch (error) {
+    console.error('Unable to ensure admin password_changed_at column exists', error);
+  }
+}
+
+void ensureAdminPasswordColumns();
 
 let ensuredPasswordResetTable = false;
 
@@ -264,7 +275,7 @@ authRouter.post('/reset-password', async (req, res) => {
       await client.query('BEGIN');
       await client.query(
         `UPDATE admins
-         SET password_hash = $1, updated_at = NOW()
+         SET password_hash = $1, password_changed_at = NOW(), updated_at = NOW()
          WHERE id = $2`,
         [passwordHash, resetToken.admin_id],
       );
@@ -289,6 +300,11 @@ authRouter.post('/reset-password', async (req, res) => {
     } finally {
       client.release();
     }
+
+    broadcastMessage({
+      type: 'auth:password-changed',
+      payload: { adminId: resetToken.admin_id },
+    });
 
     return res.json({ message: 'Password has been reset. You can now sign in.' });
   } catch (error) {
