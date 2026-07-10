@@ -193,8 +193,14 @@ kioskRouter.post('/rfid-scan', async (req, res, next) => {
 });
 
 kioskRouter.post('/fingerprint-scan', async (req, res, next) => {
+  const fingerprintId = String(req.body.fingerprintId || '').trim();
+
+  if (!fingerprintId) {
+    return res.status(400).json({ error: 'fingerprintId is required' });
+  }
+
   req.body = {
-    fingerprintId: req.body.fingerprintId,
+    fingerprintId,
     authenticationMethod: 'Fingerprint',
     deviceId: req.body.deviceId,
   };

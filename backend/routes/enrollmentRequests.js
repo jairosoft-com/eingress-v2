@@ -170,8 +170,9 @@ enrollmentRequestsRouter.use(authMiddleware);
 enrollmentRequestsRouter.get('/', async (req, res, next) => {
   try {
     const result = await query(
-      `SELECT id, request_code, employee_id, full_name, department, request_type, email, status,
-        rfid_uid, submitted_at, reviewed_at, reviewed_by, rejection_reason
+      `SELECT id, request_code, employee_id, full_name, department, request_type, email, phone,
+        status, rfid_uid, fingerprint_template, submitted_at, reviewed_at, reviewed_by,
+        rejection_reason
        FROM enrollment_requests
        ORDER BY submitted_at DESC`,
     );

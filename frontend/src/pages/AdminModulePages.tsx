@@ -55,8 +55,11 @@ type EnrollmentRequest = {
   department: string;
   employee_id: string;
   email?: string | null;
+  fingerprint_template?: string | null;
   full_name: string;
   id: number;
+  phone?: string | null;
+  rejection_reason?: string | null;
   rfid_uid: string | null;
   request_code: string;
   request_type: string;
@@ -128,6 +131,53 @@ type AuditLogRecord = {
   id: number | string;
   ip_address: string | null;
   module: string;
+};
+
+type SystemSettings = {
+  admin_rfid_enabled: boolean;
+  auto_logout_enabled: boolean;
+  database_status: string;
+  date_format: string;
+  first_day_of_week: string;
+  idle_timeout_warning_minutes: number;
+  keep_me_logged_in: boolean;
+  last_backup_at: string | null;
+  lockout_duration_minutes: number;
+  lockout_enabled: boolean;
+  max_failed_attempts: number;
+  reset_failed_attempts_after_minutes: number;
+  session_timeout_minutes: number;
+  system_language: string;
+  system_version: string;
+  time_format: string;
+  time_zone: string;
+};
+
+type AdminSettingsProfile = {
+  email: string;
+  name: string;
+  rfidUid: string;
+  role: string;
+};
+
+const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  admin_rfid_enabled: true,
+  auto_logout_enabled: true,
+  database_status: 'Healthy',
+  date_format: 'MM/DD/YYYY',
+  first_day_of_week: 'Monday',
+  idle_timeout_warning_minutes: 5,
+  keep_me_logged_in: false,
+  last_backup_at: null,
+  lockout_duration_minutes: 30,
+  lockout_enabled: false,
+  max_failed_attempts: 5,
+  reset_failed_attempts_after_minutes: 15,
+  session_timeout_minutes: 30,
+  system_language: 'English',
+  system_version: 'v2.1.0',
+  time_format: '12-Hour (hh:mm AM/PM)',
+  time_zone: '(UTC+08:00) Asia/Manila',
 };
 
 type UserEditForm = {
@@ -2097,6 +2147,7 @@ export function AttendanceManagementPage() {
       records.map((record) => [
         record.employee_id,
         record.full_name,
+        record.role || '-',
         formatClockTime(record.check_in_at),
         hasCheckedOut(record.check_in_at, record.check_out_at)
           ? formatClockTime(record.check_out_at)
@@ -2158,7 +2209,7 @@ export function AttendanceManagementPage() {
 
       <ModuleTable
         title="Today's Attendance"
-        columns={['Employee ID', 'Name', 'Time In', 'Time Out', 'Status', 'Total Hours']}
+        columns={['Employee ID', 'Name', 'Role', 'Time In', 'Time Out', 'Status', 'Total Hours']}
         rows={attendanceRows}
         isLoading={isLoading}
         errorMessage={errorMessage}
@@ -2173,6 +2224,7 @@ export function EnrollmentRequestsPage() {
   const [requests, setRequests] = useState<EnrollmentRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [selectedRequest, setSelectedRequest] = useState<EnrollmentRequest | null>(null);
   const [updatingRequestId, setUpdatingRequestId] = useState<number | null>(null);
   const [nameFilter, setNameFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<EnrollmentStatusFilter>('All');
@@ -2272,6 +2324,7 @@ export function EnrollmentRequestsPage() {
       setRequests((currentRequests) =>
         currentRequests.map((request) => (request.id === id ? data : request)),
       );
+      setSelectedRequest((currentRequest) => (currentRequest?.id === id ? data : currentRequest));
       window.dispatchEvent(new Event('enrollment-requests:changed'));
     } catch (error) {
       setErrorMessage(
@@ -2398,13 +2451,179 @@ export function EnrollmentRequestsPage() {
               >
                 <X size={14} />
               </button>
-              <button className="tiny-view" type="button">
+              <button
+                className="tiny-view"
+                onClick={() => setSelectedRequest(request)}
+                type="button"
+              >
                 View
               </button>
             </span>
           );
         }}
       />
+
+      {selectedRequest ? (
+        <div className="request-drawer-backdrop" onMouseDown={() => setSelectedRequest(null)}>
+          <aside
+            aria-labelledby="request-drawer-title"
+            aria-modal="true"
+            className="request-drawer"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <header className="request-drawer-header">
+              <div>
+                <h2 id="request-drawer-title">View User Request</h2>
+                <p>Review the details of the selected user request.</p>
+              </div>
+              <button
+                aria-label="Close request details"
+                onClick={() => setSelectedRequest(null)}
+                type="button"
+              >
+                <X size={22} />
+              </button>
+            </header>
+
+            <section className="request-drawer-section">
+              <h3>
+                <span>1</span> Request Details
+              </h3>
+              <dl className="request-detail-list">
+                <div>
+                  <dt>Request ID</dt>
+                  <dd>{selectedRequest.request_code}</dd>
+                </div>
+                <div>
+                  <dt>Request Type</dt>
+                  <dd>{selectedRequest.request_type}</dd>
+                </div>
+                <div>
+                  <dt>Submitted On</dt>
+                  <dd>{formatSubmittedDate(selectedRequest.submitted_at)}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd>
+                    <span className={`request-status ${statusTone(selectedRequest.status)}`}>
+                      {selectedRequest.status}
+                    </span>
+                  </dd>
+                </div>
+              </dl>
+            </section>
+
+            <section className="request-drawer-section">
+              <h3>
+                <span>2</span> User Information
+              </h3>
+              <div className="request-user-summary">
+                <div className="request-user-avatar" aria-hidden="true">
+                  {getInitials(selectedRequest.full_name)}
+                </div>
+                <dl className="request-detail-list">
+                  <div>
+                    <dt>Name</dt>
+                    <dd>{selectedRequest.full_name}</dd>
+                  </div>
+                  <div>
+                    <dt>Employee ID</dt>
+                    <dd>{selectedRequest.employee_id}</dd>
+                  </div>
+                  <div>
+                    <dt>Email</dt>
+                    <dd>{selectedRequest.email || 'Not provided'}</dd>
+                  </div>
+                  <div>
+                    <dt>Department</dt>
+                    <dd>{selectedRequest.department}</dd>
+                  </div>
+                  <div>
+                    <dt>Phone</dt>
+                    <dd>{selectedRequest.phone || 'Not provided'}</dd>
+                  </div>
+                </dl>
+              </div>
+            </section>
+
+            <section className="request-drawer-section">
+              <h3>
+                <span>3</span> Access &amp; Device Details
+              </h3>
+              <dl className="request-detail-list">
+                <div>
+                  <dt>RFID Number</dt>
+                  <dd>{selectedRequest.rfid_uid || 'Pending capture'}</dd>
+                </div>
+                <div>
+                  <dt>Biometric Status</dt>
+                  <dd>{selectedRequest.fingerprint_template ? 'Submitted' : 'Pending'}</dd>
+                </div>
+                <div>
+                  <dt>Access Status</dt>
+                  <dd>{selectedRequest.status === 'Approved' ? 'Active' : 'Pending approval'}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section className="request-drawer-section">
+              <h3>
+                <span>4</span> Registration Summary
+              </h3>
+              <div className="request-registration-grid">
+                <div>
+                  <strong>Biometric</strong>
+                  <small>{selectedRequest.fingerprint_template ? 'Submitted' : 'Pending'}</small>
+                </div>
+                <div>
+                  <strong>RFID</strong>
+                  <small>{selectedRequest.rfid_uid ? 'Captured' : 'Pending'}</small>
+                </div>
+                <div>
+                  <strong>Request</strong>
+                  <small>{selectedRequest.request_type}</small>
+                </div>
+                <div>
+                  <strong>Account</strong>
+                  <small>{selectedRequest.status}</small>
+                </div>
+              </div>
+              {selectedRequest.rejection_reason ? (
+                <p className="request-rejection-reason">
+                  Rejection reason: {selectedRequest.rejection_reason}
+                </p>
+              ) : null}
+            </section>
+
+            <footer className="request-drawer-actions">
+              <button onClick={() => setSelectedRequest(null)} type="button">
+                Close
+              </button>
+              <button
+                className="reject-request-button"
+                disabled={
+                  selectedRequest.status !== 'Pending' || updatingRequestId === selectedRequest.id
+                }
+                onClick={() => void updateEnrollmentStatus(selectedRequest.id, 'Rejected')}
+                type="button"
+              >
+                Reject Request
+              </button>
+              <button
+                className="approve-request-button"
+                disabled={
+                  selectedRequest.status !== 'Pending' || updatingRequestId === selectedRequest.id
+                }
+                onClick={() => void updateEnrollmentStatus(selectedRequest.id, 'Approved')}
+                type="button"
+              >
+                Approve Request
+              </button>
+            </footer>
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -2446,46 +2665,117 @@ export function DeviceManagementPage() {
 }
 
 export function ReportsPage() {
+  const { session } = useAuth();
+  const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
+  const [users, setUsers] = useState<UserRecord[]>([]);
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    const controller = new AbortController();
+    void fetch(`${API_BASE_URL}/users`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as UserRecord[] | null;
+        if (response.ok && Array.isArray(data)) setUsers(data.filter((user) => !user.is_archived));
+      })
+      .catch(() => {
+        // The report remains available if the role summary cannot be refreshed.
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken]);
+
+  const roleSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    users.forEach((user) => {
+      const role = user.role?.trim() || 'Unassigned';
+      counts.set(role, (counts.get(role) ?? 0) + 1);
+    });
+
+    return Array.from(counts.entries())
+      .sort(([, firstCount], [, secondCount]) => secondCount - firstCount)
+      .slice(0, 4);
+  }, [users]);
+
   return (
     <section className="module-page">
-      <PageHeader title="Reports" description="Generate and download system reports." />
-      <FilterRow showGenerate />
-      <div className="report-summary-grid">
-        <section className="module-panel">
-          <h2>Attendance Summary</h2>
-          <div className="report-bars">
-            <span style={{ width: '74%' }} />
-            <span style={{ width: '82%' }} />
-            <span className="green" style={{ width: '68%' }} />
-            <span className="red" style={{ width: '55%' }} />
-            <span className="yellow" style={{ width: '63%' }} />
-          </div>
-        </section>
-        <section className="module-panel department-summary">
-          <h2>Department Summary</h2>
-          <div className="donut-summary">Total 528</div>
-          <ul>
-            <li>
-              IT Department <strong>42%</strong>
-            </li>
-            <li>
-              HR Department <strong>25%</strong>
-            </li>
-            <li>
-              Operations <strong>20%</strong>
-            </li>
-            <li>
-              Finance <strong>13%</strong>
-            </li>
-          </ul>
-        </section>
-      </div>
-      <ModuleTable
-        title="Recent Reports"
-        columns={['Report Name', 'Report Type', 'Generated By', 'Generated On', 'Actions']}
-        rows={reportRows}
-        withActions
+      <PageHeader
+        title={activeTab === 'reports' ? 'Reports' : 'Audit Logs'}
+        description={
+          activeTab === 'reports'
+            ? 'View attendance reports and role summaries.'
+            : 'Track all system activities and changes.'
+        }
       />
+      <div className="reports-tabs" role="tablist" aria-label="Reports and audit sections">
+        <button
+          aria-selected={activeTab === 'reports'}
+          className={activeTab === 'reports' ? 'active' : ''}
+          onClick={() => setActiveTab('reports')}
+          role="tab"
+          type="button"
+        >
+          Reports
+        </button>
+        <button
+          aria-selected={activeTab === 'audit'}
+          className={activeTab === 'audit' ? 'active' : ''}
+          onClick={() => setActiveTab('audit')}
+          role="tab"
+          type="button"
+        >
+          Audit
+        </button>
+      </div>
+      {activeTab === 'reports' ? (
+        <>
+          <FilterRow showGenerate />
+          <div className="report-summary-grid">
+            <section className="module-panel">
+              <h2>Attendance Summary</h2>
+              <div className="report-bars">
+                <span style={{ width: '74%' }} />
+                <span style={{ width: '82%' }} />
+                <span className="green" style={{ width: '68%' }} />
+                <span className="red" style={{ width: '55%' }} />
+                <span className="yellow" style={{ width: '63%' }} />
+              </div>
+            </section>
+            <section className="module-panel role-summary">
+              <h2>Role Summary</h2>
+              <div className="donut-summary">Total {users.length}</div>
+              <ul>
+                {roleSummary.length > 0 ? (
+                  roleSummary.map(([role, count]) => (
+                    <li key={role}>
+                      <span>{role}</span>
+                      <strong>
+                        {users.length ? `${Math.round((count / users.length) * 100)}%` : '0%'}
+                      </strong>
+                    </li>
+                  ))
+                ) : (
+                  <li>
+                    <span>No role data available</span>
+                    <strong>—</strong>
+                  </li>
+                )}
+              </ul>
+            </section>
+          </div>
+          <ModuleTable
+            title="Recent Reports"
+            columns={['Report Name', 'Report Type', 'Generated By', 'Generated On', 'Actions']}
+            rows={reportRows}
+            withActions
+          />
+        </>
+      ) : (
+        <AuditLogsPage embedded />
+      )}
     </section>
   );
 }
@@ -2560,7 +2850,7 @@ function buildAuditPdf(rows: string[][]) {
   return pdf;
 }
 
-export function AuditLogsPage() {
+export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   const { session } = useAuth();
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(session?.accessToken));
@@ -2704,7 +2994,9 @@ export function AuditLogsPage() {
 
   return (
     <section className="module-page">
-      <PageHeader title="Audit Logs" description="Track all system activities and changes." />
+      {!embedded ? (
+        <PageHeader title="Audit Logs" description="Track all system activities and changes." />
+      ) : null}
       <div className="module-filter-row enrollment-filter-row">
         <input
           aria-label="Search audit logs"
@@ -2783,72 +3075,342 @@ export function AuditLogsPage() {
 }
 
 export function SettingsPage() {
+  const { session } = useAuth();
+  const [activeTab, setActiveTab] = useState<'general' | 'security'>('general');
+  const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
+  const [profile, setProfile] = useState<AdminSettingsProfile | null>(null);
+  const [totalUsers, setTotalUsers] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    const controller = new AbortController();
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
+
+    void Promise.all([
+      fetch(`${API_BASE_URL}/settings`, { headers, signal: controller.signal }),
+      fetch(`${API_BASE_URL}/auth/me`, { headers, signal: controller.signal }),
+      fetch(`${API_BASE_URL}/users`, { headers, signal: controller.signal }),
+    ])
+      .then(async ([settingsResponse, profileResponse, usersResponse]) => {
+        const settingsData = (await settingsResponse
+          .json()
+          .catch(() => null)) as SystemSettings | null;
+        const profileData = (await profileResponse
+          .json()
+          .catch(() => null)) as AdminSettingsProfile | null;
+        const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
+
+        if (settingsResponse.ok && settingsData)
+          setSettings({ ...DEFAULT_SYSTEM_SETTINGS, ...settingsData });
+        if (profileResponse.ok && profileData) setProfile(profileData);
+        if (usersResponse.ok && Array.isArray(usersData)) {
+          setTotalUsers(usersData.filter((user) => !user.is_archived).length);
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        setMessage('Unable to load all settings. Please try again.');
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken]);
+
+  const updateSetting = <K extends keyof SystemSettings>(key: K, value: SystemSettings[K]) => {
+    setSettings((current) => ({ ...current, [key]: value }));
+  };
+
+  async function saveSettings() {
+    if (!session?.accessToken) return;
+
+    try {
+      setIsSaving(true);
+      setMessage('');
+      const response = await fetch(`${API_BASE_URL}/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          timeZone: settings.time_zone,
+          dateFormat: settings.date_format,
+          timeFormat: settings.time_format,
+          systemLanguage: settings.system_language,
+          sessionTimeoutMinutes: settings.session_timeout_minutes,
+          firstDayOfWeek: settings.first_day_of_week,
+          maxFailedAttempts: settings.max_failed_attempts,
+          lockoutDurationMinutes: settings.lockout_duration_minutes,
+          resetFailedAttemptsAfterMinutes: settings.reset_failed_attempts_after_minutes,
+          lockoutEnabled: settings.lockout_enabled,
+          idleTimeoutWarningMinutes: settings.idle_timeout_warning_minutes,
+          autoLogoutEnabled: settings.auto_logout_enabled,
+          keepMeLoggedIn: settings.keep_me_logged_in,
+          adminRfidEnabled: settings.admin_rfid_enabled,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | SystemSettings
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !data || 'error' in data) {
+        throw new Error(data && 'error' in data ? data.error : 'Unable to save settings.');
+      }
+
+      setSettings({ ...DEFAULT_SYSTEM_SETTINGS, ...data });
+      setMessage('Settings saved successfully.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to save settings.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <section className="module-page">
       <PageHeader title="Settings" description="Configure system preferences and parameters." />
-      <div className="settings-layout">
-        <nav className="settings-menu" aria-label="Settings sections">
-          {[
-            'General Settings',
-            'System Preferences',
-            'Security Settings',
-            'Backup & Restore',
-            'System Information',
-          ].map((item, index) => (
-            <button className={index === 0 ? 'active' : ''} key={item} type="button">
-              {item}
-            </button>
-          ))}
-        </nav>
+      <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button
+          className={activeTab === 'general' ? 'active' : ''}
+          onClick={() => setActiveTab('general')}
+          role="tab"
+          type="button"
+        >
+          General Settings
+        </button>
+        <button
+          className={activeTab === 'security' ? 'active' : ''}
+          onClick={() => setActiveTab('security')}
+          role="tab"
+          type="button"
+        >
+          System &amp; Security
+        </button>
+      </div>
 
-        <section className="module-panel settings-form-panel">
-          <h2>General Settings</h2>
-          <div className="settings-form-grid">
-            <label>
-              Company Name
-              <input defaultValue="EINGRESS Corporation" />
-            </label>
-            <label>
-              Time Zone
-              <input defaultValue="(UTC+08:00) Asia/Manila" />
-            </label>
-            <label>
-              Date Format
-              <input defaultValue="MM/DD/YYYY" />
-            </label>
-            <label>
-              Time Format
-              <input defaultValue="12-Hour (hh:mm AM/PM)" />
-            </label>
-            <label>
-              System Language
-              <input defaultValue="English" />
-            </label>
-            <label>
-              Session Timeout
-              <input defaultValue="30 minutes" />
-            </label>
-          </div>
-          <button className="save-settings-button" type="button">
-            Save Changes
-          </button>
-        </section>
-
-        <section className="module-panel system-info-panel">
-          <h2>System Information</h2>
-          {[
-            ['System Version', 'v2.1.0'],
-            ['Database Status', 'Healthy'],
-            ['Last Backup', 'May 20, 2025 02:00 AM'],
-            ['Total Users', '528'],
-            ['Total Devices', '24'],
-          ].map(([label, value]) => (
-            <div key={label}>
-              <span>{label}</span>
-              <strong className={value === 'Healthy' ? 'healthy' : ''}>{value}</strong>
+      {activeTab === 'general' ? (
+        <div className="general-settings-grid">
+          <section className="module-panel settings-card admin-profile-card">
+            <h2>Admin Profile</h2>
+            <div className="settings-fields">
+              <label>
+                Admin Name
+                <input disabled value={profile?.name ?? session?.adminName ?? 'Administrator'} />
+              </label>
+              <label>
+                Email
+                <input disabled value={profile?.email ?? session?.email ?? ''} />
+              </label>
+              <label>
+                RFID Number
+                <input disabled value={profile?.rfidUid ?? '—'} />
+              </label>
+              <label>
+                Role
+                <input disabled value={profile?.role ?? 'Administrator'} />
+              </label>
+              <label>
+                System Language
+                <select
+                  value={settings.system_language}
+                  onChange={(event) => updateSetting('system_language', event.target.value)}
+                >
+                  <option>English</option>
+                  <option>Filipino</option>
+                </select>
+              </label>
             </div>
-          ))}
-        </section>
+          </section>
+          <section className="module-panel settings-card system-info-card">
+            <h2>System Information</h2>
+            <dl>
+              <div>
+                <dt>System Version</dt>
+                <dd>{settings.system_version}</dd>
+              </div>
+              <div>
+                <dt>Database Status</dt>
+                <dd className="healthy">{settings.database_status}</dd>
+              </div>
+              <div>
+                <dt>Last Backup</dt>
+                <dd>
+                  {settings.last_backup_at
+                    ? formatAuditTimestamp(settings.last_backup_at)
+                    : 'Not available'}
+                </dd>
+              </div>
+              <div>
+                <dt>Total Users</dt>
+                <dd>{totalUsers ?? '—'}</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      ) : (
+        <div className="security-settings-stack">
+          <section className="module-panel settings-card">
+            <h2>Date &amp; Time Settings</h2>
+            <p>Configure how dates and times are displayed across the system.</p>
+            <div className="security-fields four-columns">
+              <label>
+                Date Format
+                <input
+                  value={settings.date_format}
+                  onChange={(event) => updateSetting('date_format', event.target.value)}
+                />
+              </label>
+              <label>
+                Time Format
+                <input
+                  value={settings.time_format}
+                  onChange={(event) => updateSetting('time_format', event.target.value)}
+                />
+              </label>
+              <label>
+                First Day of Week
+                <select
+                  value={settings.first_day_of_week}
+                  onChange={(event) => updateSetting('first_day_of_week', event.target.value)}
+                >
+                  <option>Monday</option>
+                  <option>Sunday</option>
+                </select>
+              </label>
+              <label>
+                Time Zone
+                <input
+                  value={settings.time_zone}
+                  onChange={(event) => updateSetting('time_zone', event.target.value)}
+                />
+              </label>
+            </div>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>Account Lockout Policy</h2>
+            <p>Define account lockout rules to prevent unauthorized access.</p>
+            <div className="security-fields lockout-fields">
+              <label>
+                Maximum Failed Attempts
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.max_failed_attempts}
+                  onChange={(event) =>
+                    updateSetting('max_failed_attempts', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Lockout Duration (minutes)
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.lockout_duration_minutes}
+                  onChange={(event) =>
+                    updateSetting('lockout_duration_minutes', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Reset Failed Attempts After (minutes)
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.reset_failed_attempts_after_minutes}
+                  onChange={(event) =>
+                    updateSetting('reset_failed_attempts_after_minutes', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label className="toggle-setting">
+                <input
+                  checked={settings.lockout_enabled}
+                  onChange={(event) => updateSetting('lockout_enabled', event.target.checked)}
+                  type="checkbox"
+                />
+                <span />
+                Enable lockout policy
+              </label>
+            </div>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>Session &amp; Timeout Settings</h2>
+            <p>Configure user session and system timeout preferences.</p>
+            <div className="security-fields session-fields">
+              <label>
+                Session Timeout (minutes)
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.session_timeout_minutes}
+                  onChange={(event) =>
+                    updateSetting('session_timeout_minutes', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Idle Timeout Warning (minutes)
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.idle_timeout_warning_minutes}
+                  onChange={(event) =>
+                    updateSetting('idle_timeout_warning_minutes', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label className="toggle-setting">
+                <input
+                  checked={settings.auto_logout_enabled}
+                  onChange={(event) => updateSetting('auto_logout_enabled', event.target.checked)}
+                  type="checkbox"
+                />
+                <span />
+                Enable auto logout
+              </label>
+              <label className="toggle-setting">
+                <input
+                  checked={settings.keep_me_logged_in}
+                  onChange={(event) => updateSetting('keep_me_logged_in', event.target.checked)}
+                  type="checkbox"
+                />
+                <span />
+                Keep me logged in
+              </label>
+            </div>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>RFID Authentication</h2>
+            <p>Strengthen account security by requiring RFID authentication.</p>
+            <label className="toggle-setting">
+              <input
+                checked={settings.admin_rfid_enabled}
+                onChange={(event) => updateSetting('admin_rfid_enabled', event.target.checked)}
+                type="checkbox"
+              />
+              <span />
+              Administrator Enable RFID
+            </label>
+          </section>
+        </div>
+      )}
+      <div className="settings-save-row">
+        <span>{message}</span>
+        <button
+          className="save-settings-button"
+          disabled={isSaving}
+          onClick={() => void saveSettings()}
+          type="button"
+        >
+          {isSaving ? 'Saving…' : 'Save Changes'}
+        </button>
       </div>
     </section>
   );
