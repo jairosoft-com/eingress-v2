@@ -5,8 +5,6 @@ import { ProtectedRoute } from '../auth/ProtectedRoute';
 import { AccessLogsPage } from '../pages/AccessLogsPage';
 import {
   AttendanceManagementPage,
-  AuditLogsPage,
-  DeviceManagementPage,
   EnrollmentRequestsPage,
   ReportsPage,
   SettingsPage,
@@ -43,8 +41,12 @@ export const router = createBrowserRouter([
     element: <KioskPage />,
   },
   {
-    path: '/kioskbio',
+    path: '/attendance-kiosk',
     element: <KioskBioPage />,
+  },
+  {
+    path: '/kioskbio',
+    element: <Navigate replace to="/attendance-kiosk" />,
   },
   {
     element: <ProtectedRoute />,
@@ -78,16 +80,12 @@ export const router = createBrowserRouter([
             element: <EnrollmentRequestsPage />,
           },
           {
-            path: 'device-management',
-            element: <DeviceManagementPage />,
-          },
-          {
             path: 'reports',
             element: <ReportsPage />,
           },
           {
             path: 'audit-logs',
-            element: <AuditLogsPage />,
+            element: <Navigate replace to="/reports" />,
           },
           {
             path: 'settings',

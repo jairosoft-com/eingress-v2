@@ -6,12 +6,33 @@ import { authMiddleware } from '../middleware/auth.js';
 export const settingsRouter = express.Router();
 settingsRouter.use(authMiddleware);
 
+async function ensureSecuritySettingColumns() {
+  await query(`
+    ALTER TABLE system_settings
+      ADD COLUMN IF NOT EXISTS first_day_of_week VARCHAR(20) NOT NULL DEFAULT 'Monday',
+      ADD COLUMN IF NOT EXISTS max_failed_attempts INTEGER NOT NULL DEFAULT 5,
+      ADD COLUMN IF NOT EXISTS lockout_duration_minutes INTEGER NOT NULL DEFAULT 30,
+      ADD COLUMN IF NOT EXISTS reset_failed_attempts_after_minutes INTEGER NOT NULL DEFAULT 15,
+      ADD COLUMN IF NOT EXISTS lockout_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS idle_timeout_warning_minutes INTEGER NOT NULL DEFAULT 5,
+      ADD COLUMN IF NOT EXISTS auto_logout_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      ADD COLUMN IF NOT EXISTS keep_me_logged_in BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS admin_rfid_enabled BOOLEAN NOT NULL DEFAULT TRUE
+  `);
+}
+
+const settingsReady = ensureSecuritySettingColumns();
+
 settingsRouter.get('/', async (req, res, next) => {
   try {
+    await settingsReady;
     const result = await query(
       `SELECT company_name, time_zone, date_format, time_format,
         system_language, session_timeout_minutes, database_status, last_backup_at,
-        system_version, updated_at
+        system_version, updated_at, first_day_of_week, max_failed_attempts,
+        lockout_duration_minutes, reset_failed_attempts_after_minutes, lockout_enabled,
+        idle_timeout_warning_minutes, auto_logout_enabled, keep_me_logged_in,
+        admin_rfid_enabled
        FROM system_settings
        ORDER BY id
        LIMIT 1`,
@@ -25,6 +46,7 @@ settingsRouter.get('/', async (req, res, next) => {
 
 settingsRouter.patch('/', async (req, res, next) => {
   try {
+    await settingsReady;
     const {
       companyName,
       timeZone,
@@ -32,6 +54,15 @@ settingsRouter.patch('/', async (req, res, next) => {
       timeFormat,
       systemLanguage,
       sessionTimeoutMinutes,
+      firstDayOfWeek,
+      maxFailedAttempts,
+      lockoutDurationMinutes,
+      resetFailedAttemptsAfterMinutes,
+      lockoutEnabled,
+      idleTimeoutWarningMinutes,
+      autoLogoutEnabled,
+      keepMeLoggedIn,
+      adminRfidEnabled,
     } = req.body;
 
     const result = await query(
@@ -42,6 +73,15 @@ settingsRouter.patch('/', async (req, res, next) => {
          time_format = COALESCE($4, time_format),
          system_language = COALESCE($5, system_language),
          session_timeout_minutes = COALESCE($6, session_timeout_minutes),
+         first_day_of_week = COALESCE($7, first_day_of_week),
+         max_failed_attempts = COALESCE($8, max_failed_attempts),
+         lockout_duration_minutes = COALESCE($9, lockout_duration_minutes),
+         reset_failed_attempts_after_minutes = COALESCE($10, reset_failed_attempts_after_minutes),
+         lockout_enabled = COALESCE($11, lockout_enabled),
+         idle_timeout_warning_minutes = COALESCE($12, idle_timeout_warning_minutes),
+         auto_logout_enabled = COALESCE($13, auto_logout_enabled),
+         keep_me_logged_in = COALESCE($14, keep_me_logged_in),
+         admin_rfid_enabled = COALESCE($15, admin_rfid_enabled),
          updated_at = NOW()
        WHERE id = (SELECT id FROM system_settings ORDER BY id LIMIT 1)
        RETURNING *`,
@@ -52,6 +92,15 @@ settingsRouter.patch('/', async (req, res, next) => {
         timeFormat ?? null,
         systemLanguage ?? null,
         sessionTimeoutMinutes ?? null,
+        firstDayOfWeek ?? null,
+        maxFailedAttempts ?? null,
+        lockoutDurationMinutes ?? null,
+        resetFailedAttemptsAfterMinutes ?? null,
+        lockoutEnabled ?? null,
+        idleTimeoutWarningMinutes ?? null,
+        autoLogoutEnabled ?? null,
+        keepMeLoggedIn ?? null,
+        adminRfidEnabled ?? null,
       ],
     );
 
