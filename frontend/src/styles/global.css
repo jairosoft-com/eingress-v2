@@ -3046,6 +3046,7 @@ td small {
 
 .module-table {
   min-width: 900px;
+  table-layout: fixed;
 }
 
 .module-table th {
@@ -3059,10 +3060,29 @@ td small {
 .module-table td {
   padding: 14px 18px;
   border-bottom: 1px solid #17223f;
+  overflow: hidden;
+}
+
+.module-table th {
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .module-table td {
   color: #17223f;
+  vertical-align: top;
+}
+
+.module-table-filler-row td {
+  border-bottom-color: transparent;
+}
+
+.module-cell-text {
+  display: -webkit-box;
+  overflow: hidden;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .module-table-message {

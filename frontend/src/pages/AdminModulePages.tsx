@@ -133,6 +133,15 @@ type AuditLogRecord = {
   module: string;
 };
 
+type AuditLogPagination = {
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  totalRecords: number;
+};
+
+const AUDIT_LOGS_PAGE_SIZE = 10;
+
 type SystemSettings = {
   admin_rfid_enabled: boolean;
   auto_logout_enabled: boolean;
@@ -329,6 +338,8 @@ function ModuleTable({
   emptyMessage = 'No records found.',
   errorMessage,
   isLoading = false,
+  onPageChange,
+  pagination,
   rows,
   title,
   withActions = false,
@@ -338,10 +349,17 @@ function ModuleTable({
   emptyMessage?: string;
   errorMessage?: string;
   isLoading?: boolean;
+  onPageChange?: (page: number) => void;
+  pagination?: { page: number; pageSize: number; totalPages: number; totalRecords: number };
   rows: string[][];
   title: string;
   withActions?: boolean;
 }) {
+  const fillerRowCount =
+    pagination && rows.length > 0 && rows.length < pagination.pageSize
+      ? pagination.pageSize - rows.length
+      : 0;
+
   return (
     <section className="module-panel" aria-labelledby={`${title.replaceAll(' ', '-')}-title`}>
       <h2 id={`${title.replaceAll(' ', '-')}-title`}>{title}</h2>
@@ -391,9 +409,9 @@ function ModuleTable({
                       {isStatusColumn(columns[index]) ? (
                         <span className={`module-status ${statusTone(cell)}`}>{cell}</span>
                       ) : index === 1 ? (
-                        <strong>{cell}</strong>
+                        <strong className="module-cell-text">{cell}</strong>
                       ) : (
-                        cell
+                        <span className="module-cell-text">{cell}</span>
                       )}
                     </td>
                   ))}
@@ -423,19 +441,90 @@ function ModuleTable({
                 </tr>
               ))
             )}
+            {Array.from({ length: fillerRowCount }, (_, fillerIndex) => (
+              <tr
+                key={`filler-${fillerIndex}`}
+                className="module-table-filler-row"
+                aria-hidden="true"
+              >
+                {Array.from({ length: columns.length + (withActions ? 1 : 0) }, (_, cellIndex) => (
+                  <td key={cellIndex}>&nbsp;</td>
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-      <div className="module-pagination">
-        <span>Showing 1 to {rows.length} entries</span>
-        <span>
-          <button className="active">1</button>
-          <button>2</button>
-          <button>3</button>
-          <button>&gt;</button>
-        </span>
-      </div>
+      {pagination && onPageChange ? (
+        <ModuleTablePagination pagination={pagination} onPageChange={onPageChange} />
+      ) : (
+        <div className="module-pagination">
+          <span>Showing 1 to {rows.length} entries</span>
+          <span>
+            <button className="active">1</button>
+            <button>2</button>
+            <button>3</button>
+            <button>&gt;</button>
+          </span>
+        </div>
+      )}
     </section>
+  );
+}
+
+function ModuleTablePagination({
+  onPageChange,
+  pagination,
+}: {
+  onPageChange: (page: number) => void;
+  pagination: { page: number; totalPages: number; totalRecords: number };
+}) {
+  const { page, totalPages, totalRecords } = pagination;
+  const pageSize = totalRecords > 0 && totalPages > 0 ? Math.ceil(totalRecords / totalPages) : 0;
+  const rangeStart = totalRecords === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, totalRecords);
+
+  const pageNumbers: number[] = [];
+  const windowStart = Math.max(1, Math.min(page - 1, totalPages - 2));
+  const windowEnd = Math.min(totalPages, windowStart + 2);
+  for (let pageNumber = windowStart; pageNumber <= windowEnd; pageNumber += 1) {
+    pageNumbers.push(pageNumber);
+  }
+
+  return (
+    <div className="module-pagination">
+      <span>
+        Showing {rangeStart} to {rangeEnd} of {totalRecords} entries
+      </span>
+      <span>
+        <button
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          type="button"
+          aria-label="Previous page"
+        >
+          &lt;
+        </button>
+        {pageNumbers.map((pageNumber) => (
+          <button
+            key={pageNumber}
+            className={pageNumber === page ? 'active' : ''}
+            onClick={() => onPageChange(pageNumber)}
+            type="button"
+          >
+            {pageNumber}
+          </button>
+        ))}
+        <button
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+          type="button"
+          aria-label="Next page"
+        >
+          &gt;
+        </button>
+      </span>
+    </div>
   );
 }
 
@@ -2867,6 +2956,13 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
     module: '',
     search: '',
   });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<AuditLogPagination>({
+    page: 1,
+    pageSize: AUDIT_LOGS_PAGE_SIZE,
+    totalPages: 1,
+    totalRecords: 0,
+  });
 
   useEffect(() => {
     const accessToken = session?.accessToken;
@@ -2904,7 +3000,8 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
           params.set('dateTo', appliedFilters.dateTo);
         }
 
-        params.set('limit', '500');
+        params.set('page', String(currentPage));
+        params.set('pageSize', String(AUDIT_LOGS_PAGE_SIZE));
 
         const response = await fetch(`${API_BASE_URL}/audit-logs?${params.toString()}`, {
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -2915,8 +3012,12 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
           throw new Error('Unable to load audit logs.');
         }
 
-        const data = (await response.json()) as AuditLogRecord[];
-        setAuditLogs(data);
+        const data = (await response.json()) as {
+          data: AuditLogRecord[];
+          pagination: AuditLogPagination;
+        };
+        setAuditLogs(data.data);
+        setPagination(data.pagination);
       } catch (error) {
         if ((error as Error).name === 'AbortError') {
           return;
@@ -2931,16 +3032,41 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
     void loadAuditLogs();
 
     return () => controller.abort();
-  }, [appliedFilters, session?.accessToken]);
+  }, [appliedFilters, currentPage, session?.accessToken]);
 
-  const moduleOptions = useMemo(
-    () => Array.from(new Set(auditLogs.map((log) => log.module).filter(Boolean))).sort(),
-    [auditLogs],
-  );
-  const actionOptions = useMemo(
-    () => Array.from(new Set(auditLogs.map((log) => log.action).filter(Boolean))).sort(),
-    [auditLogs],
-  );
+  const [moduleOptions, setModuleOptions] = useState<string[]>([]);
+  const [actionOptions, setActionOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    const accessToken = session?.accessToken;
+
+    if (!accessToken) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE_URL}/audit-logs/options`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as {
+          actions: string[];
+          modules: string[];
+        } | null;
+
+        if (response.ok && data) {
+          setModuleOptions(data.modules);
+          setActionOptions(data.actions);
+        }
+      })
+      .catch(() => {
+        // Filter dropdowns remain empty if options cannot be loaded.
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken]);
 
   const tableRows = useMemo(
     () =>
@@ -2955,6 +3081,7 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   );
 
   const onApplyFilters = () => {
+    setCurrentPage(1);
     setAppliedFilters({
       action: draftAction,
       dateFrom: draftDateFrom,
@@ -2970,6 +3097,7 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
     setDraftAction('');
     setDraftDateFrom('');
     setDraftDateTo('');
+    setCurrentPage(1);
     setAppliedFilters({
       action: '',
       dateFrom: '',
@@ -3069,6 +3197,8 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
         title="Audit Logs"
         columns={['Date & Time', 'User', 'Action', 'Module', 'Details']}
         rows={tableRows}
+        pagination={pagination}
+        onPageChange={setCurrentPage}
       />
     </section>
   );

@@ -6,6 +6,25 @@ import { authMiddleware } from '../middleware/auth.js';
 export const auditLogsRouter = express.Router();
 auditLogsRouter.use(authMiddleware);
 
+const DEFAULT_PAGE_SIZE = Number.parseInt(process.env.AUDIT_LOGS_DEFAULT_PAGE_SIZE || '10', 10);
+const MAX_PAGE_SIZE = Number.parseInt(process.env.AUDIT_LOGS_MAX_PAGE_SIZE || '100', 10);
+
+auditLogsRouter.get('/options', async (_req, res, next) => {
+  try {
+    const [moduleResult, actionResult] = await Promise.all([
+      query('SELECT DISTINCT module FROM audit_logs WHERE module IS NOT NULL ORDER BY module'),
+      query('SELECT DISTINCT action FROM audit_logs WHERE action IS NOT NULL ORDER BY action'),
+    ]);
+
+    res.json({
+      actions: actionResult.rows.map((row) => row.action),
+      modules: moduleResult.rows.map((row) => row.module),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 auditLogsRouter.get('/', async (req, res, next) => {
   try {
     const search = String(req.query.search || '').trim();
@@ -14,7 +33,15 @@ auditLogsRouter.get('/', async (req, res, next) => {
     const adminNameFilter = String(req.query.adminName || '').trim();
     const dateFrom = String(req.query.dateFrom || '').trim();
     const dateTo = String(req.query.dateTo || '').trim();
-    const limit = Number.parseInt(String(req.query.limit || '500'), 10);
+
+    const requestedPage = Number.parseInt(String(req.query.page || '1'), 10);
+    const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+
+    const requestedPageSize = Number.parseInt(String(req.query.pageSize || ''), 10);
+    const pageSize =
+      Number.isFinite(requestedPageSize) && requestedPageSize > 0
+        ? Math.min(requestedPageSize, MAX_PAGE_SIZE)
+        : DEFAULT_PAGE_SIZE;
 
     const conditions = [];
     const values = [];
@@ -67,7 +94,17 @@ auditLogsRouter.get('/', async (req, res, next) => {
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 500;
+    const offset = (page - 1) * pageSize;
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM audit_logs l
+       LEFT JOIN admins a ON a.id = l.admin_id
+       ${whereClause}`,
+      values,
+    );
+    const totalRecords = countResult.rows[0]?.total ?? 0;
+    const totalPages = Math.max(Math.ceil(totalRecords / pageSize), 1);
 
     const result = await query(
       `SELECT l.id, l.action, l.module, l.details, l.ip_address, l.created_at,
@@ -76,16 +113,22 @@ auditLogsRouter.get('/', async (req, res, next) => {
        LEFT JOIN admins a ON a.id = l.admin_id
        ${whereClause}
        ORDER BY l.created_at DESC
-       LIMIT $${index}`,
-      [...values, safeLimit],
+       LIMIT $${index} OFFSET $${index + 1}`,
+      [...values, pageSize, offset],
     );
 
-    res.json(
-      result.rows.map((row) => ({
+    res.json({
+      data: result.rows.map((row) => ({
         ...row,
         ip_address: row.ip_address ? String(row.ip_address) : '',
       })),
-    );
+      pagination: {
+        page,
+        pageSize,
+        totalRecords,
+        totalPages,
+      },
+    });
   } catch (error) {
     next(error);
   }
