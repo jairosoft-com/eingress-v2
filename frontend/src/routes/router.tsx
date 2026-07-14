@@ -5,7 +5,6 @@ import { ProtectedRoute } from '../auth/ProtectedRoute';
 import { AccessLogsPage } from '../pages/AccessLogsPage';
 import {
   AttendanceManagementPage,
-  DeviceManagementPage,
   EnrollmentRequestsPage,
   ReportsPage,
   SettingsPage,
@@ -79,10 +78,6 @@ export const router = createBrowserRouter([
           {
             path: 'enrollment-requests',
             element: <EnrollmentRequestsPage />,
-          },
-          {
-            path: 'device-management',
-            element: <DeviceManagementPage />,
           },
           {
             path: 'reports',

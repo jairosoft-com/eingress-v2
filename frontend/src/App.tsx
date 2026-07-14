@@ -9,7 +9,6 @@ import {
   Home,
   LogOut,
   Mail,
-  Monitor,
   Settings,
   ShieldCheck,
   X,
@@ -30,7 +29,6 @@ const navItems = [
   { label: 'User Management', path: '/attendance-management', Icon: UsersRound },
   { label: 'Attendance Management', path: '/attendance', Icon: CalendarCheck },
   { label: 'Enrollment Requests', path: '/enrollment-requests', Icon: ClipboardList },
-  { label: 'Device Management', path: '/device-management', Icon: Monitor },
   { label: 'Reports & Audit Logs', path: '/reports', Icon: FileText },
   { label: 'Settings', path: '/settings', Icon: Settings },
 ];
