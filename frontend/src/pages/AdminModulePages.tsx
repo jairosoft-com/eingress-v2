@@ -45,12 +45,6 @@ const deviceRows = [
   ['DEV-006', 'IT Room Bio', 'Biometric', 'IT Room', '192.168.1.15', 'Online', 'May 20'],
 ];
 
-const reportRows = [
-  ['Attendance Summary', 'Attendance Summary', 'Admin', 'May 20', 'Download'],
-  ['Late Arrival Report', 'Late Arrival', 'Admin', 'May 20', 'Download'],
-  ['Absenteeism Report', 'Absenteeism', 'Admin', 'May 20', 'Download'],
-];
-
 type EnrollmentRequest = {
   department: string;
   employee_id: string;
@@ -233,22 +227,6 @@ function PageHeader({ description, title }: { description: string; title: string
   );
 }
 
-function FilterRow({ showGenerate = false }: { showGenerate?: boolean }) {
-  return (
-    <div className="module-filter-row">
-      <input defaultValue="May 20, 2025" aria-label="Date" />
-      <input defaultValue="All Departments" aria-label="Department" />
-      <input defaultValue="All Status" aria-label="Status" />
-      <input placeholder="Search by name or ID..." aria-label="Search" />
-      {showGenerate ? <button className="dark-action-button">Generate Report</button> : null}
-      <button className="filter-button" type="button">
-        Filter
-        <Filter size={16} />
-      </button>
-    </div>
-  );
-}
-
 function EnrollmentFilterRow({
   departmentFilter,
   departments,
@@ -360,11 +338,16 @@ function ModuleTable({
       ? pagination.pageSize - rows.length
       : 0;
 
+  const columnCount = columns.length + (withActions ? 1 : 0);
+
   return (
     <section className="module-panel" aria-labelledby={`${title.replaceAll(' ', '-')}-title`}>
       <h2 id={`${title.replaceAll(' ', '-')}-title`}>{title}</h2>
       <div className="module-table-wrap">
-        <table className="module-table">
+        <table
+          className={withActions ? 'module-table has-actions' : 'module-table'}
+          style={{ minWidth: Math.max(900, columnCount * 130) }}
+        >
           <thead>
             <tr>
               {columns.map((column) => (
@@ -2753,10 +2736,217 @@ export function DeviceManagementPage() {
   );
 }
 
+const REPORT_TYPES = [
+  'Attendance Summary',
+  'Access Request Summary',
+  'User Summary',
+  'Auto-Deactivated Accounts',
+] as const;
+
+type ReportType = (typeof REPORT_TYPES)[number];
+
+const REPORT_STATUS_OPTIONS: Record<ReportType, string[]> = {
+  'Attendance Summary': ['Present', 'Late', 'Absent'],
+  'Access Request Summary': ['Pending', 'Approved', 'Rejected'],
+  'User Summary': ['Active', 'Disabled'],
+  'Auto-Deactivated Accounts': [],
+};
+
+type GeneratedReport = {
+  created_at: string;
+  generated_by: string | null;
+  id: number;
+  report_name: string;
+  report_type: string;
+};
+
+type ReportData = {
+  columns: string[];
+  rows: string[][];
+};
+
+const REPORTS_PAGE_SIZE = 10;
+
+type DepartmentSummaryRow = {
+  department: string | null;
+  total: number;
+};
+
+type AttendanceTrendPoint = {
+  absent: number;
+  date: string;
+  late: number;
+  present: number;
+};
+
+function formatTrendDayLabel(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(date);
+}
+
+function niceMax(value: number) {
+  if (value <= 0) return 5;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  return Math.ceil(value / magnitude) * magnitude;
+}
+
+function AttendanceTrendChart({ trend }: { trend: AttendanceTrendPoint[] }) {
+  const width = 640;
+  const height = 220;
+  const paddingLeft = 36;
+  const paddingRight = 16;
+  const paddingTop = 16;
+  const paddingBottom = 28;
+  const plotWidth = width - paddingLeft - paddingRight;
+  const plotHeight = height - paddingTop - paddingBottom;
+
+  const maxValue = niceMax(
+    Math.max(1, ...trend.flatMap((point) => [point.present, point.late, point.absent])),
+  );
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => Math.round(maxValue * fraction));
+
+  const xFor = (index: number) =>
+    trend.length > 1 ? paddingLeft + (plotWidth * index) / (trend.length - 1) : paddingLeft;
+  const yFor = (value: number) => paddingTop + plotHeight - (plotHeight * value) / maxValue;
+
+  const buildPath = (key: 'present' | 'late' | 'absent') =>
+    trend
+      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${xFor(index)} ${yFor(point[key])}`)
+      .join(' ');
+
+  return (
+    <div className="attendance-trend-chart">
+      <svg
+        role="img"
+        aria-label="Attendance trend over the last 7 days"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        {yTicks.map((tick) => (
+          <g key={tick}>
+            <line
+              x1={paddingLeft}
+              x2={width - paddingRight}
+              y1={yFor(tick)}
+              y2={yFor(tick)}
+              className="attendance-trend-gridline"
+            />
+            <text
+              x={paddingLeft - 8}
+              y={yFor(tick)}
+              className="attendance-trend-axis-label"
+              textAnchor="end"
+            >
+              {tick}
+            </text>
+          </g>
+        ))}
+        {trend.map((point, index) => (
+          <text
+            key={point.date}
+            x={xFor(index)}
+            y={height - 6}
+            className="attendance-trend-axis-label"
+            textAnchor="middle"
+          >
+            {formatTrendDayLabel(point.date)}
+          </text>
+        ))}
+        <path d={buildPath('present')} className="attendance-trend-line present" fill="none" />
+        <path d={buildPath('late')} className="attendance-trend-line late" fill="none" />
+        <path d={buildPath('absent')} className="attendance-trend-line absent" fill="none" />
+      </svg>
+      <ul className="attendance-trend-legend">
+        <li className="present">Present</li>
+        <li className="late">Late</li>
+        <li className="absent">Absent</li>
+      </ul>
+    </div>
+  );
+}
+
+function ReportPreviewModal({
+  data,
+  onClose,
+  reportName,
+}: {
+  data: ReportData;
+  onClose: () => void;
+  reportName: string;
+}) {
+  return (
+    <div className="report-preview-backdrop" role="presentation" onClick={onClose}>
+      <section
+        aria-labelledby="report-preview-title"
+        className="report-preview-modal"
+        role="dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <h2 id="report-preview-title">{reportName}</h2>
+          <button aria-label="Close preview" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="report-preview-table-wrap">
+          <table className="module-table">
+            <thead>
+              <tr>
+                {data.columns.map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.length === 0 ? (
+                <tr>
+                  <td className="module-table-message" colSpan={data.columns.length}>
+                    No records match this report.
+                  </td>
+                </tr>
+              ) : (
+                data.rows.map((row) => (
+                  <tr key={row.join('-')}>
+                    {row.map((cell, index) => (
+                      <td key={`${cell}-${index}`}>{cell}</td>
+                    ))}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function ReportsPage() {
   const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
   const [users, setUsers] = useState<UserRecord[]>([]);
+  const [reportType, setReportType] = useState<ReportType>('Attendance Summary');
+  const [dateFilter, setDateFilter] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [searchFilter, setSearchFilter] = useState('');
+  const [generatedReports, setGeneratedReports] = useState<GeneratedReport[]>([]);
+  const [isLoadingReports, setIsLoadingReports] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState('');
+  const [previewReport, setPreviewReport] = useState<{ data: ReportData; name: string } | null>(
+    null,
+  );
+  const [busyReportId, setBusyReportId] = useState<number | null>(null);
+  const [reportsCurrentPage, setReportsCurrentPage] = useState(1);
+  const [reportsPagination, setReportsPagination] = useState<AuditLogPagination>({
+    page: 1,
+    pageSize: REPORTS_PAGE_SIZE,
+    totalPages: 1,
+    totalRecords: 0,
+  });
+  const [departmentSummary, setDepartmentSummary] = useState<DepartmentSummaryRow[]>([]);
+  const [attendanceTrend, setAttendanceTrend] = useState<AttendanceTrendPoint[]>([]);
 
   useEffect(() => {
     if (!session?.accessToken) return;
@@ -2777,17 +2967,179 @@ export function ReportsPage() {
     return () => controller.abort();
   }, [session?.accessToken]);
 
-  const roleSummary = useMemo(() => {
-    const counts = new Map<string, number>();
+  const departmentOptions = useMemo(() => {
+    const departments = new Set<string>();
     users.forEach((user) => {
-      const role = user.role?.trim() || 'Unassigned';
-      counts.set(role, (counts.get(role) ?? 0) + 1);
+      if (user.department) departments.add(user.department);
     });
-
-    return Array.from(counts.entries())
-      .sort(([, firstCount], [, secondCount]) => secondCount - firstCount)
-      .slice(0, 4);
+    return Array.from(departments).sort();
   }, [users]);
+
+  const fetchGeneratedReports = async (page: number) => {
+    if (!session?.accessToken) return;
+
+    setIsLoadingReports(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(REPORTS_PAGE_SIZE),
+      });
+      const response = await fetch(`${API_BASE_URL}/reports?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      });
+      const data = (await response.json().catch(() => null)) as {
+        data: GeneratedReport[];
+        pagination: AuditLogPagination;
+      } | null;
+      if (response.ok && data) {
+        setGeneratedReports(data.data);
+        setReportsPagination(data.pagination);
+      }
+    } catch {
+      // The Recent Reports table remains empty if it cannot be refreshed.
+    } finally {
+      setIsLoadingReports(false);
+    }
+  };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchGeneratedReports(reportsCurrentPage));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.accessToken, reportsCurrentPage]);
+
+  const reportRows = useMemo(
+    () =>
+      generatedReports.map((report) => [
+        report.report_name,
+        report.report_type,
+        report.generated_by || 'System',
+        formatAuditTimestamp(report.created_at),
+      ]),
+    [generatedReports],
+  );
+
+  const onGenerateReport = async () => {
+    if (!session?.accessToken) return;
+
+    setIsGenerating(true);
+    setGenerateError('');
+    try {
+      const reportName = `${reportType} – ${dateFilter || 'All Dates'}`;
+      const response = await fetch(`${API_BASE_URL}/reports`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          reportName,
+          reportType,
+          parameters: {
+            date: dateFilter,
+            department: departmentFilter,
+            status: statusFilter,
+            search: searchFilter,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Unable to generate report.');
+      }
+
+      if (reportsCurrentPage === 1) {
+        await fetchGeneratedReports(1);
+      } else {
+        setReportsCurrentPage(1);
+      }
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : 'Unable to generate report.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const fetchReportData = async (reportId: number) => {
+    if (!session?.accessToken) return null;
+
+    const response = await fetch(`${API_BASE_URL}/reports/${reportId}/data`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    });
+    const data = (await response.json().catch(() => null)) as
+      | (ReportData & { reportName: string })
+      | null;
+
+    if (!response.ok || !data) return null;
+    return data;
+  };
+
+  const onView = async (report: GeneratedReport) => {
+    setBusyReportId(report.id);
+    try {
+      const data = await fetchReportData(report.id);
+      if (data) setPreviewReport({ data, name: data.reportName });
+    } finally {
+      setBusyReportId(null);
+    }
+  };
+
+  const onDownload = async (report: GeneratedReport, format: 'csv' | 'pdf') => {
+    setBusyReportId(report.id);
+    try {
+      const data = await fetchReportData(report.id);
+      if (!data) return;
+
+      const blob = new Blob(
+        [
+          format === 'csv'
+            ? buildCsv(data.columns, data.rows)
+            : buildPdf(data.reportName, data.columns, data.rows),
+        ],
+        { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${data.reportName.replace(/[^\w-]+/g, '_')}.${format}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusyReportId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    const controller = new AbortController();
+    const params = dateFilter ? `?date=${dateFilter}` : '';
+
+    void fetch(`${API_BASE_URL}/reports/summary${params}`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as {
+          departments: DepartmentSummaryRow[];
+          trend: AttendanceTrendPoint[];
+        } | null;
+
+        if (response.ok && data) {
+          setDepartmentSummary(data.departments);
+          setAttendanceTrend(data.trend);
+        }
+      })
+      .catch(() => {
+        // The summary panels remain empty if they cannot be refreshed.
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken, dateFilter]);
+
+  const departmentTotal = useMemo(
+    () => departmentSummary.reduce((sum, row) => sum + row.total, 0),
+    [departmentSummary],
+  );
 
   return (
     <section className="module-page">
@@ -2795,7 +3147,7 @@ export function ReportsPage() {
         title={activeTab === 'reports' ? 'Reports' : 'Audit Logs'}
         description={
           activeTab === 'reports'
-            ? 'View attendance reports and role summaries.'
+            ? 'View attendance reports, access logs, and system audit records.'
             : 'Track all system activities and changes.'
         }
       />
@@ -2821,34 +3173,97 @@ export function ReportsPage() {
       </div>
       {activeTab === 'reports' ? (
         <>
-          <FilterRow showGenerate />
+          <div className="module-filter-row report-filter-row">
+            <select
+              aria-label="Report Type"
+              onChange={(event) => {
+                setReportType(event.target.value as ReportType);
+                setStatusFilter('');
+              }}
+              value={reportType}
+            >
+              {REPORT_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Date"
+              onChange={(event) => setDateFilter(event.target.value)}
+              type="date"
+              value={dateFilter}
+            />
+            <select
+              aria-label="Department"
+              onChange={(event) => setDepartmentFilter(event.target.value)}
+              value={departmentFilter}
+            >
+              <option value="">All Departments</option>
+              {departmentOptions.map((department) => (
+                <option key={department} value={department}>
+                  {department}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Status"
+              disabled={REPORT_STATUS_OPTIONS[reportType].length === 0}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              value={statusFilter}
+            >
+              <option value="">All Status</option>
+              {REPORT_STATUS_OPTIONS[reportType].map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Search"
+              onChange={(event) => setSearchFilter(event.target.value)}
+              placeholder="Search by name or ID..."
+              value={searchFilter}
+            />
+            <button
+              className="dark-action-button"
+              disabled={isGenerating}
+              onClick={() => void onGenerateReport()}
+              type="button"
+            >
+              {isGenerating ? 'Generating…' : 'Generate Report'}
+            </button>
+          </div>
+          {generateError ? <p className="form-error">{generateError}</p> : null}
           <div className="report-summary-grid">
             <section className="module-panel">
-              <h2>Attendance Summary</h2>
-              <div className="report-bars">
-                <span style={{ width: '74%' }} />
-                <span style={{ width: '82%' }} />
-                <span className="green" style={{ width: '68%' }} />
-                <span className="red" style={{ width: '55%' }} />
-                <span className="yellow" style={{ width: '63%' }} />
-              </div>
+              <h2>
+                Attendance Summary — Last 7 Days{dateFilter ? ` (through ${dateFilter})` : ''}
+              </h2>
+              {attendanceTrend.some((point) => point.present || point.late || point.absent) ? (
+                <AttendanceTrendChart trend={attendanceTrend} />
+              ) : (
+                <p className="report-panel-empty">No attendance records in this range yet.</p>
+              )}
             </section>
             <section className="module-panel role-summary">
-              <h2>Role Summary</h2>
-              <div className="donut-summary">Total {users.length}</div>
+              <h2>Department Summary</h2>
+              <div className="donut-summary">Total {departmentTotal}</div>
               <ul>
-                {roleSummary.length > 0 ? (
-                  roleSummary.map(([role, count]) => (
-                    <li key={role}>
-                      <span>{role}</span>
+                {departmentSummary.length > 0 ? (
+                  departmentSummary.map((row) => (
+                    <li key={row.department || 'Unassigned'}>
+                      <span>{row.department || 'Unassigned'}</span>
                       <strong>
-                        {users.length ? `${Math.round((count / users.length) * 100)}%` : '0%'}
+                        {departmentTotal
+                          ? `${Math.round((row.total / departmentTotal) * 100)}%`
+                          : '0%'}
                       </strong>
                     </li>
                   ))
                 ) : (
                   <li>
-                    <span>No role data available</span>
+                    <span>No department data available</span>
                     <strong>—</strong>
                   </li>
                 )}
@@ -2857,10 +3272,58 @@ export function ReportsPage() {
           </div>
           <ModuleTable
             title="Recent Reports"
-            columns={['Report Name', 'Report Type', 'Generated By', 'Generated On', 'Actions']}
+            columns={['Report Name', 'Report Type', 'Generated By', 'Generated On']}
             rows={reportRows}
+            isLoading={isLoadingReports}
+            emptyMessage="No reports have been generated yet."
+            pagination={reportsPagination}
+            onPageChange={setReportsCurrentPage}
             withActions
+            actionRenderer={(rowIndex) => {
+              const report = generatedReports[rowIndex];
+              if (!report) return null;
+              const isBusy = busyReportId === report.id;
+
+              return (
+                <span className="table-actions">
+                  <button
+                    className="tiny-view report-action-button"
+                    disabled={isBusy}
+                    onClick={() => void onView(report)}
+                    type="button"
+                  >
+                    <Eye size={14} />
+                    View
+                  </button>
+                  <button
+                    className="tiny-view report-action-button"
+                    disabled={isBusy}
+                    onClick={() => void onDownload(report, 'csv')}
+                    type="button"
+                  >
+                    <Download size={14} />
+                    CSV
+                  </button>
+                  <button
+                    className="tiny-view report-action-button"
+                    disabled={isBusy}
+                    onClick={() => void onDownload(report, 'pdf')}
+                    type="button"
+                  >
+                    <Download size={14} />
+                    PDF
+                  </button>
+                </span>
+              );
+            }}
           />
+          {previewReport ? (
+            <ReportPreviewModal
+              data={previewReport.data}
+              onClose={() => setPreviewReport(null)}
+              reportName={previewReport.name}
+            />
+          ) : null}
         </>
       ) : (
         <AuditLogsPage embedded />
@@ -2887,20 +3350,19 @@ function escapeCsvValue(value: string) {
   return /[",\n]/.test(normalized) ? `"${normalized}"` : normalized;
 }
 
-function buildAuditCsv(rows: string[][]) {
-  const header = ['Date & Time', 'User', 'Action', 'Module', 'Details', 'IP Address'];
+function buildCsv(header: string[], rows: string[][]) {
   const content = [header.join(','), ...rows.map((row) => row.map(escapeCsvValue).join(','))].join(
     '\n',
   );
   return content;
 }
 
-function buildAuditPdf(rows: string[][]) {
+function buildPdf(title: string, header: string[], rows: string[][]) {
   const lines = [
-    'EINGRESS Audit Logs',
+    title,
     `Generated ${new Date().toLocaleString()}`,
     '',
-    'Date & Time | User | Action | Module | Details | IP Address',
+    header.join(' | '),
     ...rows.map((row) => row.join(' | ')),
   ];
 
@@ -3107,9 +3569,15 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
     });
   };
 
+  const auditHeader = ['Date & Time', 'User', 'Action', 'Module', 'Details', 'IP Address'];
+
   const onExport = (format: 'csv' | 'pdf') => {
     const blob = new Blob(
-      [format === 'csv' ? buildAuditCsv(tableRows) : buildAuditPdf(tableRows)],
+      [
+        format === 'csv'
+          ? buildCsv(auditHeader, tableRows)
+          : buildPdf('EINGRESS Audit Logs', auditHeader, tableRows),
+      ],
       { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
     );
     const url = URL.createObjectURL(blob);

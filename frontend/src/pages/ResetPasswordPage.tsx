@@ -14,6 +14,8 @@ import {
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
+import authShieldIcon from '../assets/icons/auth-shield.png';
+import eingressIcon from '../assets/icons/eingress-icon.png';
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
 
@@ -154,8 +156,8 @@ export function ResetPasswordPage() {
       <section className="auth-card forgot-auth-card">
         <header className="auth-topbar">
           <div className="auth-brand">
-            <span className="logo-mark" aria-hidden="true">
-              <Fingerprint size={25} strokeWidth={2.4} />
+            <span className="logo-mark logo-mark-image" aria-hidden="true">
+              <img src={eingressIcon} alt="" />
             </span>
             <strong>EINGRESS</strong>
           </div>
@@ -196,9 +198,8 @@ export function ResetPasswordPage() {
               ))}
             </ul>
 
-            <div className="shield-visual forgot-shield" aria-hidden="true">
-              <ShieldCheck size={124} strokeWidth={1.6} />
-              <Fingerprint size={68} strokeWidth={2} />
+            <div className="shield-visual shield-visual-image forgot-shield" aria-hidden="true">
+              <img src={authShieldIcon} alt="" />
             </div>
           </section>
 
