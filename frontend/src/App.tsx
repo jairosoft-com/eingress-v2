@@ -17,6 +17,8 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
+import eingressIcon from './assets/icons/eingress-icon.png';
+import sidebarShieldIcon from './assets/icons/sidebar-shield.png';
 import { useAuth } from './auth/useAuth';
 import { API_BASE_URL } from './lib/api';
 
@@ -290,8 +292,8 @@ export function App() {
     <div className="admin-shell">
       <aside className="admin-sidebar" aria-label="Primary navigation">
         <div className="sidebar-brand">
-          <span className="logo-mark" aria-hidden="true">
-            <Fingerprint size={25} strokeWidth={2.4} />
+          <span className="logo-mark logo-mark-image" aria-hidden="true">
+            <img src={eingressIcon} alt="" />
           </span>
           <span>
             <strong>EINGRESS</strong>
@@ -317,9 +319,8 @@ export function App() {
         </nav>
 
         <div className="sidebar-promo">
-          <div className="shield-visual compact">
-            <ShieldCheck size={70} strokeWidth={1.8} />
-            <Fingerprint size={38} strokeWidth={2.2} />
+          <div className="shield-visual shield-visual-image compact">
+            <img src={sidebarShieldIcon} alt="" />
           </div>
           <strong>
             Secure. Smart. <span>Seamless.</span>

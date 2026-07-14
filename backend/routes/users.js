@@ -9,6 +9,8 @@ usersRouter.use(authMiddleware);
 async function ensureUserStatusColumns() {
   try {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivation_reason TEXT`);
   } catch (error) {
     console.error('Unable to ensure user archive column exists', error);
   }
@@ -199,7 +201,7 @@ usersRouter.patch('/:id', async (req, res) => {
 
 usersRouter.patch('/:id/status', async (req, res) => {
   const id = Number(req.params.id);
-  const { isActive } = req.body;
+  const { isActive, reason } = req.body;
 
   if (!Number.isInteger(id) || id <= 0 || typeof isActive !== 'boolean') {
     return res.status(400).json({ error: 'Valid user id and isActive are required' });
@@ -210,10 +212,12 @@ usersRouter.patch('/:id/status', async (req, res) => {
       `UPDATE users
        SET is_active = $1,
          is_archived = FALSE,
+         deactivated_at = CASE WHEN $1 THEN NULL ELSE NOW() END,
+         deactivation_reason = CASE WHEN $1 THEN NULL ELSE COALESCE($3, 'Manually deactivated by admin') END,
          updated_at = NOW()
        WHERE id = $2
        RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
-      [isActive, id],
+      [isActive, id, reason || null],
     );
 
     if (result.rowCount === 0) {

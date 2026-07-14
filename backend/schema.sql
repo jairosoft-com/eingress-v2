@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS users (
   rfid_uid VARCHAR(120) UNIQUE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+  deactivated_at TIMESTAMPTZ,
+  deactivation_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

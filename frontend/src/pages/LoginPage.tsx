@@ -14,6 +14,8 @@ import {
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
+import authShieldIcon from '../assets/icons/auth-shield.png';
+import eingressIcon from '../assets/icons/eingress-icon.png';
 import { useAuth } from '../auth/useAuth';
 
 type LoginErrors = {
@@ -99,8 +101,8 @@ export function LoginPage() {
       <section className="auth-card">
         <header className="auth-topbar">
           <div className="auth-brand">
-            <span className="logo-mark" aria-hidden="true">
-              <Fingerprint size={25} strokeWidth={2.4} />
+            <span className="logo-mark logo-mark-image" aria-hidden="true">
+              <img src={eingressIcon} alt="" />
             </span>
             <strong>EINGRESS</strong>
           </div>
@@ -141,9 +143,8 @@ export function LoginPage() {
               ))}
             </ul>
 
-            <div className="shield-visual hero-shield" aria-hidden="true">
-              <ShieldCheck size={150} strokeWidth={1.6} />
-              <Fingerprint size={82} strokeWidth={2} />
+            <div className="shield-visual shield-visual-image hero-shield" aria-hidden="true">
+              <img src={authShieldIcon} alt="" />
             </div>
           </section>
 
