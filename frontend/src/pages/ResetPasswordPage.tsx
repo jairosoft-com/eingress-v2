@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Check,
   ChevronDown,
   CircleHelp,
   Eye,
@@ -11,13 +12,18 @@ import {
   RadioTower,
   ShieldCheck,
 } from 'lucide-react';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
+import {
+  getPasswordRequirementResults,
+  getPasswordStrength,
+  meetsPasswordPolicy,
+} from '../lib/passwordPolicy';
 
 const resetFeatures = [
   { label: 'Secure Authentication', Icon: ShieldCheck },
@@ -37,8 +43,8 @@ function validateResetForm(password: string, confirmPassword: string): ResetErro
 
   if (!password) {
     errors.password = 'New password is required.';
-  } else if (password.length < 8) {
-    errors.password = 'Password must be at least 8 characters long.';
+  } else if (!meetsPasswordPolicy(password)) {
+    errors.password = 'Password does not meet all requirements.';
   }
 
   if (!confirmPassword) {
@@ -65,6 +71,10 @@ export function ResetPasswordPage() {
   const [successMessage, setSuccessMessage] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const requirementResults = useMemo(() => getPasswordRequirementResults(password), [password]);
+  const passedCount = requirementResults.filter((requirement) => requirement.passed).length;
+  const strength = getPasswordStrength(password ? passedCount : 0);
 
   useEffect(() => {
     let isMounted = true;
@@ -253,6 +263,26 @@ export function ResetPasswordPage() {
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
+
+                  <div className="password-strength-meter" aria-hidden={!password}>
+                    <div className="password-strength-bar">
+                      {[0, 1, 2, 3].map((segment) => (
+                        <span
+                          className={
+                            password && segment < strength.filled ? `filled ${strength.tone}` : ''
+                          }
+                          key={segment}
+                        />
+                      ))}
+                    </div>
+                    {password ? (
+                      <span className="password-strength-label">
+                        Password strength:{' '}
+                        <strong className={strength.tone}>{strength.label}</strong>
+                      </span>
+                    ) : null}
+                  </div>
+
                   {errors.password ? (
                     <span className="field-error" id="new-password-error">
                       {errors.password}
@@ -291,6 +321,18 @@ export function ResetPasswordPage() {
                       {errors.confirmPassword}
                     </span>
                   ) : null}
+                </div>
+
+                <div className="password-requirements">
+                  <strong>Password must contain:</strong>
+                  <ul>
+                    {requirementResults.map((requirement) => (
+                      <li className={requirement.passed ? 'met' : ''} key={requirement.key}>
+                        <Check size={14} />
+                        {requirement.label}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
 
                 <button
