@@ -85,7 +85,31 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
        FROM (
          SELECT rfid_uid FROM users WHERE rfid_uid IS NOT NULL
          UNION ALL
+<<<<<<< HEAD
          SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
+=======
+<<<<<<< HEAD
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
+=======
+<<<<<<< HEAD
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
+=======
+<<<<<<< HEAD
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
+=======
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL
+>>>>>>> origin/qa
+>>>>>>> origin/qa
+>>>>>>> origin/qa
+>>>>>>> origin/qa
+=======
+         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
+>>>>>>> origin/qa
+>>>>>>> origin/qa
        ) existing_rfids
        WHERE LOWER(TRIM(rfid_uid)) = LOWER(TRIM($1))
        LIMIT 1`,
