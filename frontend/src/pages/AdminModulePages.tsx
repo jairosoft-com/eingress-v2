@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth';
 
@@ -3996,6 +3997,13 @@ export function SettingsPage() {
               <span />
               Administrator Enable RFID
             </label>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>Password</h2>
+            <p>Update your account password regularly to keep your account secure.</p>
+            <Link className="text-link change-password-link" to="/settings/change-password">
+              Change Password
+            </Link>
           </section>
         </div>
       )}
