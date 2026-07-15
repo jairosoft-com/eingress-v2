@@ -18,7 +18,7 @@ async function ensureUserStatusColumns() {
 
 void ensureUserStatusColumns();
 
-function getDuplicateUserMessage(error) {
+export function getDuplicateUserMessage(error) {
   if (error?.code !== '23505') {
     return null;
   }
