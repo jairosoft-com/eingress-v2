@@ -60,6 +60,25 @@ function getResetTokenHash(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+function validatePasswordPolicy(password) {
+  if (!password || password.length < 8) {
+    return 'Password must be at least 8 characters long';
+  }
+  if (!/[A-Z]/.test(password)) {
+    return 'Password must include at least one uppercase letter';
+  }
+  if (!/[a-z]/.test(password)) {
+    return 'Password must include at least one lowercase letter';
+  }
+  if (!/[0-9]/.test(password)) {
+    return 'Password must include at least one number';
+  }
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return 'Password must include at least one special character';
+  }
+  return null;
+}
+
 function getMailTransport() {
   if (!process.env.SMTP_HOST || !process.env.SMTP_PORT) {
     return null;
@@ -277,8 +296,10 @@ authRouter.post('/reset-password', async (req, res) => {
     return res.status(400).json({ error: 'Reset token and new password are required' });
   }
 
-  if (password.length < 8) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+  const passwordPolicyError = validatePasswordPolicy(password);
+
+  if (passwordPolicyError) {
+    return res.status(400).json({ error: passwordPolicyError });
   }
 
   try {
@@ -355,5 +376,94 @@ authRouter.post('/reset-password', async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Unable to reset password' });
+  }
+});
+
+authRouter.post('/change-password', authMiddleware, async (req, res) => {
+  const currentPassword = String(req.body.currentPassword || '');
+  const newPassword = String(req.body.newPassword || '');
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password are required' });
+  }
+
+  const passwordPolicyError = validatePasswordPolicy(newPassword);
+
+  if (passwordPolicyError) {
+    return res.status(400).json({ error: passwordPolicyError });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT id, username, password_hash
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = adminResult.rows[0];
+    const passwordMatch = await bcrypt.compare(currentPassword, admin.password_hash);
+
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    if (currentPassword === newPassword) {
+      return res
+        .status(400)
+        .json({ error: 'New password must be different from the current password' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE admins
+         SET password_hash = $1, password_changed_at = NOW(), updated_at = NOW()
+         WHERE id = $2`,
+        [passwordHash, admin.id],
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [admin.id, 'Password Changed', 'Authentication', 'Admin changed their password', req.ip],
+      );
+
+      await client.query(
+        `INSERT INTO notifications (title, message, severity)
+         VALUES ($1, $2, $3)`,
+        [
+          'Password changed',
+          `The password for ${admin.username} was changed successfully.`,
+          'warning',
+        ],
+      );
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    broadcastMessage({
+      type: 'auth:password-changed',
+      payload: { adminId: admin.id },
+    });
+
+    return res.json({ message: 'Password updated successfully.' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Unable to change password' });
   }
 });

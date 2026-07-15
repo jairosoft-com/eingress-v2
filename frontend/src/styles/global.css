@@ -4057,6 +4057,243 @@ td small {
   font-weight: 800;
 }
 
+.change-password-link {
+  display: inline-block;
+  margin-top: 18px;
+  text-decoration: none;
+}
+
+.page-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -10px 0 -8px;
+  color: #8892a8;
+  font-size: 0.84rem;
+}
+
+.page-breadcrumb a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #667089;
+  text-decoration: none;
+}
+
+.page-breadcrumb a:hover {
+  color: #2449d8;
+}
+
+.page-breadcrumb span {
+  color: #e01835;
+  font-weight: 700;
+}
+
+.change-password-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.35fr);
+  gap: 26px;
+  align-items: start;
+}
+
+.password-info-card h2 {
+  margin: 0 0 10px;
+  color: #071435;
+  font-size: 1.4rem;
+}
+
+.password-info-card h2 span {
+  color: #e01835;
+}
+
+.password-info-card > p {
+  margin: 0 0 26px;
+  color: #667089;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.password-info-features {
+  display: grid;
+  gap: 20px;
+  margin: 0;
+  padding: 24px 0 0;
+  list-style: none;
+  border-top: 1px solid #e9edf4;
+}
+
+.password-info-features li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #27344e;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.password-info-icon {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+}
+
+.password-info-icon.red {
+  color: #e01835;
+  background: #fdeaec;
+}
+
+.password-info-icon.dark {
+  color: #142446;
+  background: #eef1f6;
+}
+
+.password-form-card h2 {
+  margin: 0 0 6px;
+  color: #071435;
+  font-size: 1.25rem;
+}
+
+.password-form-card > p {
+  margin: 0 0 26px;
+  color: #667089;
+  font-size: 0.9rem;
+}
+
+.password-strength-meter {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.password-strength-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.password-strength-bar span {
+  height: 5px;
+  border-radius: 999px;
+  background: #e5e9f1;
+}
+
+.password-strength-bar span.filled.weak {
+  background: #e01835;
+}
+
+.password-strength-bar span.filled.fair {
+  background: #f97316;
+}
+
+.password-strength-bar span.filled.good {
+  background: #eab308;
+}
+
+.password-strength-bar span.filled.strong {
+  background: #16a34a;
+}
+
+.password-strength-label {
+  color: #667089;
+  font-size: 0.82rem;
+}
+
+.password-strength-label strong {
+  font-weight: 800;
+}
+
+.password-strength-label strong.weak {
+  color: #e01835;
+}
+
+.password-strength-label strong.fair {
+  color: #f97316;
+}
+
+.password-strength-label strong.good {
+  color: #ca8a04;
+}
+
+.password-strength-label strong.strong {
+  color: #16a34a;
+}
+
+.password-requirements {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  color: #4d5873;
+  font-size: 0.84rem;
+  border-radius: 8px;
+  background: #f3f6fa;
+}
+
+.password-requirements strong {
+  color: #27344e;
+}
+
+.password-requirements ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.password-requirements li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #8892a8;
+}
+
+.password-requirements li svg {
+  flex: 0 0 auto;
+  opacity: 0.4;
+}
+
+.password-requirements li.met {
+  color: #16a34a;
+}
+
+.password-requirements li.met svg {
+  color: #16a34a;
+  opacity: 1;
+}
+
+.change-password-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.change-password-actions .outline-reset-button {
+  width: auto;
+  min-height: 50px;
+  padding: 0 22px;
+}
+
+.change-password-actions .gradient-button {
+  min-height: 50px;
+  padding: 0 26px;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 900px) {
+  .change-password-grid {
+    grid-template-columns: 1fr;
+  }
+  .password-requirements ul {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1040px) {
   .general-settings-grid {
     grid-template-columns: 1fr;
