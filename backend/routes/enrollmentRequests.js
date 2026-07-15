@@ -8,6 +8,7 @@ import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
+import { getDuplicateUserMessage } from './users.js';
 
 export const enrollmentRequestsRouter = express.Router();
 
@@ -84,23 +85,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
        FROM (
          SELECT rfid_uid FROM users WHERE rfid_uid IS NOT NULL
          UNION ALL
-<<<<<<< HEAD
          SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL
->>>>>>> origin/qa
->>>>>>> origin/qa
->>>>>>> origin/qa
->>>>>>> origin/qa
        ) existing_rfids
        WHERE LOWER(TRIM(rfid_uid)) = LOWER(TRIM($1))
        LIMIT 1`,
