@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 
 import { pool, query } from '../db.js';
+import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
@@ -142,6 +143,14 @@ authRouter.post('/login', async (req, res) => {
       [admin.id, 'Login', 'Authentication', 'Admin logged in', req.ip],
     );
 
+    const notificationResult = await query(
+      `INSERT INTO notifications (title, message, severity)
+       VALUES ($1, $2, $3)
+       RETURNING id, title, message, severity, is_read, created_at`,
+      ['Welcome, administrator', `${admin.username} signed in successfully.`, 'success'],
+    );
+    broadcastMessage({ type: 'notification:created', payload: notificationResult.rows[0] });
+
     return res.json({
       accessToken: token,
       adminName: admin.username,
@@ -151,6 +160,32 @@ authRouter.post('/login', async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+authRouter.get('/me', authMiddleware, async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT username, email, rfid_uid
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = result.rows[0];
+    return res.json({
+      name: admin.username,
+      email: admin.email,
+      role: 'Administrator',
+      rfidUid: admin.rfid_uid,
+    });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -291,6 +326,16 @@ authRouter.post('/reset-password', async (req, res) => {
         `INSERT INTO audit_logs (admin_id, action, module, details)
          VALUES ($1, $2, $3, $4)`,
         [resetToken.admin_id, 'Password Reset', 'Authentication', 'Admin password was reset'],
+      );
+
+      await client.query(
+        `INSERT INTO notifications (title, message, severity)
+         VALUES ($1, $2, $3)`,
+        [
+          'Password changed',
+          `The password for ${resetToken.username} was changed successfully.`,
+          'warning',
+        ],
       );
 
       await client.query('COMMIT');

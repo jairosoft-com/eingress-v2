@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS users (
   rfid_uid VARCHAR(120) UNIQUE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+  deactivated_at TIMESTAMPTZ,
+  deactivation_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -170,6 +172,15 @@ CREATE TABLE IF NOT EXISTS system_settings (
   database_status VARCHAR(40) NOT NULL DEFAULT 'Healthy',
   last_backup_at TIMESTAMPTZ,
   system_version VARCHAR(40) NOT NULL DEFAULT 'v2.1.0',
+  first_day_of_week VARCHAR(20) NOT NULL DEFAULT 'Monday',
+  max_failed_attempts INTEGER NOT NULL DEFAULT 5,
+  lockout_duration_minutes INTEGER NOT NULL DEFAULT 30,
+  reset_failed_attempts_after_minutes INTEGER NOT NULL DEFAULT 15,
+  lockout_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  idle_timeout_warning_minutes INTEGER NOT NULL DEFAULT 5,
+  auto_logout_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  keep_me_logged_in BOOLEAN NOT NULL DEFAULT FALSE,
+  admin_rfid_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

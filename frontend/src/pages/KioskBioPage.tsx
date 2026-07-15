@@ -1,7 +1,7 @@
-import { Check, Fingerprint, IdCard, Users } from 'lucide-react';
+import { Check, CircleUserRound, Fingerprint, IdCard, KeyRound, Users, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-type KioskBioState = 'idle' | 'processing' | 'recognized';
+type KioskBioState = 'idle' | 'processing' | 'recognized' | 'unrecognized';
 type KioskBioTerminalInput = {
   fingerprintId: string | null;
   nonce: number;
@@ -38,7 +38,7 @@ export function KioskBioPage() {
   const [kioskState, setKioskState] = useState<KioskBioState>('idle');
   const [recognizedUser, setRecognizedUser] = useState<RecognizedUser | null>(null);
   const [recognizedCountdown, setRecognizedCountdown] = useState(5);
-  const [notFoundMessage, setNotFoundMessage] = useState('');
+  const [unrecognizedCountdown, setUnrecognizedCountdown] = useState(5);
   const lastProcessedNonce = useRef(0);
 
   useEffect(() => {
@@ -67,7 +67,6 @@ export function KioskBioPage() {
           }
 
           lastProcessedNonce.current = input.nonce;
-          setNotFoundMessage('');
           setKioskState('processing');
 
           window.setTimeout(() => {
@@ -82,8 +81,8 @@ export function KioskBioPage() {
                   .catch(() => null)) as KioskFingerprintScanResponse | null;
 
                 if (!response.ok || data?.result !== 'Granted') {
-                  setNotFoundMessage('Fingerprint not recognized.');
-                  setKioskState('idle');
+                  setUnrecognizedCountdown(5);
+                  setKioskState('unrecognized');
                   return;
                 }
 
@@ -98,8 +97,8 @@ export function KioskBioPage() {
                 setKioskState('recognized');
               })
               .catch(() => {
-                setNotFoundMessage('Unable to verify fingerprint.');
-                setKioskState('idle');
+                setUnrecognizedCountdown(5);
+                setKioskState('unrecognized');
               });
           }, 1200);
         })
@@ -112,12 +111,16 @@ export function KioskBioPage() {
   }, [kioskState]);
 
   useEffect(() => {
-    if (kioskState !== 'recognized') {
+    if (kioskState !== 'recognized' && kioskState !== 'unrecognized') {
       return;
     }
 
     const intervalId = window.setInterval(() => {
-      setRecognizedCountdown((current) => Math.max(current - 1, 0));
+      if (kioskState === 'recognized') {
+        setRecognizedCountdown((current) => Math.max(current - 1, 0));
+      } else {
+        setUnrecognizedCountdown((current) => Math.max(current - 1, 0));
+      }
     }, 1000);
 
     const timeoutId = window.setTimeout(() => {
@@ -130,18 +133,6 @@ export function KioskBioPage() {
       window.clearTimeout(timeoutId);
     };
   }, [kioskState]);
-
-  useEffect(() => {
-    if (!notFoundMessage) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setNotFoundMessage('');
-    }, 3500);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [notFoundMessage]);
 
   return (
     <main className="kiosk-screen" aria-label="Kiosk Frontend System">
@@ -166,6 +157,8 @@ export function KioskBioPage() {
         <div className="kiosk-body">
           {kioskState === 'recognized' && recognizedUser ? (
             <RecognizedState countdown={recognizedCountdown} user={recognizedUser} />
+          ) : kioskState === 'unrecognized' ? (
+            <UnrecognizedState countdown={unrecognizedCountdown} />
           ) : (
             <FingerprintPrompt isProcessing={kioskState === 'processing'} />
           )}
@@ -173,12 +166,6 @@ export function KioskBioPage() {
 
         <div className="kiosk-dot-grid" aria-hidden="true" />
       </section>
-
-      {notFoundMessage ? (
-        <div className="kiosk-door-alert" role="alert">
-          {notFoundMessage}
-        </div>
-      ) : null}
     </main>
   );
 }
@@ -243,6 +230,35 @@ function RecognizedState({ countdown, user }: { countdown: number; user: Recogni
             <small>Don't forget to time in tomorrow~</small>
           </span>
         </div>
+      </div>
+
+      <p className="return-note">Returning to home screen in {countdown} seconds...</p>
+    </section>
+  );
+}
+
+function UnrecognizedState({ countdown }: { countdown: number }) {
+  return (
+    <section className="unregistered-layout kiosk-unrecognized" aria-live="assertive">
+      <div className="unregistered-symbol">
+        <CircleUserRound size={56} />
+        <span>
+          <X size={20} />
+        </span>
+      </div>
+
+      <div className="unregistered-copy">
+        <small>Fingerprint scan failed.</small>
+        <h2>Unrecognized</h2>
+        <p>Please contact an administrator for assistance.</p>
+      </div>
+
+      <div className="admin-rfid-card">
+        <KeyRound size={26} />
+        <span>
+          <strong>Scan Admin RFID</strong>
+          <small>Place admin card on the RFID reader.</small>
+        </span>
       </div>
 
       <p className="return-note">Returning to home screen in {countdown} seconds...</p>

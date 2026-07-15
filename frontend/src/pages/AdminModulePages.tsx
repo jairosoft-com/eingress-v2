@@ -45,18 +45,15 @@ const deviceRows = [
   ['DEV-006', 'IT Room Bio', 'Biometric', 'IT Room', '192.168.1.15', 'Online', 'May 20'],
 ];
 
-const reportRows = [
-  ['Attendance Summary', 'Attendance Summary', 'Admin', 'May 20', 'Download'],
-  ['Late Arrival Report', 'Late Arrival', 'Admin', 'May 20', 'Download'],
-  ['Absenteeism Report', 'Absenteeism', 'Admin', 'May 20', 'Download'],
-];
-
 type EnrollmentRequest = {
   department: string;
   employee_id: string;
   email?: string | null;
+  fingerprint_template?: string | null;
   full_name: string;
   id: number;
+  phone?: string | null;
+  rejection_reason?: string | null;
   rfid_uid: string | null;
   request_code: string;
   request_type: string;
@@ -130,6 +127,62 @@ type AuditLogRecord = {
   module: string;
 };
 
+type AuditLogPagination = {
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  totalRecords: number;
+};
+
+const AUDIT_LOGS_PAGE_SIZE = 10;
+
+type SystemSettings = {
+  admin_rfid_enabled: boolean;
+  auto_logout_enabled: boolean;
+  database_status: string;
+  date_format: string;
+  first_day_of_week: string;
+  idle_timeout_warning_minutes: number;
+  keep_me_logged_in: boolean;
+  last_backup_at: string | null;
+  lockout_duration_minutes: number;
+  lockout_enabled: boolean;
+  max_failed_attempts: number;
+  reset_failed_attempts_after_minutes: number;
+  session_timeout_minutes: number;
+  system_language: string;
+  system_version: string;
+  time_format: string;
+  time_zone: string;
+};
+
+type AdminSettingsProfile = {
+  email: string;
+  name: string;
+  rfidUid: string;
+  role: string;
+};
+
+const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  admin_rfid_enabled: true,
+  auto_logout_enabled: true,
+  database_status: 'Healthy',
+  date_format: 'MM/DD/YYYY',
+  first_day_of_week: 'Monday',
+  idle_timeout_warning_minutes: 5,
+  keep_me_logged_in: false,
+  last_backup_at: null,
+  lockout_duration_minutes: 30,
+  lockout_enabled: false,
+  max_failed_attempts: 5,
+  reset_failed_attempts_after_minutes: 15,
+  session_timeout_minutes: 30,
+  system_language: 'English',
+  system_version: 'v2.1.0',
+  time_format: '12-Hour (hh:mm AM/PM)',
+  time_zone: '(UTC+08:00) Asia/Manila',
+};
+
 type UserEditForm = {
   fullName: string;
   rfidUid: string;
@@ -171,22 +224,6 @@ function PageHeader({ description, title }: { description: string; title: string
       <h1>{title}</h1>
       <p>{description}</p>
     </header>
-  );
-}
-
-function FilterRow({ showGenerate = false }: { showGenerate?: boolean }) {
-  return (
-    <div className="module-filter-row">
-      <input defaultValue="May 20, 2025" aria-label="Date" />
-      <input defaultValue="All Departments" aria-label="Department" />
-      <input defaultValue="All Status" aria-label="Status" />
-      <input placeholder="Search by name or ID..." aria-label="Search" />
-      {showGenerate ? <button className="dark-action-button">Generate Report</button> : null}
-      <button className="filter-button" type="button">
-        Filter
-        <Filter size={16} />
-      </button>
-    </div>
   );
 }
 
@@ -279,6 +316,8 @@ function ModuleTable({
   emptyMessage = 'No records found.',
   errorMessage,
   isLoading = false,
+  onPageChange,
+  pagination,
   rows,
   title,
   withActions = false,
@@ -288,15 +327,27 @@ function ModuleTable({
   emptyMessage?: string;
   errorMessage?: string;
   isLoading?: boolean;
+  onPageChange?: (page: number) => void;
+  pagination?: { page: number; pageSize: number; totalPages: number; totalRecords: number };
   rows: string[][];
   title: string;
   withActions?: boolean;
 }) {
+  const fillerRowCount =
+    pagination && rows.length > 0 && rows.length < pagination.pageSize
+      ? pagination.pageSize - rows.length
+      : 0;
+
+  const columnCount = columns.length + (withActions ? 1 : 0);
+
   return (
     <section className="module-panel" aria-labelledby={`${title.replaceAll(' ', '-')}-title`}>
       <h2 id={`${title.replaceAll(' ', '-')}-title`}>{title}</h2>
       <div className="module-table-wrap">
-        <table className="module-table">
+        <table
+          className={withActions ? 'module-table has-actions' : 'module-table'}
+          style={{ minWidth: Math.max(900, columnCount * 130) }}
+        >
           <thead>
             <tr>
               {columns.map((column) => (
@@ -341,9 +392,9 @@ function ModuleTable({
                       {isStatusColumn(columns[index]) ? (
                         <span className={`module-status ${statusTone(cell)}`}>{cell}</span>
                       ) : index === 1 ? (
-                        <strong>{cell}</strong>
+                        <strong className="module-cell-text">{cell}</strong>
                       ) : (
-                        cell
+                        <span className="module-cell-text">{cell}</span>
                       )}
                     </td>
                   ))}
@@ -373,19 +424,90 @@ function ModuleTable({
                 </tr>
               ))
             )}
+            {Array.from({ length: fillerRowCount }, (_, fillerIndex) => (
+              <tr
+                key={`filler-${fillerIndex}`}
+                className="module-table-filler-row"
+                aria-hidden="true"
+              >
+                {Array.from({ length: columns.length + (withActions ? 1 : 0) }, (_, cellIndex) => (
+                  <td key={cellIndex}>&nbsp;</td>
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-      <div className="module-pagination">
-        <span>Showing 1 to {rows.length} entries</span>
-        <span>
-          <button className="active">1</button>
-          <button>2</button>
-          <button>3</button>
-          <button>&gt;</button>
-        </span>
-      </div>
+      {pagination && onPageChange ? (
+        <ModuleTablePagination pagination={pagination} onPageChange={onPageChange} />
+      ) : (
+        <div className="module-pagination">
+          <span>Showing 1 to {rows.length} entries</span>
+          <span>
+            <button className="active">1</button>
+            <button>2</button>
+            <button>3</button>
+            <button>&gt;</button>
+          </span>
+        </div>
+      )}
     </section>
+  );
+}
+
+function ModuleTablePagination({
+  onPageChange,
+  pagination,
+}: {
+  onPageChange: (page: number) => void;
+  pagination: { page: number; totalPages: number; totalRecords: number };
+}) {
+  const { page, totalPages, totalRecords } = pagination;
+  const pageSize = totalRecords > 0 && totalPages > 0 ? Math.ceil(totalRecords / totalPages) : 0;
+  const rangeStart = totalRecords === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, totalRecords);
+
+  const pageNumbers: number[] = [];
+  const windowStart = Math.max(1, Math.min(page - 1, totalPages - 2));
+  const windowEnd = Math.min(totalPages, windowStart + 2);
+  for (let pageNumber = windowStart; pageNumber <= windowEnd; pageNumber += 1) {
+    pageNumbers.push(pageNumber);
+  }
+
+  return (
+    <div className="module-pagination">
+      <span>
+        Showing {rangeStart} to {rangeEnd} of {totalRecords} entries
+      </span>
+      <span>
+        <button
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          type="button"
+          aria-label="Previous page"
+        >
+          &lt;
+        </button>
+        {pageNumbers.map((pageNumber) => (
+          <button
+            key={pageNumber}
+            className={pageNumber === page ? 'active' : ''}
+            onClick={() => onPageChange(pageNumber)}
+            type="button"
+          >
+            {pageNumber}
+          </button>
+        ))}
+        <button
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+          type="button"
+          aria-label="Next page"
+        >
+          &gt;
+        </button>
+      </span>
+    </div>
   );
 }
 
@@ -2097,6 +2219,7 @@ export function AttendanceManagementPage() {
       records.map((record) => [
         record.employee_id,
         record.full_name,
+        record.role || '-',
         formatClockTime(record.check_in_at),
         hasCheckedOut(record.check_in_at, record.check_out_at)
           ? formatClockTime(record.check_out_at)
@@ -2158,7 +2281,7 @@ export function AttendanceManagementPage() {
 
       <ModuleTable
         title="Today's Attendance"
-        columns={['Employee ID', 'Name', 'Time In', 'Time Out', 'Status', 'Total Hours']}
+        columns={['Employee ID', 'Name', 'Role', 'Time In', 'Time Out', 'Status', 'Total Hours']}
         rows={attendanceRows}
         isLoading={isLoading}
         errorMessage={errorMessage}
@@ -2173,6 +2296,7 @@ export function EnrollmentRequestsPage() {
   const [requests, setRequests] = useState<EnrollmentRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [selectedRequest, setSelectedRequest] = useState<EnrollmentRequest | null>(null);
   const [updatingRequestId, setUpdatingRequestId] = useState<number | null>(null);
   const [nameFilter, setNameFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<EnrollmentStatusFilter>('All');
@@ -2272,6 +2396,7 @@ export function EnrollmentRequestsPage() {
       setRequests((currentRequests) =>
         currentRequests.map((request) => (request.id === id ? data : request)),
       );
+      setSelectedRequest((currentRequest) => (currentRequest?.id === id ? data : currentRequest));
       window.dispatchEvent(new Event('enrollment-requests:changed'));
     } catch (error) {
       setErrorMessage(
@@ -2398,13 +2523,179 @@ export function EnrollmentRequestsPage() {
               >
                 <X size={14} />
               </button>
-              <button className="tiny-view" type="button">
+              <button
+                className="tiny-view"
+                onClick={() => setSelectedRequest(request)}
+                type="button"
+              >
                 View
               </button>
             </span>
           );
         }}
       />
+
+      {selectedRequest ? (
+        <div className="request-drawer-backdrop" onMouseDown={() => setSelectedRequest(null)}>
+          <aside
+            aria-labelledby="request-drawer-title"
+            aria-modal="true"
+            className="request-drawer"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <header className="request-drawer-header">
+              <div>
+                <h2 id="request-drawer-title">View User Request</h2>
+                <p>Review the details of the selected user request.</p>
+              </div>
+              <button
+                aria-label="Close request details"
+                onClick={() => setSelectedRequest(null)}
+                type="button"
+              >
+                <X size={22} />
+              </button>
+            </header>
+
+            <section className="request-drawer-section">
+              <h3>
+                <span>1</span> Request Details
+              </h3>
+              <dl className="request-detail-list">
+                <div>
+                  <dt>Request ID</dt>
+                  <dd>{selectedRequest.request_code}</dd>
+                </div>
+                <div>
+                  <dt>Request Type</dt>
+                  <dd>{selectedRequest.request_type}</dd>
+                </div>
+                <div>
+                  <dt>Submitted On</dt>
+                  <dd>{formatSubmittedDate(selectedRequest.submitted_at)}</dd>
+                </div>
+                <div>
+                  <dt>Status</dt>
+                  <dd>
+                    <span className={`request-status ${statusTone(selectedRequest.status)}`}>
+                      {selectedRequest.status}
+                    </span>
+                  </dd>
+                </div>
+              </dl>
+            </section>
+
+            <section className="request-drawer-section">
+              <h3>
+                <span>2</span> User Information
+              </h3>
+              <div className="request-user-summary">
+                <div className="request-user-avatar" aria-hidden="true">
+                  {getInitials(selectedRequest.full_name)}
+                </div>
+                <dl className="request-detail-list">
+                  <div>
+                    <dt>Name</dt>
+                    <dd>{selectedRequest.full_name}</dd>
+                  </div>
+                  <div>
+                    <dt>Employee ID</dt>
+                    <dd>{selectedRequest.employee_id}</dd>
+                  </div>
+                  <div>
+                    <dt>Email</dt>
+                    <dd>{selectedRequest.email || 'Not provided'}</dd>
+                  </div>
+                  <div>
+                    <dt>Department</dt>
+                    <dd>{selectedRequest.department}</dd>
+                  </div>
+                  <div>
+                    <dt>Phone</dt>
+                    <dd>{selectedRequest.phone || 'Not provided'}</dd>
+                  </div>
+                </dl>
+              </div>
+            </section>
+
+            <section className="request-drawer-section">
+              <h3>
+                <span>3</span> Access &amp; Device Details
+              </h3>
+              <dl className="request-detail-list">
+                <div>
+                  <dt>RFID Number</dt>
+                  <dd>{selectedRequest.rfid_uid || 'Pending capture'}</dd>
+                </div>
+                <div>
+                  <dt>Biometric Status</dt>
+                  <dd>{selectedRequest.fingerprint_template ? 'Submitted' : 'Pending'}</dd>
+                </div>
+                <div>
+                  <dt>Access Status</dt>
+                  <dd>{selectedRequest.status === 'Approved' ? 'Active' : 'Pending approval'}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section className="request-drawer-section">
+              <h3>
+                <span>4</span> Registration Summary
+              </h3>
+              <div className="request-registration-grid">
+                <div>
+                  <strong>Biometric</strong>
+                  <small>{selectedRequest.fingerprint_template ? 'Submitted' : 'Pending'}</small>
+                </div>
+                <div>
+                  <strong>RFID</strong>
+                  <small>{selectedRequest.rfid_uid ? 'Captured' : 'Pending'}</small>
+                </div>
+                <div>
+                  <strong>Request</strong>
+                  <small>{selectedRequest.request_type}</small>
+                </div>
+                <div>
+                  <strong>Account</strong>
+                  <small>{selectedRequest.status}</small>
+                </div>
+              </div>
+              {selectedRequest.rejection_reason ? (
+                <p className="request-rejection-reason">
+                  Rejection reason: {selectedRequest.rejection_reason}
+                </p>
+              ) : null}
+            </section>
+
+            <footer className="request-drawer-actions">
+              <button onClick={() => setSelectedRequest(null)} type="button">
+                Close
+              </button>
+              <button
+                className="reject-request-button"
+                disabled={
+                  selectedRequest.status !== 'Pending' || updatingRequestId === selectedRequest.id
+                }
+                onClick={() => void updateEnrollmentStatus(selectedRequest.id, 'Rejected')}
+                type="button"
+              >
+                Reject Request
+              </button>
+              <button
+                className="approve-request-button"
+                disabled={
+                  selectedRequest.status !== 'Pending' || updatingRequestId === selectedRequest.id
+                }
+                onClick={() => void updateEnrollmentStatus(selectedRequest.id, 'Approved')}
+                type="button"
+              >
+                Approve Request
+              </button>
+            </footer>
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -2445,47 +2736,598 @@ export function DeviceManagementPage() {
   );
 }
 
+const REPORT_TYPES = [
+  'Attendance Summary',
+  'Access Request Summary',
+  'User Summary',
+  'Auto-Deactivated Accounts',
+] as const;
+
+type ReportType = (typeof REPORT_TYPES)[number];
+
+const REPORT_STATUS_OPTIONS: Record<ReportType, string[]> = {
+  'Attendance Summary': ['Present', 'Late', 'Absent'],
+  'Access Request Summary': ['Pending', 'Approved', 'Rejected'],
+  'User Summary': ['Active', 'Disabled'],
+  'Auto-Deactivated Accounts': [],
+};
+
+type GeneratedReport = {
+  created_at: string;
+  generated_by: string | null;
+  id: number;
+  report_name: string;
+  report_type: string;
+};
+
+type ReportData = {
+  columns: string[];
+  rows: string[][];
+};
+
+const REPORTS_PAGE_SIZE = 10;
+
+type DepartmentSummaryRow = {
+  department: string | null;
+  total: number;
+};
+
+type AttendanceTrendPoint = {
+  absent: number;
+  date: string;
+  late: number;
+  present: number;
+};
+
+function formatTrendDayLabel(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(date);
+}
+
+function niceMax(value: number) {
+  if (value <= 0) return 5;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  return Math.ceil(value / magnitude) * magnitude;
+}
+
+function AttendanceTrendChart({ trend }: { trend: AttendanceTrendPoint[] }) {
+  const width = 640;
+  const height = 220;
+  const paddingLeft = 36;
+  const paddingRight = 16;
+  const paddingTop = 16;
+  const paddingBottom = 28;
+  const plotWidth = width - paddingLeft - paddingRight;
+  const plotHeight = height - paddingTop - paddingBottom;
+
+  const maxValue = niceMax(
+    Math.max(1, ...trend.flatMap((point) => [point.present, point.late, point.absent])),
+  );
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => Math.round(maxValue * fraction));
+
+  const xFor = (index: number) =>
+    trend.length > 1 ? paddingLeft + (plotWidth * index) / (trend.length - 1) : paddingLeft;
+  const yFor = (value: number) => paddingTop + plotHeight - (plotHeight * value) / maxValue;
+
+  const buildPath = (key: 'present' | 'late' | 'absent') =>
+    trend
+      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${xFor(index)} ${yFor(point[key])}`)
+      .join(' ');
+
+  return (
+    <div className="attendance-trend-chart">
+      <svg
+        role="img"
+        aria-label="Attendance trend over the last 7 days"
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        {yTicks.map((tick) => (
+          <g key={tick}>
+            <line
+              x1={paddingLeft}
+              x2={width - paddingRight}
+              y1={yFor(tick)}
+              y2={yFor(tick)}
+              className="attendance-trend-gridline"
+            />
+            <text
+              x={paddingLeft - 8}
+              y={yFor(tick)}
+              className="attendance-trend-axis-label"
+              textAnchor="end"
+            >
+              {tick}
+            </text>
+          </g>
+        ))}
+        {trend.map((point, index) => (
+          <text
+            key={point.date}
+            x={xFor(index)}
+            y={height - 6}
+            className="attendance-trend-axis-label"
+            textAnchor="middle"
+          >
+            {formatTrendDayLabel(point.date)}
+          </text>
+        ))}
+        <path d={buildPath('present')} className="attendance-trend-line present" fill="none" />
+        <path d={buildPath('late')} className="attendance-trend-line late" fill="none" />
+        <path d={buildPath('absent')} className="attendance-trend-line absent" fill="none" />
+      </svg>
+      <ul className="attendance-trend-legend">
+        <li className="present">Present</li>
+        <li className="late">Late</li>
+        <li className="absent">Absent</li>
+      </ul>
+    </div>
+  );
+}
+
+function ReportPreviewModal({
+  data,
+  onClose,
+  reportName,
+}: {
+  data: ReportData;
+  onClose: () => void;
+  reportName: string;
+}) {
+  return (
+    <div className="report-preview-backdrop" role="presentation" onClick={onClose}>
+      <section
+        aria-labelledby="report-preview-title"
+        className="report-preview-modal"
+        role="dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <h2 id="report-preview-title">{reportName}</h2>
+          <button aria-label="Close preview" onClick={onClose} type="button">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="report-preview-table-wrap">
+          <table className="module-table">
+            <thead>
+              <tr>
+                {data.columns.map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.length === 0 ? (
+                <tr>
+                  <td className="module-table-message" colSpan={data.columns.length}>
+                    No records match this report.
+                  </td>
+                </tr>
+              ) : (
+                data.rows.map((row) => (
+                  <tr key={row.join('-')}>
+                    {row.map((cell, index) => (
+                      <td key={`${cell}-${index}`}>{cell}</td>
+                    ))}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function ReportsPage() {
+  const { session } = useAuth();
+  const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [reportType, setReportType] = useState<ReportType>('Attendance Summary');
+  const [dateFilter, setDateFilter] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [searchFilter, setSearchFilter] = useState('');
+  const [generatedReports, setGeneratedReports] = useState<GeneratedReport[]>([]);
+  const [isLoadingReports, setIsLoadingReports] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState('');
+  const [previewReport, setPreviewReport] = useState<{ data: ReportData; name: string } | null>(
+    null,
+  );
+  const [busyReportId, setBusyReportId] = useState<number | null>(null);
+  const [reportsCurrentPage, setReportsCurrentPage] = useState(1);
+  const [reportsPagination, setReportsPagination] = useState<AuditLogPagination>({
+    page: 1,
+    pageSize: REPORTS_PAGE_SIZE,
+    totalPages: 1,
+    totalRecords: 0,
+  });
+  const [departmentSummary, setDepartmentSummary] = useState<DepartmentSummaryRow[]>([]);
+  const [attendanceTrend, setAttendanceTrend] = useState<AttendanceTrendPoint[]>([]);
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    const controller = new AbortController();
+    void fetch(`${API_BASE_URL}/users`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as UserRecord[] | null;
+        if (response.ok && Array.isArray(data)) setUsers(data.filter((user) => !user.is_archived));
+      })
+      .catch(() => {
+        // The report remains available if the role summary cannot be refreshed.
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken]);
+
+  const departmentOptions = useMemo(() => {
+    const departments = new Set<string>();
+    users.forEach((user) => {
+      if (user.department) departments.add(user.department);
+    });
+    return Array.from(departments).sort();
+  }, [users]);
+
+  const fetchGeneratedReports = async (page: number) => {
+    if (!session?.accessToken) return;
+
+    setIsLoadingReports(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(REPORTS_PAGE_SIZE),
+      });
+      const response = await fetch(`${API_BASE_URL}/reports?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      });
+      const data = (await response.json().catch(() => null)) as {
+        data: GeneratedReport[];
+        pagination: AuditLogPagination;
+      } | null;
+      if (response.ok && data) {
+        setGeneratedReports(data.data);
+        setReportsPagination(data.pagination);
+      }
+    } catch {
+      // The Recent Reports table remains empty if it cannot be refreshed.
+    } finally {
+      setIsLoadingReports(false);
+    }
+  };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchGeneratedReports(reportsCurrentPage));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.accessToken, reportsCurrentPage]);
+
+  const reportRows = useMemo(
+    () =>
+      generatedReports.map((report) => [
+        report.report_name,
+        report.report_type,
+        report.generated_by || 'System',
+        formatAuditTimestamp(report.created_at),
+      ]),
+    [generatedReports],
+  );
+
+  const onGenerateReport = async () => {
+    if (!session?.accessToken) return;
+
+    setIsGenerating(true);
+    setGenerateError('');
+    try {
+      const reportName = `${reportType} – ${dateFilter || 'All Dates'}`;
+      const response = await fetch(`${API_BASE_URL}/reports`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          reportName,
+          reportType,
+          parameters: {
+            date: dateFilter,
+            department: departmentFilter,
+            status: statusFilter,
+            search: searchFilter,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Unable to generate report.');
+      }
+
+      if (reportsCurrentPage === 1) {
+        await fetchGeneratedReports(1);
+      } else {
+        setReportsCurrentPage(1);
+      }
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : 'Unable to generate report.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const fetchReportData = async (reportId: number) => {
+    if (!session?.accessToken) return null;
+
+    const response = await fetch(`${API_BASE_URL}/reports/${reportId}/data`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    });
+    const data = (await response.json().catch(() => null)) as
+      | (ReportData & { reportName: string })
+      | null;
+
+    if (!response.ok || !data) return null;
+    return data;
+  };
+
+  const onView = async (report: GeneratedReport) => {
+    setBusyReportId(report.id);
+    try {
+      const data = await fetchReportData(report.id);
+      if (data) setPreviewReport({ data, name: data.reportName });
+    } finally {
+      setBusyReportId(null);
+    }
+  };
+
+  const onDownload = async (report: GeneratedReport, format: 'csv' | 'pdf') => {
+    setBusyReportId(report.id);
+    try {
+      const data = await fetchReportData(report.id);
+      if (!data) return;
+
+      const blob = new Blob(
+        [
+          format === 'csv'
+            ? buildCsv(data.columns, data.rows)
+            : buildPdf(data.reportName, data.columns, data.rows),
+        ],
+        { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${data.reportName.replace(/[^\w-]+/g, '_')}.${format}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setBusyReportId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    const controller = new AbortController();
+    const params = dateFilter ? `?date=${dateFilter}` : '';
+
+    void fetch(`${API_BASE_URL}/reports/summary${params}`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as {
+          departments: DepartmentSummaryRow[];
+          trend: AttendanceTrendPoint[];
+        } | null;
+
+        if (response.ok && data) {
+          setDepartmentSummary(data.departments);
+          setAttendanceTrend(data.trend);
+        }
+      })
+      .catch(() => {
+        // The summary panels remain empty if they cannot be refreshed.
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken, dateFilter]);
+
+  const departmentTotal = useMemo(
+    () => departmentSummary.reduce((sum, row) => sum + row.total, 0),
+    [departmentSummary],
+  );
+
   return (
     <section className="module-page">
-      <PageHeader title="Reports" description="Generate and download system reports." />
-      <FilterRow showGenerate />
-      <div className="report-summary-grid">
-        <section className="module-panel">
-          <h2>Attendance Summary</h2>
-          <div className="report-bars">
-            <span style={{ width: '74%' }} />
-            <span style={{ width: '82%' }} />
-            <span className="green" style={{ width: '68%' }} />
-            <span className="red" style={{ width: '55%' }} />
-            <span className="yellow" style={{ width: '63%' }} />
-          </div>
-        </section>
-        <section className="module-panel department-summary">
-          <h2>Department Summary</h2>
-          <div className="donut-summary">Total 528</div>
-          <ul>
-            <li>
-              IT Department <strong>42%</strong>
-            </li>
-            <li>
-              HR Department <strong>25%</strong>
-            </li>
-            <li>
-              Operations <strong>20%</strong>
-            </li>
-            <li>
-              Finance <strong>13%</strong>
-            </li>
-          </ul>
-        </section>
-      </div>
-      <ModuleTable
-        title="Recent Reports"
-        columns={['Report Name', 'Report Type', 'Generated By', 'Generated On', 'Actions']}
-        rows={reportRows}
-        withActions
+      <PageHeader
+        title={activeTab === 'reports' ? 'Reports' : 'Audit Logs'}
+        description={
+          activeTab === 'reports'
+            ? 'View attendance reports, access logs, and system audit records.'
+            : 'Track all system activities and changes.'
+        }
       />
+      <div className="reports-tabs" role="tablist" aria-label="Reports and audit sections">
+        <button
+          aria-selected={activeTab === 'reports'}
+          className={activeTab === 'reports' ? 'active' : ''}
+          onClick={() => setActiveTab('reports')}
+          role="tab"
+          type="button"
+        >
+          Reports
+        </button>
+        <button
+          aria-selected={activeTab === 'audit'}
+          className={activeTab === 'audit' ? 'active' : ''}
+          onClick={() => setActiveTab('audit')}
+          role="tab"
+          type="button"
+        >
+          Audit
+        </button>
+      </div>
+      {activeTab === 'reports' ? (
+        <>
+          <div className="module-filter-row report-filter-row">
+            <select
+              aria-label="Report Type"
+              onChange={(event) => {
+                setReportType(event.target.value as ReportType);
+                setStatusFilter('');
+              }}
+              value={reportType}
+            >
+              {REPORT_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Date"
+              onChange={(event) => setDateFilter(event.target.value)}
+              type="date"
+              value={dateFilter}
+            />
+            <select
+              aria-label="Department"
+              onChange={(event) => setDepartmentFilter(event.target.value)}
+              value={departmentFilter}
+            >
+              <option value="">All Departments</option>
+              {departmentOptions.map((department) => (
+                <option key={department} value={department}>
+                  {department}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Status"
+              disabled={REPORT_STATUS_OPTIONS[reportType].length === 0}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              value={statusFilter}
+            >
+              <option value="">All Status</option>
+              {REPORT_STATUS_OPTIONS[reportType].map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Search"
+              onChange={(event) => setSearchFilter(event.target.value)}
+              placeholder="Search by name or ID..."
+              value={searchFilter}
+            />
+            <button
+              className="dark-action-button"
+              disabled={isGenerating}
+              onClick={() => void onGenerateReport()}
+              type="button"
+            >
+              {isGenerating ? 'Generating…' : 'Generate Report'}
+            </button>
+          </div>
+          {generateError ? <p className="form-error">{generateError}</p> : null}
+          <div className="report-summary-grid">
+            <section className="module-panel">
+              <h2>
+                Attendance Summary — Last 7 Days{dateFilter ? ` (through ${dateFilter})` : ''}
+              </h2>
+              {attendanceTrend.some((point) => point.present || point.late || point.absent) ? (
+                <AttendanceTrendChart trend={attendanceTrend} />
+              ) : (
+                <p className="report-panel-empty">No attendance records in this range yet.</p>
+              )}
+            </section>
+            <section className="module-panel role-summary">
+              <h2>Department Summary</h2>
+              <div className="donut-summary">Total {departmentTotal}</div>
+              <ul>
+                {departmentSummary.length > 0 ? (
+                  departmentSummary.map((row) => (
+                    <li key={row.department || 'Unassigned'}>
+                      <span>{row.department || 'Unassigned'}</span>
+                      <strong>
+                        {departmentTotal
+                          ? `${Math.round((row.total / departmentTotal) * 100)}%`
+                          : '0%'}
+                      </strong>
+                    </li>
+                  ))
+                ) : (
+                  <li>
+                    <span>No department data available</span>
+                    <strong>—</strong>
+                  </li>
+                )}
+              </ul>
+            </section>
+          </div>
+          <ModuleTable
+            title="Recent Reports"
+            columns={['Report Name', 'Report Type', 'Generated By', 'Generated On']}
+            rows={reportRows}
+            isLoading={isLoadingReports}
+            emptyMessage="No reports have been generated yet."
+            pagination={reportsPagination}
+            onPageChange={setReportsCurrentPage}
+            withActions
+            actionRenderer={(rowIndex) => {
+              const report = generatedReports[rowIndex];
+              if (!report) return null;
+              const isBusy = busyReportId === report.id;
+
+              return (
+                <span className="table-actions">
+                  <button
+                    className="tiny-view report-action-button"
+                    disabled={isBusy}
+                    onClick={() => void onView(report)}
+                    type="button"
+                  >
+                    <Eye size={14} />
+                    View
+                  </button>
+                  <button
+                    className="tiny-view report-action-button"
+                    disabled={isBusy}
+                    onClick={() => void onDownload(report, 'csv')}
+                    type="button"
+                  >
+                    <Download size={14} />
+                    CSV
+                  </button>
+                  <button
+                    className="tiny-view report-action-button"
+                    disabled={isBusy}
+                    onClick={() => void onDownload(report, 'pdf')}
+                    type="button"
+                  >
+                    <Download size={14} />
+                    PDF
+                  </button>
+                </span>
+              );
+            }}
+          />
+          {previewReport ? (
+            <ReportPreviewModal
+              data={previewReport.data}
+              onClose={() => setPreviewReport(null)}
+              reportName={previewReport.name}
+            />
+          ) : null}
+        </>
+      ) : (
+        <AuditLogsPage embedded />
+      )}
     </section>
   );
 }
@@ -2508,20 +3350,19 @@ function escapeCsvValue(value: string) {
   return /[",\n]/.test(normalized) ? `"${normalized}"` : normalized;
 }
 
-function buildAuditCsv(rows: string[][]) {
-  const header = ['Date & Time', 'User', 'Action', 'Module', 'Details', 'IP Address'];
+function buildCsv(header: string[], rows: string[][]) {
   const content = [header.join(','), ...rows.map((row) => row.map(escapeCsvValue).join(','))].join(
     '\n',
   );
   return content;
 }
 
-function buildAuditPdf(rows: string[][]) {
+function buildPdf(title: string, header: string[], rows: string[][]) {
   const lines = [
-    'EINGRESS Audit Logs',
+    title,
     `Generated ${new Date().toLocaleString()}`,
     '',
-    'Date & Time | User | Action | Module | Details | IP Address',
+    header.join(' | '),
     ...rows.map((row) => row.join(' | ')),
   ];
 
@@ -2560,7 +3401,7 @@ function buildAuditPdf(rows: string[][]) {
   return pdf;
 }
 
-export function AuditLogsPage() {
+export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   const { session } = useAuth();
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(session?.accessToken));
@@ -2576,6 +3417,13 @@ export function AuditLogsPage() {
     dateTo: '',
     module: '',
     search: '',
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState<AuditLogPagination>({
+    page: 1,
+    pageSize: AUDIT_LOGS_PAGE_SIZE,
+    totalPages: 1,
+    totalRecords: 0,
   });
 
   useEffect(() => {
@@ -2614,7 +3462,8 @@ export function AuditLogsPage() {
           params.set('dateTo', appliedFilters.dateTo);
         }
 
-        params.set('limit', '500');
+        params.set('page', String(currentPage));
+        params.set('pageSize', String(AUDIT_LOGS_PAGE_SIZE));
 
         const response = await fetch(`${API_BASE_URL}/audit-logs?${params.toString()}`, {
           headers: { Authorization: `Bearer ${accessToken}` },
@@ -2625,8 +3474,12 @@ export function AuditLogsPage() {
           throw new Error('Unable to load audit logs.');
         }
 
-        const data = (await response.json()) as AuditLogRecord[];
-        setAuditLogs(data);
+        const data = (await response.json()) as {
+          data: AuditLogRecord[];
+          pagination: AuditLogPagination;
+        };
+        setAuditLogs(data.data);
+        setPagination(data.pagination);
       } catch (error) {
         if ((error as Error).name === 'AbortError') {
           return;
@@ -2641,16 +3494,41 @@ export function AuditLogsPage() {
     void loadAuditLogs();
 
     return () => controller.abort();
-  }, [appliedFilters, session?.accessToken]);
+  }, [appliedFilters, currentPage, session?.accessToken]);
 
-  const moduleOptions = useMemo(
-    () => Array.from(new Set(auditLogs.map((log) => log.module).filter(Boolean))).sort(),
-    [auditLogs],
-  );
-  const actionOptions = useMemo(
-    () => Array.from(new Set(auditLogs.map((log) => log.action).filter(Boolean))).sort(),
-    [auditLogs],
-  );
+  const [moduleOptions, setModuleOptions] = useState<string[]>([]);
+  const [actionOptions, setActionOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    const accessToken = session?.accessToken;
+
+    if (!accessToken) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE_URL}/audit-logs/options`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as {
+          actions: string[];
+          modules: string[];
+        } | null;
+
+        if (response.ok && data) {
+          setModuleOptions(data.modules);
+          setActionOptions(data.actions);
+        }
+      })
+      .catch(() => {
+        // Filter dropdowns remain empty if options cannot be loaded.
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken]);
 
   const tableRows = useMemo(
     () =>
@@ -2665,6 +3543,7 @@ export function AuditLogsPage() {
   );
 
   const onApplyFilters = () => {
+    setCurrentPage(1);
     setAppliedFilters({
       action: draftAction,
       dateFrom: draftDateFrom,
@@ -2680,6 +3559,7 @@ export function AuditLogsPage() {
     setDraftAction('');
     setDraftDateFrom('');
     setDraftDateTo('');
+    setCurrentPage(1);
     setAppliedFilters({
       action: '',
       dateFrom: '',
@@ -2689,9 +3569,15 @@ export function AuditLogsPage() {
     });
   };
 
+  const auditHeader = ['Date & Time', 'User', 'Action', 'Module', 'Details', 'IP Address'];
+
   const onExport = (format: 'csv' | 'pdf') => {
     const blob = new Blob(
-      [format === 'csv' ? buildAuditCsv(tableRows) : buildAuditPdf(tableRows)],
+      [
+        format === 'csv'
+          ? buildCsv(auditHeader, tableRows)
+          : buildPdf('EINGRESS Audit Logs', auditHeader, tableRows),
+      ],
       { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
     );
     const url = URL.createObjectURL(blob);
@@ -2704,7 +3590,9 @@ export function AuditLogsPage() {
 
   return (
     <section className="module-page">
-      <PageHeader title="Audit Logs" description="Track all system activities and changes." />
+      {!embedded ? (
+        <PageHeader title="Audit Logs" description="Track all system activities and changes." />
+      ) : null}
       <div className="module-filter-row enrollment-filter-row">
         <input
           aria-label="Search audit logs"
@@ -2777,78 +3665,350 @@ export function AuditLogsPage() {
         title="Audit Logs"
         columns={['Date & Time', 'User', 'Action', 'Module', 'Details']}
         rows={tableRows}
+        pagination={pagination}
+        onPageChange={setCurrentPage}
       />
     </section>
   );
 }
 
 export function SettingsPage() {
+  const { session } = useAuth();
+  const [activeTab, setActiveTab] = useState<'general' | 'security'>('general');
+  const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
+  const [profile, setProfile] = useState<AdminSettingsProfile | null>(null);
+  const [totalUsers, setTotalUsers] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    const controller = new AbortController();
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
+
+    void Promise.all([
+      fetch(`${API_BASE_URL}/settings`, { headers, signal: controller.signal }),
+      fetch(`${API_BASE_URL}/auth/me`, { headers, signal: controller.signal }),
+      fetch(`${API_BASE_URL}/users`, { headers, signal: controller.signal }),
+    ])
+      .then(async ([settingsResponse, profileResponse, usersResponse]) => {
+        const settingsData = (await settingsResponse
+          .json()
+          .catch(() => null)) as SystemSettings | null;
+        const profileData = (await profileResponse
+          .json()
+          .catch(() => null)) as AdminSettingsProfile | null;
+        const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
+
+        if (settingsResponse.ok && settingsData)
+          setSettings({ ...DEFAULT_SYSTEM_SETTINGS, ...settingsData });
+        if (profileResponse.ok && profileData) setProfile(profileData);
+        if (usersResponse.ok && Array.isArray(usersData)) {
+          setTotalUsers(usersData.filter((user) => !user.is_archived).length);
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+
+        setMessage('Unable to load all settings. Please try again.');
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken]);
+
+  const updateSetting = <K extends keyof SystemSettings>(key: K, value: SystemSettings[K]) => {
+    setSettings((current) => ({ ...current, [key]: value }));
+  };
+
+  async function saveSettings() {
+    if (!session?.accessToken) return;
+
+    try {
+      setIsSaving(true);
+      setMessage('');
+      const response = await fetch(`${API_BASE_URL}/settings`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          timeZone: settings.time_zone,
+          dateFormat: settings.date_format,
+          timeFormat: settings.time_format,
+          systemLanguage: settings.system_language,
+          sessionTimeoutMinutes: settings.session_timeout_minutes,
+          firstDayOfWeek: settings.first_day_of_week,
+          maxFailedAttempts: settings.max_failed_attempts,
+          lockoutDurationMinutes: settings.lockout_duration_minutes,
+          resetFailedAttemptsAfterMinutes: settings.reset_failed_attempts_after_minutes,
+          lockoutEnabled: settings.lockout_enabled,
+          idleTimeoutWarningMinutes: settings.idle_timeout_warning_minutes,
+          autoLogoutEnabled: settings.auto_logout_enabled,
+          keepMeLoggedIn: settings.keep_me_logged_in,
+          adminRfidEnabled: settings.admin_rfid_enabled,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | SystemSettings
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !data || 'error' in data) {
+        throw new Error(data && 'error' in data ? data.error : 'Unable to save settings.');
+      }
+
+      setSettings({ ...DEFAULT_SYSTEM_SETTINGS, ...data });
+      setMessage('Settings saved successfully.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to save settings.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <section className="module-page">
       <PageHeader title="Settings" description="Configure system preferences and parameters." />
-      <div className="settings-layout">
-        <nav className="settings-menu" aria-label="Settings sections">
-          {[
-            'General Settings',
-            'System Preferences',
-            'Security Settings',
-            'Backup & Restore',
-            'System Information',
-          ].map((item, index) => (
-            <button className={index === 0 ? 'active' : ''} key={item} type="button">
-              {item}
-            </button>
-          ))}
-        </nav>
+      <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button
+          className={activeTab === 'general' ? 'active' : ''}
+          onClick={() => setActiveTab('general')}
+          role="tab"
+          type="button"
+        >
+          General Settings
+        </button>
+        <button
+          className={activeTab === 'security' ? 'active' : ''}
+          onClick={() => setActiveTab('security')}
+          role="tab"
+          type="button"
+        >
+          System &amp; Security
+        </button>
+      </div>
 
-        <section className="module-panel settings-form-panel">
-          <h2>General Settings</h2>
-          <div className="settings-form-grid">
-            <label>
-              Company Name
-              <input defaultValue="EINGRESS Corporation" />
-            </label>
-            <label>
-              Time Zone
-              <input defaultValue="(UTC+08:00) Asia/Manila" />
-            </label>
-            <label>
-              Date Format
-              <input defaultValue="MM/DD/YYYY" />
-            </label>
-            <label>
-              Time Format
-              <input defaultValue="12-Hour (hh:mm AM/PM)" />
-            </label>
-            <label>
-              System Language
-              <input defaultValue="English" />
-            </label>
-            <label>
-              Session Timeout
-              <input defaultValue="30 minutes" />
-            </label>
-          </div>
-          <button className="save-settings-button" type="button">
-            Save Changes
-          </button>
-        </section>
-
-        <section className="module-panel system-info-panel">
-          <h2>System Information</h2>
-          {[
-            ['System Version', 'v2.1.0'],
-            ['Database Status', 'Healthy'],
-            ['Last Backup', 'May 20, 2025 02:00 AM'],
-            ['Total Users', '528'],
-            ['Total Devices', '24'],
-          ].map(([label, value]) => (
-            <div key={label}>
-              <span>{label}</span>
-              <strong className={value === 'Healthy' ? 'healthy' : ''}>{value}</strong>
+      {activeTab === 'general' ? (
+        <div className="general-settings-grid">
+          <section className="module-panel settings-card admin-profile-card">
+            <h2>Admin Profile</h2>
+            <div className="settings-fields">
+              <label>
+                Admin Name
+                <input disabled value={profile?.name ?? session?.adminName ?? 'Administrator'} />
+              </label>
+              <label>
+                Email
+                <input disabled value={profile?.email ?? session?.email ?? ''} />
+              </label>
+              <label>
+                RFID Number
+                <input disabled value={profile?.rfidUid ?? '—'} />
+              </label>
+              <label>
+                Role
+                <input disabled value={profile?.role ?? 'Administrator'} />
+              </label>
+              <label>
+                System Language
+                <select
+                  value={settings.system_language}
+                  onChange={(event) => updateSetting('system_language', event.target.value)}
+                >
+                  <option>English</option>
+                  <option>Filipino</option>
+                </select>
+              </label>
             </div>
-          ))}
-        </section>
+          </section>
+          <section className="module-panel settings-card system-info-card">
+            <h2>System Information</h2>
+            <dl>
+              <div>
+                <dt>System Version</dt>
+                <dd>{settings.system_version}</dd>
+              </div>
+              <div>
+                <dt>Database Status</dt>
+                <dd className="healthy">{settings.database_status}</dd>
+              </div>
+              <div>
+                <dt>Last Backup</dt>
+                <dd>
+                  {settings.last_backup_at
+                    ? formatAuditTimestamp(settings.last_backup_at)
+                    : 'Not available'}
+                </dd>
+              </div>
+              <div>
+                <dt>Total Users</dt>
+                <dd>{totalUsers ?? '—'}</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      ) : (
+        <div className="security-settings-stack">
+          <section className="module-panel settings-card">
+            <h2>Date &amp; Time Settings</h2>
+            <p>Configure how dates and times are displayed across the system.</p>
+            <div className="security-fields four-columns">
+              <label>
+                Date Format
+                <input
+                  value={settings.date_format}
+                  onChange={(event) => updateSetting('date_format', event.target.value)}
+                />
+              </label>
+              <label>
+                Time Format
+                <input
+                  value={settings.time_format}
+                  onChange={(event) => updateSetting('time_format', event.target.value)}
+                />
+              </label>
+              <label>
+                First Day of Week
+                <select
+                  value={settings.first_day_of_week}
+                  onChange={(event) => updateSetting('first_day_of_week', event.target.value)}
+                >
+                  <option>Monday</option>
+                  <option>Sunday</option>
+                </select>
+              </label>
+              <label>
+                Time Zone
+                <input
+                  value={settings.time_zone}
+                  onChange={(event) => updateSetting('time_zone', event.target.value)}
+                />
+              </label>
+            </div>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>Account Lockout Policy</h2>
+            <p>Define account lockout rules to prevent unauthorized access.</p>
+            <div className="security-fields lockout-fields">
+              <label>
+                Maximum Failed Attempts
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.max_failed_attempts}
+                  onChange={(event) =>
+                    updateSetting('max_failed_attempts', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Lockout Duration (minutes)
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.lockout_duration_minutes}
+                  onChange={(event) =>
+                    updateSetting('lockout_duration_minutes', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Reset Failed Attempts After (minutes)
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.reset_failed_attempts_after_minutes}
+                  onChange={(event) =>
+                    updateSetting('reset_failed_attempts_after_minutes', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label className="toggle-setting">
+                <input
+                  checked={settings.lockout_enabled}
+                  onChange={(event) => updateSetting('lockout_enabled', event.target.checked)}
+                  type="checkbox"
+                />
+                <span />
+                Enable lockout policy
+              </label>
+            </div>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>Session &amp; Timeout Settings</h2>
+            <p>Configure user session and system timeout preferences.</p>
+            <div className="security-fields session-fields">
+              <label>
+                Session Timeout (minutes)
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.session_timeout_minutes}
+                  onChange={(event) =>
+                    updateSetting('session_timeout_minutes', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label>
+                Idle Timeout Warning (minutes)
+                <input
+                  min="1"
+                  type="number"
+                  value={settings.idle_timeout_warning_minutes}
+                  onChange={(event) =>
+                    updateSetting('idle_timeout_warning_minutes', Number(event.target.value))
+                  }
+                />
+              </label>
+              <label className="toggle-setting">
+                <input
+                  checked={settings.auto_logout_enabled}
+                  onChange={(event) => updateSetting('auto_logout_enabled', event.target.checked)}
+                  type="checkbox"
+                />
+                <span />
+                Enable auto logout
+              </label>
+              <label className="toggle-setting">
+                <input
+                  checked={settings.keep_me_logged_in}
+                  onChange={(event) => updateSetting('keep_me_logged_in', event.target.checked)}
+                  type="checkbox"
+                />
+                <span />
+                Keep me logged in
+              </label>
+            </div>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>RFID Authentication</h2>
+            <p>Strengthen account security by requiring RFID authentication.</p>
+            <label className="toggle-setting">
+              <input
+                checked={settings.admin_rfid_enabled}
+                onChange={(event) => updateSetting('admin_rfid_enabled', event.target.checked)}
+                type="checkbox"
+              />
+              <span />
+              Administrator Enable RFID
+            </label>
+          </section>
+        </div>
+      )}
+      <div className="settings-save-row">
+        <span>{message}</span>
+        <button
+          className="save-settings-button"
+          disabled={isSaving}
+          onClick={() => void saveSettings()}
+          type="button"
+        >
+          {isSaving ? 'Saving…' : 'Save Changes'}
+        </button>
       </div>
     </section>
   );

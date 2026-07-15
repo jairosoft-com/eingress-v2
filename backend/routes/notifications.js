@@ -22,3 +22,8 @@ notificationsRouter.post('/:id/read', async (req, res) => {
   await query('UPDATE notifications SET is_read = TRUE WHERE id = $1', [id]);
   res.json({ success: true });
 });
+
+notificationsRouter.post('/read-all', async (_req, res) => {
+  await query('UPDATE notifications SET is_read = TRUE WHERE is_read = FALSE');
+  res.json({ success: true });
+});

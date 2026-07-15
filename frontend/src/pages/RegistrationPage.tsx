@@ -3,7 +3,6 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleHelp,
-  Fingerprint,
   Globe2,
   Mail,
   Phone,
@@ -12,6 +11,8 @@ import {
 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
+
+import eingressIcon from '../assets/icons/eingress-icon.png';
 
 function getApiBaseUrl() {
   const configuredUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
@@ -155,8 +156,8 @@ export function RegistrationPage() {
     <main className="registration-screen" aria-labelledby="registration-title">
       <header className="registration-topbar">
         <Link className="auth-brand registration-brand" to="/login">
-          <span className="logo-mark" aria-hidden="true">
-            <Fingerprint size={25} strokeWidth={2.4} />
+          <span className="logo-mark logo-mark-image" aria-hidden="true">
+            <img src={eingressIcon} alt="" />
           </span>
           <strong>EINGRESS</strong>
         </Link>
