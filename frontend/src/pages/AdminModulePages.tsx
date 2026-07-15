@@ -108,6 +108,7 @@ type UserDisplayRow = {
   avatarTone: string;
   biometricStatus: 'Registered' | 'Missing';
   biometricTone: 'success' | 'danger';
+  department: string;
   employeeId: string;
   expirationDate: string | null;
   id: number;
@@ -229,53 +230,36 @@ function PageHeader({ description, title }: { description: string; title: string
 }
 
 function EnrollmentFilterRow({
+  dateFilter,
   departmentFilter,
   departments,
-  endDateFilter,
   nameFilter,
   onClear,
+  onDateChange,
   onDepartmentChange,
-  onEndDateChange,
   onNameChange,
   onStatusChange,
-  onStartDateChange,
-  resultCount,
-  startDateFilter,
   statusFilter,
 }: {
+  dateFilter: string;
   departmentFilter: string;
   departments: string[];
-  endDateFilter: string;
   nameFilter: string;
   onClear: () => void;
+  onDateChange: (value: string) => void;
   onDepartmentChange: (value: string) => void;
-  onEndDateChange: (value: string) => void;
   onNameChange: (value: string) => void;
   onStatusChange: (value: EnrollmentStatusFilter) => void;
-  onStartDateChange: (value: string) => void;
-  resultCount: number;
-  startDateFilter: string;
   statusFilter: EnrollmentStatusFilter;
 }) {
   return (
-    <div className="module-filter-row enrollment-filter-row">
+    <div className="enrollment-search-row">
       <input
-        aria-label="Filter by name"
-        onChange={(event) => onNameChange(event.target.value)}
-        placeholder="Filter by name..."
-        type="search"
-        value={nameFilter}
+        aria-label="Filter by date"
+        onChange={(event) => onDateChange(event.target.value)}
+        type="date"
+        value={dateFilter}
       />
-      <select
-        aria-label="Filter by status"
-        onChange={(event) => onStatusChange(event.target.value as EnrollmentStatusFilter)}
-        value={statusFilter}
-      >
-        <option value="All">All Status</option>
-        <option value="Pending">Pending</option>
-        <option value="Approved">Approved</option>
-        <option value="Rejected">Rejected</option>
-      </select>
       <select
         aria-label="Filter by department"
         onChange={(event) => onDepartmentChange(event.target.value)}
@@ -288,31 +272,34 @@ function EnrollmentFilterRow({
           </option>
         ))}
       </select>
+      <select
+        aria-label="Filter by status"
+        onChange={(event) => onStatusChange(event.target.value as EnrollmentStatusFilter)}
+        value={statusFilter}
+      >
+        <option value="All">All Status</option>
+        <option value="Pending">Pending</option>
+        <option value="Approved">Approved</option>
+        <option value="Rejected">Rejected</option>
+      </select>
       <input
-        aria-label="Filter start date"
-        onChange={(event) => onStartDateChange(event.target.value)}
-        type="date"
-        value={startDateFilter}
-      />
-      <input
-        aria-label="Filter end date"
-        onChange={(event) => onEndDateChange(event.target.value)}
-        type="date"
-        value={endDateFilter}
+        aria-label="Search by name or ID"
+        onChange={(event) => onNameChange(event.target.value)}
+        placeholder="Search by name or ID..."
+        type="search"
+        value={nameFilter}
       />
       <button className="filter-button" onClick={onClear} type="button">
-        Clear
+        Filter
         <Filter size={16} />
       </button>
-      <span className="filter-result-count" aria-live="polite">
-        {resultCount} shown
-      </span>
     </div>
   );
 }
 
 function ModuleTable({
   actionRenderer,
+  actionsWidth = 182,
   columns,
   emptyMessage = 'No records found.',
   errorMessage,
@@ -324,6 +311,7 @@ function ModuleTable({
   withActions = false,
 }: {
   actionRenderer?: (rowIndex: number) => ReactNode;
+  actionsWidth?: number;
   columns: string[];
   emptyMessage?: string;
   errorMessage?: string;
@@ -339,7 +327,7 @@ function ModuleTable({
       ? pagination.pageSize - rows.length
       : 0;
 
-  const columnCount = columns.length + (withActions ? 1 : 0);
+  const tableMinWidth = Math.max(900, columns.length * 130 + (withActions ? actionsWidth : 0));
 
   return (
     <section className="module-panel" aria-labelledby={`${title.replaceAll(' ', '-')}-title`}>
@@ -347,14 +335,14 @@ function ModuleTable({
       <div className="module-table-wrap">
         <table
           className={withActions ? 'module-table has-actions' : 'module-table'}
-          style={{ minWidth: Math.max(900, columnCount * 130) }}
+          style={{ minWidth: tableMinWidth }}
         >
           <thead>
             <tr>
               {columns.map((column) => (
                 <th key={column}>{column}</th>
               ))}
-              {withActions ? <th>Actions</th> : null}
+              {withActions ? <th style={{ width: actionsWidth }}>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -400,7 +388,7 @@ function ModuleTable({
                     </td>
                   ))}
                   {withActions ? (
-                    <td>
+                    <td style={{ width: actionsWidth }}>
                       {actionRenderer ? (
                         actionRenderer(rowIndex)
                       ) : (
@@ -638,6 +626,7 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     avatarTone: getAvatarTone(index),
     biometricStatus: hasBiometric ? 'Registered' : 'Missing',
     biometricTone: hasBiometric ? 'success' : 'danger',
+    department: user.department || '-',
     employeeId: user.employee_id,
     expirationDate,
     id: user.id,
@@ -1403,11 +1392,11 @@ export function UserManagementPage() {
         </div>
 
         <div className="user-table-wrap">
-          <table className="user-management-table">
+          <table className="managed-table user-management-table">
             <thead>
               <tr>
                 <th>User</th>
-                <th>Role</th>
+                <th>Department</th>
                 <th>Biometric Status</th>
                 <th>Access Status</th>
                 <th>RFID</th>
@@ -1457,7 +1446,7 @@ export function UserManagementPage() {
                         </span>
                       </span>
                     </td>
-                    <td>{user.role}</td>
+                    <td>{user.department}</td>
                     <td>
                       <span className={`user-status-pill ${user.biometricTone}`}>
                         {attendanceStatusIcon(user.biometricStatus)}
@@ -2302,8 +2291,7 @@ export function EnrollmentRequestsPage() {
   const [nameFilter, setNameFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<EnrollmentStatusFilter>('All');
   const [departmentFilter, setDepartmentFilter] = useState('All');
-  const [startDateFilter, setStartDateFilter] = useState('');
-  const [endDateFilter, setEndDateFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2429,36 +2417,17 @@ export function EnrollmentRequestsPage() {
       const matchesStatus = statusFilter === 'All' || request.status === statusFilter;
       const matchesDepartment =
         departmentFilter === 'All' || request.department === departmentFilter;
-      const matchesStartDate = !startDateFilter || submittedDate >= startDateFilter;
-      const matchesEndDate = !endDateFilter || submittedDate <= endDateFilter;
+      const matchesDate = !dateFilter || submittedDate === dateFilter;
 
-      return (
-        matchesName && matchesStatus && matchesDepartment && matchesStartDate && matchesEndDate
-      );
+      return matchesName && matchesStatus && matchesDepartment && matchesDate;
     });
-  }, [departmentFilter, endDateFilter, nameFilter, requests, startDateFilter, statusFilter]);
-
-  const enrollmentRows = useMemo(
-    () =>
-      filteredRequests.map((request) => [
-        request.request_code,
-        request.full_name,
-        request.employee_id,
-        request.department,
-        request.rfid_uid || '-',
-        request.request_type,
-        formatSubmittedDate(request.submitted_at),
-        request.status,
-      ]),
-    [filteredRequests],
-  );
+  }, [dateFilter, departmentFilter, nameFilter, requests, statusFilter]);
 
   function clearEnrollmentFilters() {
     setNameFilter('');
     setStatusFilter('All');
     setDepartmentFilter('All');
-    setStartDateFilter('');
-    setEndDateFilter('');
+    setDateFilter('');
   }
 
   return (
@@ -2468,73 +2437,125 @@ export function EnrollmentRequestsPage() {
         description="Review and manage biometric and RFID enrollment requests."
       />
       <EnrollmentFilterRow
+        dateFilter={dateFilter}
         departmentFilter={departmentFilter}
         departments={departmentOptions}
-        endDateFilter={endDateFilter}
         nameFilter={nameFilter}
         onClear={clearEnrollmentFilters}
+        onDateChange={setDateFilter}
         onDepartmentChange={setDepartmentFilter}
-        onEndDateChange={setEndDateFilter}
         onNameChange={setNameFilter}
-        onStartDateChange={setStartDateFilter}
         onStatusChange={setStatusFilter}
-        resultCount={filteredRequests.length}
-        startDateFilter={startDateFilter}
         statusFilter={statusFilter}
       />
-      <ModuleTable
-        title="Enrollment Requests"
-        columns={[
-          'Request ID',
-          'Name',
-          'Employee ID',
-          'Department',
-          'RFID UID',
-          'Request Type',
-          'Submitted',
-          'Status',
-        ]}
-        rows={enrollmentRows}
-        isLoading={isLoading}
-        errorMessage={errorMessage}
-        emptyMessage="No enrollment requests found."
-        withActions
-        actionRenderer={(rowIndex) => {
-          const request = filteredRequests[rowIndex];
-          const isUpdating = updatingRequestId === request.id;
-          const isPending = request.status === 'Pending';
+      <section className="module-panel" aria-labelledby="enrollment-table-title">
+        <h2 id="enrollment-table-title">Enrollment Requests</h2>
+        <div className="module-table-wrap">
+          <table className="module-table has-actions enrollment-requests-table">
+            <thead>
+              <tr>
+                <th>Request ID</th>
+                <th>Name</th>
+                <th>Employee ID</th>
+                <th>Department</th>
+                <th>Request Type</th>
+                <th>Submitted</th>
+                <th>Status</th>
+                <th>
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr>
+                  <td className="module-table-message" colSpan={8}>
+                    Loading enrollment requests...
+                  </td>
+                </tr>
+              ) : errorMessage ? (
+                <tr>
+                  <td className="module-table-message error" colSpan={8}>
+                    {errorMessage}
+                  </td>
+                </tr>
+              ) : filteredRequests.length === 0 ? (
+                <tr>
+                  <td className="module-table-message" colSpan={8}>
+                    No enrollment requests found.
+                  </td>
+                </tr>
+              ) : (
+                filteredRequests.map((request) => {
+                  const isUpdating = updatingRequestId === request.id;
+                  const isPending = request.status === 'Pending';
 
-          return (
-            <span className="table-actions">
-              <button
-                className="tiny-action approve"
-                type="button"
-                aria-label="Approve"
-                disabled={!isPending || isUpdating}
-                onClick={() => void updateEnrollmentStatus(request.id, 'Approved')}
-              >
-                <Check size={14} />
-              </button>
-              <button
-                className="tiny-action reject"
-                type="button"
-                aria-label="Reject"
-                disabled={!isPending || isUpdating}
-                onClick={() => void updateEnrollmentStatus(request.id, 'Rejected')}
-              >
-                <X size={14} />
-              </button>
-              <button
-                className="tiny-view"
-                onClick={() => setSelectedRequest(request)}
-                type="button"
-              >
-                View
-              </button>
-            </span>
-          );
-        }}
-      />
+                  return (
+                    <tr key={request.id}>
+                      <td>{request.request_code}</td>
+                      <td>
+                        <strong className="module-cell-text">{request.full_name}</strong>
+                      </td>
+                      <td>{request.employee_id}</td>
+                      <td>{request.department}</td>
+                      <td>{request.request_type}</td>
+                      <td>{formatSubmittedDate(request.submitted_at)}</td>
+                      <td>
+                        <span className={`module-status ${statusTone(request.status)}`}>
+                          {request.status}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="table-actions">
+                          <button
+                            className="tiny-action approve"
+                            type="button"
+                            aria-label="Approve"
+                            disabled={!isPending || isUpdating}
+                            onClick={() => void updateEnrollmentStatus(request.id, 'Approved')}
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            className="tiny-action reject"
+                            type="button"
+                            aria-label="Reject"
+                            disabled={!isPending || isUpdating}
+                            onClick={() => void updateEnrollmentStatus(request.id, 'Rejected')}
+                          >
+                            <X size={14} />
+                          </button>
+                          <button
+                            className="tiny-view"
+                            onClick={() => setSelectedRequest(request)}
+                            type="button"
+                          >
+                            View
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="enrollment-pagination-row">
+          <span>
+            Showing {filteredRequests.length === 0 ? 0 : 1} to {filteredRequests.length} entries
+          </span>
+          <span className="module-pagination-controls">
+            <button className="active" type="button">
+              1
+            </button>
+            <button type="button">2</button>
+            <button type="button">3</button>
+            <button type="button">&gt;</button>
+          </span>
+        </div>
+      </section>
 
       {selectedRequest ? (
         <div className="request-drawer-backdrop" onMouseDown={() => setSelectedRequest(null)}>
@@ -3280,6 +3301,7 @@ export function ReportsPage() {
             pagination={reportsPagination}
             onPageChange={setReportsCurrentPage}
             withActions
+            actionsWidth={270}
             actionRenderer={(rowIndex) => {
               const report = generatedReports[rowIndex];
               if (!report) return null;

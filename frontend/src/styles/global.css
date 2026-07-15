@@ -2029,15 +2029,14 @@ td small {
   overflow-x: auto;
 }
 
-.user-management-table {
-  min-width: 930px;
+.managed-table {
   overflow: hidden;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
 }
 
-.user-management-table th {
+.managed-table th {
   padding: 14px 18px;
   color: #263650;
   font-size: 0.82rem;
@@ -2047,13 +2046,17 @@ td small {
   border-bottom: 0;
 }
 
-.user-management-table td {
+.managed-table td {
   height: 52px;
   padding: 8px 18px;
   color: #071435;
   font-size: 0.78rem;
   border-bottom: 1px solid #e7ebf1;
   background: #ffffff;
+}
+
+.user-management-table {
+  min-width: 930px;
 }
 
 .user-management-table th:nth-child(1),
@@ -2084,6 +2087,66 @@ td small {
 .user-management-table th:nth-child(6),
 .user-management-table td:nth-child(6) {
   width: 132px;
+}
+
+.module-table.enrollment-requests-table {
+  width: 100%;
+  min-width: 1040px;
+}
+
+.enrollment-requests-table th,
+.enrollment-requests-table td {
+  padding: 12px;
+  border-bottom-color: #e5e9f1;
+}
+
+.enrollment-requests-table th {
+  color: #46536b;
+  background: #f4f6fa;
+}
+
+.enrollment-requests-table td:nth-child(1) {
+  white-space: nowrap;
+}
+
+.enrollment-requests-table th:nth-child(1),
+.enrollment-requests-table td:nth-child(1) {
+  width: 12%;
+}
+
+.enrollment-requests-table th:nth-child(2),
+.enrollment-requests-table td:nth-child(2) {
+  width: 13%;
+}
+
+.enrollment-requests-table th:nth-child(3),
+.enrollment-requests-table td:nth-child(3) {
+  width: 13%;
+}
+
+.enrollment-requests-table th:nth-child(4),
+.enrollment-requests-table td:nth-child(4) {
+  width: 12%;
+}
+
+.enrollment-requests-table th:nth-child(5),
+.enrollment-requests-table td:nth-child(5) {
+  width: 13%;
+}
+
+.enrollment-requests-table th:nth-child(6),
+.enrollment-requests-table td:nth-child(6) {
+  width: 11%;
+}
+
+.enrollment-requests-table th:nth-child(7),
+.enrollment-requests-table td:nth-child(7) {
+  width: 10%;
+}
+
+.enrollment-requests-table th:nth-child(8),
+.enrollment-requests-table td:nth-child(8) {
+  width: 16%;
 }
 
 .managed-user-cell {
@@ -3051,6 +3114,108 @@ td small {
   background: #101936;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.enrollment-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.enrollment-search-row input,
+.enrollment-search-row select {
+  min-height: 42px;
+  padding: 0 16px;
+  color: #071435;
+  border: 1px solid #aeb8c7;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.enrollment-search-row input[type='date'] {
+  width: 160px;
+}
+
+.enrollment-search-row select {
+  width: 170px;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #667089 50%),
+    linear-gradient(135deg, #667089 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 18px,
+    calc(100% - 12px) 18px;
+  background-repeat: no-repeat;
+  background-size:
+    6px 6px,
+    6px 6px;
+  padding-right: 34px;
+}
+
+.enrollment-search-row input[type='search'] {
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.enrollment-search-row .filter-button {
+  margin-left: auto;
+}
+
+@media (max-width: 760px) {
+  .enrollment-search-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .enrollment-search-row input,
+  .enrollment-search-row select {
+    width: 100%;
+  }
+
+  .enrollment-search-row .filter-button {
+    margin-left: 0;
+  }
+}
+
+.enrollment-pagination-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 16px;
+  color: #667089;
+  font-size: 0.9rem;
+}
+
+.enrollment-pagination-row .module-pagination-controls {
+  display: flex;
+  align-items: center;
+}
+
+.enrollment-pagination-row button {
+  min-width: 32px;
+  height: 28px;
+  margin-left: 8px;
+  color: #071435;
+  border: 1px solid #aeb8c7;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.enrollment-pagination-row button.active {
+  color: #ffffff;
+  border-color: #e01835;
+  background: #e01835;
+}
+
 .module-panel {
   padding: 20px;
   border: 1px solid #aeb8c7;
@@ -3089,7 +3254,7 @@ td small {
 
 .module-table.has-actions th:last-child,
 .module-table.has-actions td:last-child {
-  overflow: visible;
+  overflow: hidden;
   white-space: nowrap;
 }
 
