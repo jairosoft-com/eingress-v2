@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
   deactivated_at TIMESTAMPTZ,
   deactivation_reason TEXT,
+  expiration_date TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -2,6 +2,7 @@ import express from 'express';
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
+import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 
 export const usersRouter = express.Router();
 usersRouter.use(authMiddleware);
@@ -11,6 +12,7 @@ async function ensureUserStatusColumns() {
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMPTZ`);
     await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivation_reason TEXT`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS expiration_date TIMESTAMPTZ`);
   } catch (error) {
     console.error('Unable to ensure user archive column exists', error);
   }
@@ -62,7 +64,7 @@ usersRouter.get('/', async (req, res) => {
   try {
     const result = await query(
       `SELECT id, employee_id, full_name, email, phone, department, role,
-        fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at
+        fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at
        FROM users
        WHERE COALESCE(is_archived, FALSE) = FALSE
        ORDER BY full_name`,
@@ -81,11 +83,12 @@ usersRouter.post('/', async (req, res) => {
   }
 
   try {
+    const expirationDate = getDefaultExpirationForRole(role);
     const result = await query(
-      `INSERT INTO users (employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
-      [employeeId, fullName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive],
+      `INSERT INTO users (employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10)
+       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`,
+      [employeeId, fullName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive, expirationDate],
     );
     const user = result.rows[0];
     await query(
@@ -164,7 +167,7 @@ usersRouter.patch('/:id', async (req, res) => {
          is_archived = COALESCE($9, is_archived),
          updated_at = NOW()
        WHERE id = $10
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
+       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`,
       [fullName ?? null, email ?? null, phone ?? null, department ?? null, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, isArchived ?? null, id],
     );
 
@@ -216,7 +219,7 @@ usersRouter.patch('/:id/status', async (req, res) => {
          deactivation_reason = CASE WHEN $1 THEN NULL ELSE COALESCE($3, 'Manually deactivated by admin') END,
          updated_at = NOW()
        WHERE id = $2
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
+       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`,
       [isActive, id, reason || null],
     );
 
@@ -261,7 +264,7 @@ usersRouter.patch('/:id/archive', async (req, res) => {
          is_archived = $2,
          updated_at = NOW()
        WHERE id = $3
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, created_at, updated_at`,
+       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`,
       [isArchived ? false : true, isArchived, id],
     );
 
