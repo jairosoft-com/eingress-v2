@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
+import { formatDateTime } from '../lib/dateTimeFormat';
+import { useDateTimeSettings } from '../lib/systemSettingsStore';
 
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
@@ -48,6 +50,7 @@ function getStatus(log: AccessLog) {
 
 export function AccessLogsPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [accessLogs, setAccessLogs] = useState<AccessLog[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -152,7 +155,7 @@ export function AccessLogsPage() {
                   <td>{log.area ?? 'System'}</td>
                   <td>{log.device ?? log.device_name ?? 'EIngress'}</td>
                   <td>{getStatus(log)}</td>
-                  <td>{new Date(getEventTime(log)).toLocaleString()}</td>
+                  <td>{formatDateTime(getEventTime(log), dateTimeSettings)}</td>
                 </tr>
               ))
             )}
