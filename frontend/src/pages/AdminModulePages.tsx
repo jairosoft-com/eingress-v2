@@ -25,6 +25,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth';
+import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
+import {
+  DateTimeSettings,
+  setDateTimeSettings,
+  useDateTimeSettings,
+} from '../lib/systemSettingsStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
@@ -112,7 +118,6 @@ type UserDisplayRow = {
   employeeId: string;
   expirationDate: string | null;
   id: number;
-  isExpired: boolean;
   name: string;
   online: boolean;
   rfidUid: string;
@@ -184,6 +189,29 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   time_format: '12-Hour (hh:mm AM/PM)',
   time_zone: '(UTC+08:00) Asia/Manila',
 };
+
+const DATE_FORMAT_OPTIONS = ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD'];
+
+const TIME_FORMAT_OPTIONS = ['12-Hour (hh:mm AM/PM)', '24-Hour (HH:mm)'];
+
+const FIRST_DAY_OF_WEEK_OPTIONS = ['Monday', 'Sunday'];
+
+const TIME_ZONE_OPTIONS = [
+  '(UTC-08:00) America/Los_Angeles',
+  '(UTC-05:00) America/New_York',
+  '(UTC+00:00) UTC',
+  '(UTC+00:00) Europe/London',
+  '(UTC+08:00) Asia/Manila',
+  '(UTC+08:00) Asia/Singapore',
+  '(UTC+08:00) Asia/Hong_Kong',
+  '(UTC+08:00) Asia/Shanghai',
+  '(UTC+09:00) Asia/Tokyo',
+  '(UTC+10:00) Australia/Sydney',
+];
+
+function withCurrentOption(options: string[], current: string): string[] {
+  return options.includes(current) ? options : [current, ...options];
+}
 
 type UserEditForm = {
   fullName: string;
@@ -516,32 +544,41 @@ function statusTone(status: string) {
   return 'danger';
 }
 
-function formatSubmittedDate(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
+function formatSubmittedDate(value: string, settings: DateTimeSettings) {
+  return formatDate(value, settings);
 }
 
-function formatClockTime(value: string | null) {
+function formatExpiryCountdown(
+  expirationDate: string,
+  now: number,
+): { isExpired: boolean; label: string } {
+  const remainingMs = new Date(expirationDate).getTime() - now;
+
+  if (Number.isNaN(remainingMs) || remainingMs <= 0) {
+    return { isExpired: true, label: 'Expired' };
+  }
+
+  const days = Math.floor(remainingMs / 86_400_000);
+  const hours = Math.floor((remainingMs % 86_400_000) / 3_600_000);
+  const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
+
+  if (days > 0) {
+    return { isExpired: false, label: `${days}d ${hours}h` };
+  }
+
+  if (hours > 0) {
+    return { isExpired: false, label: `${hours}h ${minutes}m` };
+  }
+
+  return { isExpired: false, label: `${minutes}m` };
+}
+
+function formatClockTime(value: string | null, settings: DateTimeSettings) {
   if (!value) {
     return '-';
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return formatTime(value, settings) || '-';
 }
 
 function hasCheckedOut(checkInAt: string | null, checkOutAt: string | null) {
@@ -617,7 +654,6 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
   const hasBiometric = Boolean(user.fingerprint_id);
   const isStudent = (user.role || '').trim().toLowerCase() === 'student';
   const expirationDate = isStudent ? (user.expiration_date ?? null) : null;
-  const isExpired = Boolean(expirationDate) && new Date() > new Date(expirationDate as string);
 
   return {
     accessStatus: user.is_active ? 'Active' : 'Disabled',
@@ -630,7 +666,6 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     employeeId: user.employee_id,
     expirationDate,
     id: user.id,
-    isExpired,
     name: user.full_name,
     online: user.is_active,
     rfidUid: user.rfid_uid || '-',
@@ -680,6 +715,8 @@ function attendanceStatusIcon(status: string) {
 
 export function UserManagementPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
+  const [now, setNow] = useState(() => Date.now());
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [usersErrorMessage, setUsersErrorMessage] = useState('');
@@ -716,6 +753,11 @@ export function UserManagementPage() {
   const [fingerprintScanInput, setFingerprintScanInput] = useState('');
   const [rfidScanBaselineNonce, setRfidScanBaselineNonce] = useState(0);
   const [visibleRfidUserIds, setVisibleRfidUserIds] = useState<Set<number>>(() => new Set());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1396,7 +1438,7 @@ export function UserManagementPage() {
             <thead>
               <tr>
                 <th>User</th>
-                <th>Department</th>
+                <th>Role</th>
                 <th>Biometric Status</th>
                 <th>Access Status</th>
                 <th>RFID</th>
@@ -1423,105 +1465,120 @@ export function UserManagementPage() {
                   </td>
                 </tr>
               ) : (
-                visibleUsers.map((user) => (
-                  <tr key={user.id}>
-                    <td>
-                      <span className="managed-user-cell">
-                        <span className={`managed-avatar ${user.avatarTone}`}>
-                          {user.avatar}
-                          {user.online ? <i aria-hidden="true" /> : null}
+                visibleUsers.map((user) => {
+                  const countdown = user.expirationDate
+                    ? formatExpiryCountdown(user.expirationDate, now)
+                    : null;
+
+                  return (
+                    <tr key={user.id}>
+                      <td>
+                        <span className="managed-user-cell">
+                          <span className={`managed-avatar ${user.avatarTone}`}>
+                            {user.avatar}
+                            {user.online ? <i aria-hidden="true" /> : null}
+                          </span>
+                          <span>
+                            <strong>{user.name}</strong>
+                            <small>
+                              {user.employeeId}
+                              {countdown ? (
+                                <span
+                                  className={`expiry-badge${countdown.isExpired ? ' expired' : ''}`}
+                                  title={formatSubmittedDate(
+                                    user.expirationDate as string,
+                                    dateTimeSettings,
+                                  )}
+                                >
+                                  {' · '}
+                                  {countdown.isExpired
+                                    ? 'Expired'
+                                    : `Expires in ${countdown.label}`}
+                                </span>
+                              ) : null}
+                            </small>
+                          </span>
                         </span>
-                        <span>
-                          <strong>{user.name}</strong>
-                          <small>
-                            {user.employeeId}
-                            {user.expirationDate ? (
-                              <span className={`expiry-badge${user.isExpired ? ' expired' : ''}`}>
-                                {' · '}
-                                {user.isExpired ? 'Expired' : 'Expires'}{' '}
-                                {formatSubmittedDate(user.expirationDate)}
-                              </span>
-                            ) : null}
-                          </small>
+                      </td>
+                      <td>{user.role}</td>
+                      <td>
+                        <span className={`user-status-pill ${user.biometricTone}`}>
+                          {attendanceStatusIcon(user.biometricStatus)}
+                          {user.biometricStatus}
                         </span>
-                      </span>
-                    </td>
-                    <td>{user.department}</td>
-                    <td>
-                      <span className={`user-status-pill ${user.biometricTone}`}>
-                        {attendanceStatusIcon(user.biometricStatus)}
-                        {user.biometricStatus}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`user-status-pill ${user.accessTone}`}>
-                        {attendanceStatusIcon(user.accessStatus)}
-                        {user.accessStatus}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="rfid-mask-cell">
-                        <span>
-                          {visibleRfidUserIds.has(user.id) ? user.rfidUid : maskRfid(user.rfidUid)}
+                      </td>
+                      <td>
+                        <span className={`user-status-pill ${user.accessTone}`}>
+                          {attendanceStatusIcon(user.accessStatus)}
+                          {user.accessStatus}
                         </span>
-                        {user.rfidUid !== '-' ? (
+                      </td>
+                      <td>
+                        <span className="rfid-mask-cell">
+                          <span>
+                            {visibleRfidUserIds.has(user.id)
+                              ? user.rfidUid
+                              : maskRfid(user.rfidUid)}
+                          </span>
+                          {user.rfidUid !== '-' ? (
+                            <button
+                              aria-label={
+                                visibleRfidUserIds.has(user.id)
+                                  ? `Hide RFID for ${user.name}`
+                                  : `Show RFID for ${user.name}`
+                              }
+                              onClick={() => toggleRfidVisibility(user.id)}
+                              type="button"
+                            >
+                              {visibleRfidUserIds.has(user.id) ? (
+                                <EyeOff size={13} />
+                              ) : (
+                                <Eye size={13} />
+                              )}
+                            </button>
+                          ) : null}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="user-row-actions">
                           <button
-                            aria-label={
-                              visibleRfidUserIds.has(user.id)
-                                ? `Hide RFID for ${user.name}`
-                                : `Show RFID for ${user.name}`
-                            }
-                            onClick={() => toggleRfidVisibility(user.id)}
+                            className={user.accessStatus === 'Active' ? 'activate' : 'deactivate'}
                             type="button"
+                            aria-label={
+                              user.accessStatus === 'Disabled'
+                                ? `Activate ${user.name}`
+                                : `Deactivate ${user.name}`
+                            }
+                            disabled={updatingUserId === user.id}
+                            onClick={() =>
+                              void updateUserStatus(user.id, user.accessStatus === 'Disabled')
+                            }
                           >
-                            {visibleRfidUserIds.has(user.id) ? (
-                              <EyeOff size={13} />
-                            ) : (
-                              <Eye size={13} />
-                            )}
+                            <Power size={15} />
                           </button>
-                        ) : null}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="user-row-actions">
-                        <button
-                          className={user.accessStatus === 'Active' ? 'activate' : 'deactivate'}
-                          type="button"
-                          aria-label={
-                            user.accessStatus === 'Disabled'
-                              ? `Activate ${user.name}`
-                              : `Deactivate ${user.name}`
-                          }
-                          disabled={updatingUserId === user.id}
-                          onClick={() =>
-                            void updateUserStatus(user.id, user.accessStatus === 'Disabled')
-                          }
-                        >
-                          <Power size={15} />
-                        </button>
-                        <button
-                          className="archive"
-                          type="button"
-                          aria-label={`Archive ${user.name}`}
-                          disabled={updatingUserId === user.id}
-                          onClick={() => void archiveUser(user.id)}
-                        >
-                          <Archive size={15} />
-                        </button>
-                        <button
-                          className="edit"
-                          type="button"
-                          aria-label={`Edit ${user.name}`}
-                          disabled={updatingUserId === user.id}
-                          onClick={() => openUserEditor(user.id)}
-                        >
-                          <Pencil size={15} />
-                        </button>
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                          <button
+                            className="archive"
+                            type="button"
+                            aria-label={`Archive ${user.name}`}
+                            disabled={updatingUserId === user.id}
+                            onClick={() => void archiveUser(user.id)}
+                          >
+                            <Archive size={15} />
+                          </button>
+                          <button
+                            className="edit"
+                            type="button"
+                            aria-label={`Edit ${user.name}`}
+                            disabled={updatingUserId === user.id}
+                            onClick={() => openUserEditor(user.id)}
+                          >
+                            <Pencil size={15} />
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -2132,6 +2189,7 @@ export function UserManagementPage() {
 
 export function AttendanceManagementPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [summary, setSummary] = useState<AttendanceSummary | null>(null);
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
@@ -2210,14 +2268,14 @@ export function AttendanceManagementPage() {
         record.employee_id,
         record.full_name,
         record.role || '-',
-        formatClockTime(record.check_in_at),
+        formatClockTime(record.check_in_at, dateTimeSettings),
         hasCheckedOut(record.check_in_at, record.check_out_at)
-          ? formatClockTime(record.check_out_at)
+          ? formatClockTime(record.check_out_at, dateTimeSettings)
           : '-',
         record.status,
         formatTotalHours(record.check_in_at, record.check_out_at),
       ]),
-    [records],
+    [records, dateTimeSettings],
   );
 
   const attendanceMetrics = [
@@ -2283,6 +2341,7 @@ export function AttendanceManagementPage() {
 
 export function EnrollmentRequestsPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [requests, setRequests] = useState<EnrollmentRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -2499,7 +2558,7 @@ export function EnrollmentRequestsPage() {
                       <td>{request.employee_id}</td>
                       <td>{request.department}</td>
                       <td>{request.request_type}</td>
-                      <td>{formatSubmittedDate(request.submitted_at)}</td>
+                      <td>{formatSubmittedDate(request.submitted_at, dateTimeSettings)}</td>
                       <td>
                         <span className={`module-status ${statusTone(request.status)}`}>
                           {request.status}
@@ -2595,7 +2654,7 @@ export function EnrollmentRequestsPage() {
                 </div>
                 <div>
                   <dt>Submitted On</dt>
-                  <dd>{formatSubmittedDate(selectedRequest.submitted_at)}</dd>
+                  <dd>{formatSubmittedDate(selectedRequest.submitted_at, dateTimeSettings)}</dd>
                 </div>
                 <div>
                   <dt>Status</dt>
@@ -2945,6 +3004,7 @@ function ReportPreviewModal({
 
 export function ReportsPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [reportType, setReportType] = useState<ReportType>('Attendance Summary');
@@ -3035,9 +3095,9 @@ export function ReportsPage() {
         report.report_name,
         report.report_type,
         report.generated_by || 'System',
-        formatAuditTimestamp(report.created_at),
+        formatAuditTimestamp(report.created_at, dateTimeSettings),
       ]),
-    [generatedReports],
+    [generatedReports, dateTimeSettings],
   );
 
   const onGenerateReport = async () => {
@@ -3115,7 +3175,7 @@ export function ReportsPage() {
         [
           format === 'csv'
             ? buildCsv(data.columns, data.rows)
-            : buildPdf(data.reportName, data.columns, data.rows),
+            : buildPdf(data.reportName, data.columns, data.rows, dateTimeSettings),
         ],
         { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
       );
@@ -3355,17 +3415,8 @@ export function ReportsPage() {
   );
 }
 
-function formatAuditTimestamp(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
+function formatAuditTimestamp(value: string, settings: DateTimeSettings) {
+  return formatDateTime(value, settings);
 }
 
 function escapeCsvValue(value: string) {
@@ -3380,10 +3431,10 @@ function buildCsv(header: string[], rows: string[][]) {
   return content;
 }
 
-function buildPdf(title: string, header: string[], rows: string[][]) {
+function buildPdf(title: string, header: string[], rows: string[][], settings: DateTimeSettings) {
   const lines = [
     title,
-    `Generated ${new Date().toLocaleString()}`,
+    `Generated ${formatDateTime(new Date(), settings)}`,
     '',
     header.join(' | '),
     ...rows.map((row) => row.join(' | ')),
@@ -3426,6 +3477,7 @@ function buildPdf(title: string, header: string[], rows: string[][]) {
 
 export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(session?.accessToken));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -3556,13 +3608,13 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   const tableRows = useMemo(
     () =>
       auditLogs.map((log) => [
-        formatAuditTimestamp(log.created_at),
+        formatAuditTimestamp(log.created_at, dateTimeSettings),
         log.admin_name || 'System',
         log.action,
         log.module,
         log.details || '—',
       ]),
-    [auditLogs],
+    [auditLogs, dateTimeSettings],
   );
 
   const onApplyFilters = () => {
@@ -3599,7 +3651,7 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
       [
         format === 'csv'
           ? buildCsv(auditHeader, tableRows)
-          : buildPdf('EINGRESS Audit Logs', auditHeader, tableRows),
+          : buildPdf('EINGRESS Audit Logs', auditHeader, tableRows, dateTimeSettings),
       ],
       { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
     );
@@ -3699,6 +3751,8 @@ export function SettingsPage() {
   const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<'general' | 'security'>('general');
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
+  const [lastSavedSettings, setLastSavedSettings] =
+    useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
   const [profile, setProfile] = useState<AdminSettingsProfile | null>(null);
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -3724,8 +3778,11 @@ export function SettingsPage() {
           .catch(() => null)) as AdminSettingsProfile | null;
         const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
 
-        if (settingsResponse.ok && settingsData)
-          setSettings({ ...DEFAULT_SYSTEM_SETTINGS, ...settingsData });
+        if (settingsResponse.ok && settingsData) {
+          const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settingsData };
+          setSettings(merged);
+          setLastSavedSettings(merged);
+        }
         if (profileResponse.ok && profileData) setProfile(profileData);
         if (usersResponse.ok && Array.isArray(usersData)) {
           setTotalUsers(usersData.filter((user) => !user.is_archived).length);
@@ -3745,6 +3802,8 @@ export function SettingsPage() {
   const updateSetting = <K extends keyof SystemSettings>(key: K, value: SystemSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }));
   };
+
+  const isDirty = JSON.stringify(settings) !== JSON.stringify(lastSavedSettings);
 
   async function saveSettings() {
     if (!session?.accessToken) return;
@@ -3784,7 +3843,10 @@ export function SettingsPage() {
         throw new Error(data && 'error' in data ? data.error : 'Unable to save settings.');
       }
 
-      setSettings({ ...DEFAULT_SYSTEM_SETTINGS, ...data });
+      const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...data };
+      setSettings(merged);
+      setLastSavedSettings(merged);
+      setDateTimeSettings(merged);
       setMessage('Settings saved successfully.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save settings.');
@@ -3863,7 +3925,7 @@ export function SettingsPage() {
                 <dt>Last Backup</dt>
                 <dd>
                   {settings.last_backup_at
-                    ? formatAuditTimestamp(settings.last_backup_at)
+                    ? formatAuditTimestamp(settings.last_backup_at, settings)
                     : 'Not available'}
                 </dd>
               </div>
@@ -3882,17 +3944,25 @@ export function SettingsPage() {
             <div className="security-fields four-columns">
               <label>
                 Date Format
-                <input
+                <select
                   value={settings.date_format}
                   onChange={(event) => updateSetting('date_format', event.target.value)}
-                />
+                >
+                  {withCurrentOption(DATE_FORMAT_OPTIONS, settings.date_format).map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
               </label>
               <label>
                 Time Format
-                <input
+                <select
                   value={settings.time_format}
                   onChange={(event) => updateSetting('time_format', event.target.value)}
-                />
+                >
+                  {withCurrentOption(TIME_FORMAT_OPTIONS, settings.time_format).map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
               </label>
               <label>
                 First Day of Week
@@ -3900,16 +3970,23 @@ export function SettingsPage() {
                   value={settings.first_day_of_week}
                   onChange={(event) => updateSetting('first_day_of_week', event.target.value)}
                 >
-                  <option>Monday</option>
-                  <option>Sunday</option>
+                  {withCurrentOption(FIRST_DAY_OF_WEEK_OPTIONS, settings.first_day_of_week).map(
+                    (option) => (
+                      <option key={option}>{option}</option>
+                    ),
+                  )}
                 </select>
               </label>
               <label>
                 Time Zone
-                <input
+                <select
                   value={settings.time_zone}
                   onChange={(event) => updateSetting('time_zone', event.target.value)}
-                />
+                >
+                  {withCurrentOption(TIME_ZONE_OPTIONS, settings.time_zone).map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
               </label>
             </div>
           </section>
@@ -4030,10 +4107,10 @@ export function SettingsPage() {
         </div>
       )}
       <div className="settings-save-row">
-        <span>{message}</span>
+        <span>{message || (isDirty && !isSaving ? 'You have unsaved changes.' : '')}</span>
         <button
           className="save-settings-button"
-          disabled={isSaving}
+          disabled={isSaving || !isDirty}
           onClick={() => void saveSettings()}
           type="button"
         >

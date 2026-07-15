@@ -6,6 +6,10 @@ import { authMiddleware } from '../middleware/auth.js';
 export const settingsRouter = express.Router();
 settingsRouter.use(authMiddleware);
 
+const ALLOWED_DATE_FORMATS = ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD'];
+const ALLOWED_TIME_FORMATS = ['12-Hour (hh:mm AM/PM)', '24-Hour (HH:mm)'];
+const ALLOWED_FIRST_DAY_OF_WEEK = ['Monday', 'Sunday'];
+
 async function ensureSecuritySettingColumns() {
   await query(`
     ALTER TABLE system_settings
@@ -64,6 +68,22 @@ settingsRouter.patch('/', async (req, res, next) => {
       keepMeLoggedIn,
       adminRfidEnabled,
     } = req.body;
+
+    if (dateFormat !== undefined && dateFormat !== null && !ALLOWED_DATE_FORMATS.includes(dateFormat)) {
+      return res.status(400).json({ error: `dateFormat must be one of: ${ALLOWED_DATE_FORMATS.join(', ')}` });
+    }
+    if (timeFormat !== undefined && timeFormat !== null && !ALLOWED_TIME_FORMATS.includes(timeFormat)) {
+      return res.status(400).json({ error: `timeFormat must be one of: ${ALLOWED_TIME_FORMATS.join(', ')}` });
+    }
+    if (
+      firstDayOfWeek !== undefined &&
+      firstDayOfWeek !== null &&
+      !ALLOWED_FIRST_DAY_OF_WEEK.includes(firstDayOfWeek)
+    ) {
+      return res
+        .status(400)
+        .json({ error: `firstDayOfWeek must be one of: ${ALLOWED_FIRST_DAY_OF_WEEK.join(', ')}` });
+    }
 
     const result = await query(
       `UPDATE system_settings
