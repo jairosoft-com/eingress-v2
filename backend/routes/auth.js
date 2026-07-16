@@ -9,7 +9,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
-const TOKEN_EXPIRES_IN = '1h';
+const PERSISTENT_SESSION_MINUTES = 7 * 24 * 60;
 const RESET_TOKEN_EXPIRES_MINUTES = Number.parseInt(
   process.env.RESET_TOKEN_EXPIRES_MINUTES || '30',
   10,
@@ -21,7 +21,13 @@ export const authRouter = express.Router();
 
 async function ensureAdminPasswordColumns() {
   try {
-    await query(`ALTER TABLE admins ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ`);
+    await query(`
+      ALTER TABLE admins
+        ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ
+    `);
   } catch (error) {
     console.error('Unable to ensure admin password_changed_at column exists', error);
   }
@@ -123,17 +129,53 @@ async function sendResetEmail({ email, resetUrl, username }) {
   });
 }
 
+authRouter.get('/login-options', async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT admin_rfid_enabled FROM system_settings ORDER BY id LIMIT 1`,
+    );
+
+    res.json({ rfidRequired: result.rows[0]?.admin_rfid_enabled ?? true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 authRouter.post('/login', async (req, res) => {
   const usernameOrEmail = req.body.usernameOrEmail || req.body.username || req.body.email;
   const { password, rfidCode } = req.body;
 
-  if (!usernameOrEmail || !password || !rfidCode) {
-    return res.status(400).json({ error: 'usernameOrEmail, password, and rfidCode are required' });
+  if (!usernameOrEmail || !password) {
+    return res.status(400).json({ error: 'usernameOrEmail and password are required' });
   }
 
   try {
+    const settingsResult = await query(
+      `SELECT session_timeout_minutes, auto_logout_enabled, keep_me_logged_in, admin_rfid_enabled,
+        lockout_enabled, max_failed_attempts, lockout_duration_minutes, reset_failed_attempts_after_minutes
+       FROM system_settings
+       ORDER BY id
+       LIMIT 1`,
+    );
+    const settings = settingsResult.rows[0] || {};
+    const sessionTimeoutMinutes = settings.session_timeout_minutes ?? 30;
+    const autoLogoutEnabled = settings.auto_logout_enabled ?? true;
+    const keepMeLoggedIn = settings.keep_me_logged_in ?? false;
+    const adminRfidEnabled = settings.admin_rfid_enabled ?? true;
+    const lockoutEnabled = settings.lockout_enabled ?? false;
+    const maxFailedAttempts = settings.max_failed_attempts ?? 5;
+    const lockoutDurationMinutes = settings.lockout_duration_minutes ?? 30;
+    const resetFailedAttemptsAfterMinutes = settings.reset_failed_attempts_after_minutes ?? 15;
+    const effectiveSessionMinutes =
+      keepMeLoggedIn || !autoLogoutEnabled ? PERSISTENT_SESSION_MINUTES : sessionTimeoutMinutes;
+
+    if (adminRfidEnabled && !rfidCode) {
+      return res.status(400).json({ error: 'usernameOrEmail, password, and rfidCode are required' });
+    }
+
     const adminResult = await query(
-      `SELECT id, username, email, password_hash, rfid_uid, is_active
+      `SELECT id, username, email, password_hash, rfid_uid, is_active,
+        failed_login_attempts, last_failed_login_at, locked_until
        FROM admins
        WHERE username = $1 OR email = $1
        LIMIT 1`,
@@ -145,15 +187,61 @@ authRouter.post('/login', async (req, res) => {
     }
 
     const admin = adminResult.rows[0];
+    const now = Date.now();
+
+    if (lockoutEnabled && admin.locked_until && new Date(admin.locked_until).getTime() > now) {
+      const minutesLeft = Math.ceil((new Date(admin.locked_until).getTime() - now) / 60_000);
+
+      return res.status(423).json({
+        error: `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute(s).`,
+      });
+    }
+
     const passwordMatch = await bcrypt.compare(password, admin.password_hash);
-    const rfidMatch = admin.rfid_uid === rfidCode;
+    const rfidMatch = !adminRfidEnabled || admin.rfid_uid === rfidCode;
 
     if (!admin.is_active || !passwordMatch || !rfidMatch) {
+      if (lockoutEnabled && admin.is_active) {
+        const resetWindowElapsed =
+          admin.last_failed_login_at &&
+          now - new Date(admin.last_failed_login_at).getTime() > resetFailedAttemptsAfterMinutes * 60_000;
+        const nextAttempts = (resetWindowElapsed ? 0 : admin.failed_login_attempts) + 1;
+        const isNowLocked = nextAttempts >= maxFailedAttempts;
+
+        await query(
+          `UPDATE admins
+           SET failed_login_attempts = $1,
+             last_failed_login_at = NOW(),
+             locked_until = $2
+           WHERE id = $3`,
+          [
+            nextAttempts,
+            isNowLocked ? new Date(now + lockoutDurationMinutes * 60_000) : null,
+            admin.id,
+          ],
+        );
+
+        if (isNowLocked) {
+          return res.status(423).json({
+            error: `Account locked due to too many failed attempts. Try again in ${lockoutDurationMinutes} minute(s).`,
+          });
+        }
+      }
+
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    if (lockoutEnabled && (admin.failed_login_attempts > 0 || admin.locked_until)) {
+      await query(
+        `UPDATE admins
+         SET failed_login_attempts = 0, last_failed_login_at = NULL, locked_until = NULL
+         WHERE id = $1`,
+        [admin.id],
+      );
+    }
+
     const token = jwt.sign({ adminId: admin.id, username: admin.username }, JWT_SECRET, {
-      expiresIn: TOKEN_EXPIRES_IN,
+      expiresIn: effectiveSessionMinutes * 60,
     });
 
     await query(
@@ -174,7 +262,11 @@ authRouter.post('/login', async (req, res) => {
       accessToken: token,
       adminName: admin.username,
       email: admin.email,
-      expiresAt: Date.now() + 60 * 60 * 1000,
+      expiresAt: Date.now() + effectiveSessionMinutes * 60 * 1000,
+      autoLogoutEnabled,
+      idleTimeoutWarningMinutes: settings.idle_timeout_warning_minutes ?? 5,
+      keepMeLoggedIn,
+      sessionTimeoutMinutes,
     });
   } catch (error) {
     console.error(error);

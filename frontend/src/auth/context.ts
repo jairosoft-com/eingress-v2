@@ -13,6 +13,7 @@ export type AuthContextValue = {
   isAuthenticated: boolean;
   signIn: (input: SignInInput) => Promise<AuthSession>;
   signOut: () => void;
+  extendSession: () => void;
 };
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

@@ -85,6 +85,25 @@ settingsRouter.patch('/', async (req, res, next) => {
         .json({ error: `firstDayOfWeek must be one of: ${ALLOWED_FIRST_DAY_OF_WEEK.join(', ')}` });
     }
 
+    if (sessionTimeoutMinutes != null || idleTimeoutWarningMinutes != null) {
+      const current = await query(
+        `SELECT session_timeout_minutes, idle_timeout_warning_minutes
+         FROM system_settings
+         ORDER BY id
+         LIMIT 1`,
+      );
+      const effectiveSessionTimeout =
+        sessionTimeoutMinutes ?? current.rows[0]?.session_timeout_minutes;
+      const effectiveIdleWarning =
+        idleTimeoutWarningMinutes ?? current.rows[0]?.idle_timeout_warning_minutes;
+
+      if (effectiveIdleWarning >= effectiveSessionTimeout) {
+        return res.status(400).json({
+          error: 'idleTimeoutWarningMinutes must be less than sessionTimeoutMinutes',
+        });
+      }
+    }
+
     const result = await query(
       `UPDATE system_settings
        SET company_name = COALESCE($1, company_name),

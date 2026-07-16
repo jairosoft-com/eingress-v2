@@ -26,6 +26,7 @@ import { Link } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth';
 import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
+import { setSecuritySettings } from '../lib/securitySettingsStore';
 import {
   DateTimeSettings,
   setDateTimeSettings,
@@ -3857,6 +3858,11 @@ export function SettingsPage() {
   async function saveSettings() {
     if (!session?.accessToken) return;
 
+    if (settings.idle_timeout_warning_minutes >= settings.session_timeout_minutes) {
+      setMessage('Idle Timeout Warning must be less than Session Timeout.');
+      return;
+    }
+
     try {
       setIsSaving(true);
       setMessage('');
@@ -3896,6 +3902,7 @@ export function SettingsPage() {
       setSettings(merged);
       setLastSavedSettings(merged);
       setDateTimeSettings(merged);
+      setSecuritySettings(merged);
       setMessage('Settings saved successfully.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save settings.');
