@@ -1,15 +1,16 @@
+let pendingEnrollmentFingerprintId = null;
 let pendingEnrollmentRfidUid = null;
 
 export function setPendingEnrollmentFingerprintId(fingerprintId) {
-  pendingEnrollmentRfidUid = fingerprintId;
+  pendingEnrollmentFingerprintId = fingerprintId;
 }
 
 export function getPendingEnrollmentFingerprintId() {
-  return pendingEnrollmentRfidUid;
+  return pendingEnrollmentFingerprintId;
 }
 
 export function clearPendingEnrollmentFingerprintId() {
-  pendingEnrollmentRfidUid = null;
+  pendingEnrollmentFingerprintId = null;
 }
 
 export function setPendingEnrollmentRfidUid(rfidUid) {

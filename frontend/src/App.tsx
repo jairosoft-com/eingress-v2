@@ -138,11 +138,15 @@ export function App() {
 
     const controller = new AbortController();
 
-    void fetchPendingEnrollmentCount(session.accessToken, controller.signal).then((count) => {
-      if (!controller.signal.aborted && count !== null) {
-        setPendingEnrollmentCount(count);
-      }
-    });
+    void fetchPendingEnrollmentCount(session.accessToken, controller.signal)
+      .then((count) => {
+        if (!controller.signal.aborted && count !== null) {
+          setPendingEnrollmentCount(count);
+        }
+      })
+      .catch(() => {
+        // Request was aborted (e.g. effect cleanup) or failed; ignore.
+      });
 
     return () => {
       controller.abort();

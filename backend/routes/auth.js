@@ -208,6 +208,121 @@ authRouter.get('/me', authMiddleware, async (req, res, next) => {
   }
 });
 
+authRouter.patch('/me', authMiddleware, async (req, res, next) => {
+  const name = String(req.body.name || '').trim();
+  const rfidCode = String(req.body.rfidCode || '').trim();
+
+  if (!name) {
+    return res.status(400).json({ error: 'Admin name is required' });
+  }
+
+  if (!rfidCode) {
+    return res.status(400).json({ error: 'RFID verification is required' });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT id, username, email, rfid_uid
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = adminResult.rows[0];
+
+    if (admin.rfid_uid !== rfidCode) {
+      return res.status(403).json({ error: 'RFID verification failed. Please tap your admin card.' });
+    }
+
+    const updateResult = await query(
+      `UPDATE admins
+       SET username = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING username, email, rfid_uid`,
+      [name, admin.id],
+    );
+
+    const updatedAdmin = updateResult.rows[0];
+
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [admin.id, 'Profile Updated', 'Settings', `Admin name changed to ${name}`, req.ip],
+    );
+
+    return res.json({
+      name: updatedAdmin.username,
+      email: updatedAdmin.email,
+      role: 'Administrator',
+      rfidUid: updatedAdmin.rfid_uid,
+    });
+  } catch (error) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'That admin name is already taken.' });
+    }
+
+    next(error);
+  }
+});
+
+authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
+  const rfidUid = String(req.body.rfidUid || '').trim();
+
+  if (!rfidUid) {
+    return res.status(400).json({ error: 'A new RFID card is required' });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT id, username, email
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = adminResult.rows[0];
+
+    const updateResult = await query(
+      `UPDATE admins
+       SET rfid_uid = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING username, email, rfid_uid`,
+      [rfidUid, admin.id],
+    );
+
+    const updatedAdmin = updateResult.rows[0];
+
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [admin.id, 'RFID Changed', 'Settings', `Admin RFID card was changed`, req.ip],
+    );
+
+    return res.json({
+      name: updatedAdmin.username,
+      email: updatedAdmin.email,
+      role: 'Administrator',
+      rfidUid: updatedAdmin.rfid_uid,
+    });
+  } catch (error) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'This RFID card is already assigned to another admin.' });
+    }
+
+    next(error);
+  }
+});
+
 authRouter.post('/forgot-password', async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
 
