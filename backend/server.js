@@ -70,34 +70,9 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-<<<<<<< HEAD
-function startServer(port) {
-  const server = http.createServer(app);
-
-  server.once('error', (error) => {
-    if (error.code === 'EADDRINUSE') {
-      const nextPort = port + 1;
-      console.warn(`Port ${port} is already in use. Trying ${nextPort}...`);
-      startServer(nextPort);
-      return;
-    }
-
-    console.error(error);
-    process.exit(1);
-  });
-
-  server.listen(port, () => {
-    createWebSocketServer(server);
-    console.log(`EIngress backend is running on http://localhost:${port}`);
-  });
-}
-
-startServer(PORT);
-=======
 const server = http.createServer(app);
 createWebSocketServer(server);
 
 server.listen(PORT, () => {
   console.log(`EIngress backend is running on http://localhost:${PORT}`);
 });
->>>>>>> origin/qa
