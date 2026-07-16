@@ -9,6 +9,7 @@ import {
 } from './session';
 import { AuthContext, AuthContextValue, SignInInput } from './context';
 import { API_BASE_URL } from '../lib/api';
+import { getSecuritySettings, setSecuritySettings } from '../lib/securitySettingsStore';
 
 const activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'];
 const FORCE_LOGOUT_STORAGE_KEY = 'eingress.auth.force-logout';
@@ -19,6 +20,10 @@ type LoginResponse = {
   adminName: string;
   email: string;
   expiresAt: number;
+  autoLogoutEnabled: boolean;
+  idleTimeoutWarningMinutes: number;
+  keepMeLoggedIn: boolean;
+  sessionTimeoutMinutes: number;
 };
 
 function decodeAccessTokenAdminId(accessToken: string): string | null {
@@ -85,6 +90,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let shouldReconnect = true;
 
     const recordActivity = () => {
+      const { auto_logout_enabled, idle_timeout_warning_minutes, keep_me_logged_in } =
+        getSecuritySettings();
+
+      if (!auto_logout_enabled || keep_me_logged_in) {
+        return;
+      }
+
+      const storedSession = getStoredSession();
+
+      if (!storedSession) {
+        return;
+      }
+
+      // Once the idle warning is showing, only an explicit "stay signed in"
+      // response (extendSession) should reset the clock, not ambient mouse
+      // movement, so an unattended screen still logs out on schedule.
+      if (storedSession.expiresAt - Date.now() <= idle_timeout_warning_minutes * 60_000) {
+        return;
+      }
+
       const now = Date.now();
 
       if (now - lastRefreshAt.current < 30_000) {
@@ -180,8 +205,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       isAuthenticated: Boolean(session),
       async signIn(input: SignInInput) {
-        if (!input.usernameOrEmail.trim() || !input.password.trim() || !input.rfidCode.trim()) {
-          throw new Error('Username/email, password, and RFID verification are required.');
+        if (!input.usernameOrEmail.trim() || !input.password.trim()) {
+          throw new Error('Username/email and password are required.');
         }
 
         const response = await fetch(`${API_BASE_URL}/auth/login`, {
@@ -204,6 +229,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           throw new Error(data?.error || 'Authentication failed.');
         }
 
+        // Seed the security settings store from the login response itself,
+        // rather than waiting on the separate /settings fetch, so the idle
+        // warning never briefly evaluates this fresh session against a
+        // stale/default warning window before that fetch resolves.
+        if (
+          data.autoLogoutEnabled !== undefined &&
+          data.idleTimeoutWarningMinutes !== undefined &&
+          data.keepMeLoggedIn !== undefined &&
+          data.sessionTimeoutMinutes !== undefined
+        ) {
+          setSecuritySettings({
+            auto_logout_enabled: data.autoLogoutEnabled,
+            idle_timeout_warning_minutes: data.idleTimeoutWarningMinutes,
+            keep_me_logged_in: data.keepMeLoggedIn,
+            session_timeout_minutes: data.sessionTimeoutMinutes,
+          });
+        }
+
         const createdSession = createStoredSession({
           accessToken: data.accessToken,
           adminName: data.adminName,
@@ -217,6 +260,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       signOut() {
         handleLogout();
+      },
+      extendSession() {
+        lastRefreshAt.current = Date.now();
+        setSession(refreshStoredSession());
       },
     }),
     [handleLogout, session],

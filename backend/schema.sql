@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS admins (
   rfid_uid VARCHAR(120) NOT NULL UNIQUE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   password_changed_at TIMESTAMPTZ,
+  failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+  last_failed_login_at TIMESTAMPTZ,
+  locked_until TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

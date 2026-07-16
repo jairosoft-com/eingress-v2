@@ -11,12 +11,13 @@ import {
   ShieldCheck,
   UserRound,
 } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
 import { useAuth } from '../auth/useAuth';
+import { API_BASE_URL } from '../lib/api';
 
 type LoginErrors = {
   form?: string;
@@ -36,6 +37,7 @@ function validateLoginForm(
   usernameOrEmail: string,
   password: string,
   rfidCode: string,
+  rfidRequired: boolean,
 ): LoginErrors {
   const errors: LoginErrors = {};
 
@@ -47,7 +49,7 @@ function validateLoginForm(
     errors.password = 'Password is required.';
   }
 
-  if (!rfidCode.trim()) {
+  if (rfidRequired && !rfidCode.trim()) {
     errors.rfidCode = 'RFID verification is required.';
   }
 
@@ -64,6 +66,24 @@ export function LoginPage() {
   const [errors, setErrors] = useState<LoginErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [rfidRequired, setRfidRequired] = useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(`${API_BASE_URL}/auth/login-options`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { rfidRequired?: boolean } | null) => {
+        if (data && typeof data.rfidRequired === 'boolean') {
+          setRfidRequired(data.rfidRequired);
+        }
+      })
+      .catch(() => {
+        // Keep the safer default (RFID required) if this can't be determined.
+      });
+
+    return () => controller.abort();
+  }, []);
 
   const redirectTo =
     (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/dashboard';
@@ -71,7 +91,7 @@ export function LoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const validationErrors = validateLoginForm(usernameOrEmail, password, rfidCode);
+    const validationErrors = validateLoginForm(usernameOrEmail, password, rfidCode, rfidRequired);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) {
@@ -209,28 +229,30 @@ export function LoginPage() {
                 ) : null}
               </div>
 
-              <div className="form-field">
-                <label htmlFor="rfidCode">RFID Verification</label>
-                <div className="input-shell">
-                  <IdCard size={22} aria-hidden="true" />
-                  <input
-                    aria-describedby={errors.rfidCode ? 'rfid-error' : undefined}
-                    aria-invalid={Boolean(errors.rfidCode)}
-                    autoComplete="one-time-code"
-                    id="rfidCode"
-                    name="rfidCode"
-                    onChange={(event) => setRfidCode(event.target.value)}
-                    placeholder="Scan or enter RFID code"
-                    type="text"
-                    value={rfidCode}
-                  />
+              {rfidRequired ? (
+                <div className="form-field">
+                  <label htmlFor="rfidCode">RFID Verification</label>
+                  <div className="input-shell">
+                    <IdCard size={22} aria-hidden="true" />
+                    <input
+                      aria-describedby={errors.rfidCode ? 'rfid-error' : undefined}
+                      aria-invalid={Boolean(errors.rfidCode)}
+                      autoComplete="one-time-code"
+                      id="rfidCode"
+                      name="rfidCode"
+                      onChange={(event) => setRfidCode(event.target.value)}
+                      placeholder="Scan or enter RFID code"
+                      type="text"
+                      value={rfidCode}
+                    />
+                  </div>
+                  {errors.rfidCode ? (
+                    <span className="field-error" id="rfid-error">
+                      {errors.rfidCode}
+                    </span>
+                  ) : null}
                 </div>
-                {errors.rfidCode ? (
-                  <span className="field-error" id="rfid-error">
-                    {errors.rfidCode}
-                  </span>
-                ) : null}
-              </div>
+              ) : null}
 
               <div className="form-row">
                 <label className="checkbox-label">

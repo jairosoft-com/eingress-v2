@@ -19,6 +19,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 
 import eingressIcon from './assets/icons/eingress-icon.png';
 import sidebarShieldIcon from './assets/icons/sidebar-shield.png';
+import { IdleTimeoutWarning } from './auth/IdleTimeoutWarning';
 import { useAuth } from './auth/useAuth';
 import { API_BASE_URL } from './lib/api';
 
@@ -138,11 +139,15 @@ export function App() {
 
     const controller = new AbortController();
 
-    void fetchPendingEnrollmentCount(session.accessToken, controller.signal).then((count) => {
-      if (!controller.signal.aborted && count !== null) {
-        setPendingEnrollmentCount(count);
-      }
-    });
+    void fetchPendingEnrollmentCount(session.accessToken, controller.signal)
+      .then((count) => {
+        if (!controller.signal.aborted && count !== null) {
+          setPendingEnrollmentCount(count);
+        }
+      })
+      .catch(() => {
+        // Request was aborted (e.g. effect cleanup) or failed; ignore.
+      });
 
     return () => {
       controller.abort();
@@ -290,6 +295,7 @@ export function App() {
 
   return (
     <div className="admin-shell">
+      <IdleTimeoutWarning />
       <aside className="admin-sidebar" aria-label="Primary navigation">
         <div className="sidebar-brand">
           <span className="logo-mark logo-mark-image" aria-hidden="true">

@@ -26,6 +26,7 @@ import { Link } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth';
 import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
+import { setSecuritySettings } from '../lib/securitySettingsStore';
 import {
   DateTimeSettings,
   setDateTimeSettings,
@@ -169,6 +170,20 @@ type AdminSettingsProfile = {
   rfidUid: string;
   role: string;
 };
+
+function isAdminSettingsProfile(value: unknown): value is AdminSettingsProfile {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<AdminSettingsProfile>;
+  return (
+    typeof candidate.email === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.rfidUid === 'string' &&
+    typeof candidate.role === 'string'
+  );
+}
 
 const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   admin_rfid_enabled: true,
@@ -3757,6 +3772,41 @@ export function SettingsPage() {
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [profileMessage, setProfileMessage] = useState('');
+  const [isVerifyRfidOpen, setIsVerifyRfidOpen] = useState(false);
+  const [verifyRfidInput, setVerifyRfidInput] = useState('');
+  const [verifyRfidError, setVerifyRfidError] = useState('');
+  const [verifyRfidStep, setVerifyRfidStep] = useState<'idle' | 'saving' | 'success' | 'error'>(
+    'idle',
+  );
+  const [verifySuccessCountdown, setVerifySuccessCountdown] = useState(5);
+  const isSavingProfile = verifyRfidStep === 'saving';
+  const [isChangeRfidOpen, setIsChangeRfidOpen] = useState(false);
+  const [changeRfidInput, setChangeRfidInput] = useState('');
+  const [changeRfidError, setChangeRfidError] = useState('');
+  const [isChangingRfid, setIsChangingRfid] = useState(false);
+
+  useEffect(() => {
+    if (verifyRfidStep !== 'success') return;
+
+    const intervalId = window.setInterval(() => {
+      setVerifySuccessCountdown((current) => {
+        if (current <= 1) {
+          window.clearInterval(intervalId);
+          setIsVerifyRfidOpen(false);
+          setVerifyRfidStep('idle');
+          return 5;
+        }
+
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [verifyRfidStep]);
 
   useEffect(() => {
     if (!session?.accessToken) return;
@@ -3808,6 +3858,11 @@ export function SettingsPage() {
   async function saveSettings() {
     if (!session?.accessToken) return;
 
+    if (settings.idle_timeout_warning_minutes >= settings.session_timeout_minutes) {
+      setMessage('Idle Timeout Warning must be less than Session Timeout.');
+      return;
+    }
+
     try {
       setIsSaving(true);
       setMessage('');
@@ -3847,11 +3902,136 @@ export function SettingsPage() {
       setSettings(merged);
       setLastSavedSettings(merged);
       setDateTimeSettings(merged);
+      setSecuritySettings(merged);
       setMessage('Settings saved successfully.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save settings.');
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  function startEditingProfile() {
+    setEditedName(profile?.name ?? session?.adminName ?? '');
+    setProfileError('');
+    setProfileMessage('');
+    setIsEditingProfile(true);
+  }
+
+  function openVerifyRfidModal() {
+    if (!editedName.trim()) {
+      setProfileError('Admin name is required.');
+      return;
+    }
+    setProfileError('');
+    setVerifyRfidInput('');
+    setVerifyRfidError('');
+    setVerifyRfidStep('idle');
+    setIsVerifyRfidOpen(true);
+  }
+
+  function closeVerifyRfidModal() {
+    setIsVerifyRfidOpen(false);
+    setVerifyRfidStep('idle');
+    setVerifyRfidInput('');
+    setVerifyRfidError('');
+  }
+
+  function retryVerifyRfid() {
+    setVerifyRfidInput('');
+    setVerifyRfidError('');
+    setVerifyRfidStep('idle');
+  }
+
+  async function submitProfileNameChange() {
+    if (!session?.accessToken) return;
+
+    if (!verifyRfidInput.trim()) {
+      setVerifyRfidError('Please scan or enter your RFID card.');
+      return;
+    }
+
+    setVerifyRfidStep('saving');
+    setVerifyRfidError('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: editedName.trim(), rfidCode: verifyRfidInput.trim() }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | AdminSettingsProfile
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !isAdminSettingsProfile(data)) {
+        const errorMessage =
+          data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+            ? data.error
+            : 'Unable to update admin name.';
+        throw new Error(errorMessage);
+      }
+
+      setProfile(data);
+      setIsEditingProfile(false);
+      setProfileMessage('Admin name updated successfully.');
+      setVerifySuccessCountdown(5);
+      setVerifyRfidStep('success');
+    } catch (error) {
+      setVerifyRfidError(error instanceof Error ? error.message : 'Unable to update admin name.');
+      setVerifyRfidStep('error');
+    }
+  }
+
+  function openChangeRfidModal() {
+    setChangeRfidInput('');
+    setChangeRfidError('');
+    setIsChangeRfidOpen(true);
+  }
+
+  async function submitRfidChange() {
+    if (!session?.accessToken) return;
+
+    if (!changeRfidInput.trim()) {
+      setChangeRfidError('Please scan or enter the new RFID card.');
+      return;
+    }
+
+    try {
+      setIsChangingRfid(true);
+      setChangeRfidError('');
+      const response = await fetch(`${API_BASE_URL}/auth/me/rfid`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rfidUid: changeRfidInput.trim() }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | AdminSettingsProfile
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !isAdminSettingsProfile(data)) {
+        const errorMessage =
+          data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+            ? data.error
+            : 'Unable to update RFID card.';
+        throw new Error(errorMessage);
+      }
+
+      setProfile(data);
+      setIsChangeRfidOpen(false);
+      setProfileMessage('RFID card updated successfully.');
+    } catch (error) {
+      setChangeRfidError(error instanceof Error ? error.message : 'Unable to update RFID card.');
+    } finally {
+      setIsChangingRfid(false);
     }
   }
 
@@ -3884,23 +4064,24 @@ export function SettingsPage() {
             <div className="settings-fields">
               <label>
                 Admin Name
-                <input disabled value={profile?.name ?? session?.adminName ?? 'Administrator'} />
+                <input
+                  disabled={!isEditingProfile}
+                  onChange={(event) => setEditedName(event.target.value)}
+                  value={
+                    isEditingProfile
+                      ? editedName
+                      : (profile?.name ?? session?.adminName ?? 'Administrator')
+                  }
+                />
               </label>
               <label>
                 Email
                 <input disabled value={profile?.email ?? session?.email ?? ''} />
               </label>
               <label>
-                RFID Number
-                <input disabled value={profile?.rfidUid ?? '—'} />
-              </label>
-              <label>
-                Role
-                <input disabled value={profile?.role ?? 'Administrator'} />
-              </label>
-              <label>
                 System Language
                 <select
+                  disabled={isEditingProfile}
                   value={settings.system_language}
                   onChange={(event) => updateSetting('system_language', event.target.value)}
                 >
@@ -3908,6 +4089,40 @@ export function SettingsPage() {
                   <option>Filipino</option>
                 </select>
               </label>
+              <label>
+                Role
+                <input disabled value={profile?.role ?? 'Administrator'} />
+              </label>
+              <div className="admin-profile-rfid-row">
+                <label>
+                  RFID Number
+                  <input disabled value={profile?.rfidUid ?? '—'} />
+                </label>
+                <button
+                  className="change-rfid-button"
+                  disabled={isEditingProfile}
+                  onClick={openChangeRfidModal}
+                  type="button"
+                >
+                  Change RFID
+                </button>
+              </div>
+            </div>
+            {profileError ? (
+              <p className="module-table-message error" role="alert">
+                {profileError}
+              </p>
+            ) : null}
+            {profileMessage ? <p className="module-table-message">{profileMessage}</p> : null}
+            <div className="admin-profile-footer">
+              <button
+                className="admin-profile-edit-button"
+                disabled={isSavingProfile}
+                onClick={() => (isEditingProfile ? openVerifyRfidModal() : startEditingProfile())}
+                type="button"
+              >
+                {isEditingProfile ? 'Save Changes' : 'Edit'}
+              </button>
             </div>
           </section>
           <section className="module-panel settings-card system-info-card">
@@ -4117,6 +4332,187 @@ export function SettingsPage() {
           {isSaving ? 'Saving…' : 'Save Changes'}
         </button>
       </div>
+
+      {isVerifyRfidOpen ? (
+        <div className="rfid-scan-backdrop" role="presentation">
+          <section className="rfid-scan-modal" aria-labelledby="verify-rfid-title" role="dialog">
+            <header>
+              <div className="rfid-scan-brand">
+                <span aria-hidden="true">ID</span>
+                <div>
+                  <strong>EINGRESS</strong>
+                  <small>ATTENDANCE KIOSK</small>
+                </div>
+              </div>
+              <button
+                aria-label="Close RFID verification"
+                onClick={closeVerifyRfidModal}
+                type="button"
+              >
+                X
+              </button>
+            </header>
+
+            {verifyRfidStep === 'saving' ? (
+              <>
+                <div className="rfid-scan-visual" aria-hidden="true">
+                  <span className="rfid-id-card-symbol">
+                    <i />
+                    <span>
+                      <b />
+                      <b />
+                      <b />
+                    </span>
+                  </span>
+                </div>
+                <h2 id="verify-rfid-title">Saving changes...</h2>
+                <p>Please wait while we save your profile changes.</p>
+              </>
+            ) : verifyRfidStep === 'success' ? (
+              <>
+                <div className="rfid-scan-visual rfid-scan-visual-success" aria-hidden="true">
+                  <Check size={64} strokeWidth={3} />
+                </div>
+                <h2 id="verify-rfid-title">Verification Successful</h2>
+                <p>
+                  Returning to home screen in {verifySuccessCountdown} second
+                  {verifySuccessCountdown === 1 ? '' : 's'}...
+                </p>
+              </>
+            ) : verifyRfidStep === 'error' ? (
+              <>
+                <div className="rfid-scan-visual rfid-scan-visual-error" aria-hidden="true">
+                  <X size={64} strokeWidth={3} />
+                </div>
+                <h2 id="verify-rfid-title">Verification Failed</h2>
+                <p>{verifyRfidError || 'Please try again.'}</p>
+                <div className="rfid-scan-result-actions">
+                  <button
+                    className="rfid-scan-capture-button"
+                    onClick={retryVerifyRfid}
+                    type="button"
+                  >
+                    Scan Again
+                  </button>
+                  <button
+                    className="rfid-scan-cancel-button"
+                    onClick={closeVerifyRfidModal}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="rfid-scan-visual" aria-hidden="true">
+                  <span className="rfid-id-card-symbol">
+                    <i />
+                    <span>
+                      <b />
+                      <b />
+                      <b />
+                    </span>
+                  </span>
+                </div>
+                <h2 id="verify-rfid-title">Verify Your Identity</h2>
+                <p>Tap your admin RFID card to confirm this change.</p>
+                <label className="rfid-scan-input">
+                  <span>RFID Number</span>
+                  <input
+                    autoFocus
+                    inputMode="numeric"
+                    onChange={(event) => setVerifyRfidInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void submitProfileNameChange();
+                      }
+                    }}
+                    placeholder="Tap card or enter RFID"
+                    value={verifyRfidInput}
+                  />
+                </label>
+                <button
+                  className="rfid-scan-capture-button"
+                  onClick={() => void submitProfileNameChange()}
+                  type="button"
+                >
+                  Confirm Changes
+                </button>
+              </>
+            )}
+            <div className="rfid-scan-dots" aria-hidden="true" />
+          </section>
+        </div>
+      ) : null}
+
+      {isChangeRfidOpen ? (
+        <div className="rfid-scan-backdrop" role="presentation">
+          <section className="rfid-scan-modal" aria-labelledby="change-rfid-title" role="dialog">
+            <header>
+              <div className="rfid-scan-brand">
+                <span aria-hidden="true">ID</span>
+                <div>
+                  <strong>EINGRESS</strong>
+                  <small>ATTENDANCE KIOSK</small>
+                </div>
+              </div>
+              <button
+                aria-label="Close RFID scanner"
+                onClick={() => setIsChangeRfidOpen(false)}
+                type="button"
+              >
+                X
+              </button>
+            </header>
+
+            <div className="rfid-scan-visual" aria-hidden="true">
+              <span className="rfid-id-card-symbol">
+                <i />
+                <span>
+                  <b />
+                  <b />
+                  <b />
+                </span>
+              </span>
+            </div>
+
+            <h2 id="change-rfid-title">Place New ID</h2>
+            <p>Your new ID is being registered... Please wait.</p>
+            <label className="rfid-scan-input">
+              <span>RFID Number</span>
+              <input
+                autoFocus
+                inputMode="numeric"
+                onChange={(event) => setChangeRfidInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void submitRfidChange();
+                  }
+                }}
+                placeholder="Tap card or enter RFID"
+                value={changeRfidInput}
+              />
+            </label>
+            <button
+              className="rfid-scan-capture-button"
+              disabled={isChangingRfid}
+              onClick={() => void submitRfidChange()}
+              type="button"
+            >
+              {isChangingRfid ? 'Saving...' : 'Use RFID'}
+            </button>
+            {changeRfidError ? (
+              <p className="module-table-message error" role="alert">
+                {changeRfidError}
+              </p>
+            ) : null}
+            <div className="rfid-scan-dots" aria-hidden="true" />
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
