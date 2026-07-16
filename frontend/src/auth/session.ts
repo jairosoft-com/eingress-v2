@@ -1,3 +1,5 @@
+import { getSecuritySettings } from '../lib/securitySettingsStore';
+
 export type AuthSession = {
   accessToken: string;
   adminName: string;
@@ -14,8 +16,11 @@ export type CreateSessionInput = {
   expiresAt?: number;
 };
 
-const SESSION_TIMEOUT_MS = 15 * 60 * 1000;
 const SESSION_STORAGE_KEY = 'eingress.admin.session';
+
+function getSessionTimeoutMs() {
+  return getSecuritySettings().session_timeout_minutes * 60 * 1000;
+}
 
 function createAccessToken() {
   if (window.crypto.randomUUID) {
@@ -66,7 +71,7 @@ export function createStoredSession(input: CreateSessionInput, now = Date.now())
     email: input.email ?? '',
     issuedAt: now,
     lastActivityAt: now,
-    expiresAt: input.expiresAt ?? now + SESSION_TIMEOUT_MS,
+    expiresAt: input.expiresAt ?? now + getSessionTimeoutMs(),
   };
 
   writeSession(session);
@@ -84,7 +89,7 @@ export function refreshStoredSession(now = Date.now()) {
   const refreshedSession: AuthSession = {
     ...session,
     lastActivityAt: now,
-    expiresAt: now + SESSION_TIMEOUT_MS,
+    expiresAt: now + getSessionTimeoutMs(),
   };
 
   writeSession(refreshedSession);

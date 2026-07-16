@@ -1147,6 +1147,70 @@ button {
   background: #e3292f;
 }
 
+.idle-warning-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(6 20 53 / 58%);
+}
+
+.idle-warning-dialog {
+  width: min(100%, 440px);
+  padding: 32px 30px 28px;
+  text-align: center;
+  color: #071435;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 22px 55px rgb(6 20 53 / 28%);
+}
+
+.idle-warning-dialog h2 {
+  margin: 0 0 14px;
+  font-size: 1.2rem;
+}
+
+.idle-warning-dialog p {
+  margin: 0;
+  color: #536078;
+  line-height: 1.5;
+}
+
+.idle-warning-dialog strong {
+  color: #071435;
+  font-variant-numeric: tabular-nums;
+}
+
+.idle-warning-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.idle-warning-stay,
+.idle-warning-logout {
+  min-height: 46px;
+  padding: 0 22px;
+  font-weight: 800;
+  border-radius: 8px;
+}
+
+.idle-warning-stay {
+  color: #ffffff;
+  border: 0;
+  background: #2665ed;
+}
+
+.idle-warning-logout {
+  color: #e3292f;
+  border: 1px solid #e3292f;
+  background: transparent;
+}
+
 .notifications-backdrop {
   position: fixed;
   z-index: 20;

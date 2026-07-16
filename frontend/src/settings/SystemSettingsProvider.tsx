@@ -2,6 +2,7 @@ import { ReactNode, useEffect } from 'react';
 
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
+import { SecuritySettings, setSecuritySettings } from '../lib/securitySettingsStore';
 import { DateTimeSettings, setDateTimeSettings } from '../lib/systemSettingsStore';
 
 export function SystemSettingsProvider({ children }: { children: ReactNode }) {
@@ -17,10 +18,15 @@ export function SystemSettingsProvider({ children }: { children: ReactNode }) {
       signal: controller.signal,
     })
       .then((response) =>
-        response.ok ? (response.json() as Promise<Partial<DateTimeSettings>>) : null,
+        response.ok
+          ? (response.json() as Promise<Partial<DateTimeSettings & SecuritySettings>>)
+          : null,
       )
       .then((data) => {
-        if (data) setDateTimeSettings(data);
+        if (data) {
+          setDateTimeSettings(data);
+          setSecuritySettings(data);
+        }
       })
       .catch(() => {
         // The rest of the app keeps using the last-known/default formatting.
