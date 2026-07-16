@@ -86,39 +86,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
        FROM (
          SELECT rfid_uid FROM users WHERE rfid_uid IS NOT NULL
          UNION ALL
-<<<<<<< HEAD
          SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-<<<<<<< HEAD
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
-=======
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL
->>>>>>> origin/qa
->>>>>>> origin/qa
->>>>>>> origin/qa
->>>>>>> origin/qa
-=======
-         SELECT rfid_uid FROM enrollment_requests WHERE rfid_uid IS NOT NULL AND status = 'Pending'
->>>>>>> origin/qa
->>>>>>> origin/qa
->>>>>>> origin/qa
->>>>>>> origin/qa
        ) existing_rfids
        WHERE LOWER(TRIM(rfid_uid)) = LOWER(TRIM($1))
        LIMIT 1`,
@@ -279,45 +247,21 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
         return res.status(400).json({ error: 'RFID UID is required before approving enrollment.' });
       }
 
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> origin/qa
       const expirationDate = getDefaultExpirationForRole(request.department);
 
       await client.query(
         `INSERT INTO users
           (employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, expiration_date)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-<<<<<<< HEAD
-=======
-=======
-      await client.query(
-        `INSERT INTO users
-          (employee_id, full_name, email, phone, department, fingerprint_id, rfid_uid)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
->>>>>>> origin/qa
->>>>>>> origin/qa
          ON CONFLICT (employee_id) DO UPDATE
          SET full_name = EXCLUDED.full_name,
            email = EXCLUDED.email,
            phone = EXCLUDED.phone,
            department = EXCLUDED.department,
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> origin/qa
            role = EXCLUDED.role,
            fingerprint_id = EXCLUDED.fingerprint_id,
            rfid_uid = EXCLUDED.rfid_uid,
            expiration_date = EXCLUDED.expiration_date,
-<<<<<<< HEAD
-=======
-=======
-           fingerprint_id = EXCLUDED.fingerprint_id,
-           rfid_uid = EXCLUDED.rfid_uid,
->>>>>>> origin/qa
->>>>>>> origin/qa
            updated_at = NOW()`,
         [
           request.employee_id,
@@ -325,21 +269,10 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
           request.email,
           request.phone,
           request.department,
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> origin/qa
           request.department,
           request.fingerprint_template,
           rfidUid,
           expirationDate,
-<<<<<<< HEAD
-=======
-=======
-          request.fingerprint_template,
-          rfidUid,
->>>>>>> origin/qa
->>>>>>> origin/qa
         ],
       );
     }
