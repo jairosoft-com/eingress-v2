@@ -71,7 +71,7 @@ async function processKioskScanUnsafe(req, res) {
   const deviceLabel = method === 'Fingerprint' ? 'Fingerprint Scanner' : 'RFID Reader';
 
   const userResult = await query(
-    `SELECT id, employee_id, full_name, department, role, is_active FROM users WHERE (${predicates.join(' OR ')}) AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
+    `SELECT id, employee_id, full_name, department, role, is_active, expiration_date FROM users WHERE (${predicates.join(' OR ')}) AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
     params,
   );
 
@@ -107,7 +107,11 @@ async function processKioskScanUnsafe(req, res) {
   }
 
   const user = userResult.rows[0];
-  const result = user.is_active ? 'Granted' : 'Denied';
+  const isExpiredStudent =
+    (user.role || '').trim().toLowerCase() === 'student' &&
+    user.expiration_date &&
+    new Date(user.expiration_date) < new Date();
+  const result = user.is_active && !isExpiredStudent ? 'Granted' : 'Denied';
 
   const logResult = await query(
     `INSERT INTO access_logs (user_id, device_id, authentication_method, result, area)
