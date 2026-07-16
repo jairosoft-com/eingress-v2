@@ -208,6 +208,7 @@ authRouter.get('/me', authMiddleware, async (req, res, next) => {
   }
 });
 
+<<<<<<< HEAD
 authRouter.patch('/me', authMiddleware, async (req, res, next) => {
   const name = String(req.body.name || '').trim();
   const rfidCode = String(req.body.rfidCode || '').trim();
@@ -323,6 +324,8 @@ authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
   }
 });
 
+=======
+>>>>>>> origin/qa
 authRouter.post('/forgot-password', async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
 
