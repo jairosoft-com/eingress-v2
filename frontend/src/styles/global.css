@@ -4168,6 +4168,92 @@ td small {
   grid-template-columns: repeat(2, minmax(0, 1fr)) max-content max-content;
   align-items: end;
 }
+.lifecycle-fields {
+  grid-template-columns: minmax(0, 220px) max-content;
+  align-items: start;
+  margin-top: 14px;
+}
+
+.settings-card-divider {
+  margin: 0 0 18px;
+  border: 0;
+  border-top: 1px solid #e4e9f2;
+}
+
+.lifecycle-toggle-field {
+  display: grid;
+  gap: 8px;
+}
+.lifecycle-toggle-label {
+  color: #17223f;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.lifecycle-toggle-field .toggle-setting {
+  color: #667089;
+}
+
+.lifecycle-duration-field {
+  display: grid;
+  gap: 7px;
+}
+.lifecycle-duration-label {
+  color: #17223f;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.lifecycle-duration-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lifecycle-duration-input-row input {
+  min-height: 32px;
+  padding: 0 10px;
+  color: #17223f;
+  border: 1px solid #aebed3;
+  border-radius: 4px;
+  background: #f8fbff;
+}
+.lifecycle-duration-input-row span {
+  color: #27344e;
+  font-size: 0.82rem;
+}
+
+.applicable-roles-field {
+  display: grid;
+  gap: 7px;
+}
+.applicable-roles-label {
+  color: #17223f;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.applicable-roles-options {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-height: 32px;
+}
+
+.role-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #27344e;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.role-checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: #e32947;
+  cursor: pointer;
+}
+.role-checkbox input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 
 .toggle-setting {
   display: inline-flex !important;
