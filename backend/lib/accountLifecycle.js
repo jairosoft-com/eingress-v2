@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
+import { createNotification } from './notifications.js';
 
 export async function getEligibleUsersForDeactivation({ durationDays, applicableRoles }) {
   const roles = (applicableRoles || [])
@@ -102,6 +103,12 @@ export async function runAutoDeactivation({ actorAdminId, ip }) {
       status: 'Failed',
       time: user.deactivated_at,
     });
+
+    await createNotification(
+      'Account Deactivated',
+      `${user.full_name} (${user.employee_id}) was automatically deactivated after ${settings.auto_deactivation_duration_days} day(s) of inactivity.`,
+      'warning',
+    );
   }
 
   return { ran: true, deactivatedUsers };

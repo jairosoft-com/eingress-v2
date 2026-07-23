@@ -10,6 +10,7 @@ import { broadcastMessage } from '../ws.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { getDuplicateUserMessage } from './users.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
+import { createNotification } from '../lib/notifications.js';
 
 export const enrollmentRequestsRouter = express.Router();
 
@@ -141,6 +142,11 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       status: 'Info',
       time: result.rows[0].submitted_at,
     });
+    await createNotification(
+      'New Access Request',
+      `${result.rows[0].full_name} submitted an access request (${result.rows[0].request_code}).`,
+      'info',
+    );
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -202,6 +208,11 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
       status: 'Info',
       time: result.rows[0].submitted_at,
     });
+    await createNotification(
+      'New Access Request',
+      `${result.rows[0].full_name} submitted an access request (${result.rows[0].request_code}).`,
+      'info',
+    );
     res.status(201).json(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
