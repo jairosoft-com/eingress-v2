@@ -146,6 +146,9 @@ const AUDIT_LOGS_PAGE_SIZE = 10;
 
 type SystemSettings = {
   admin_rfid_enabled: boolean;
+  auto_deactivation_applicable_roles: string[];
+  auto_deactivation_duration_days: number;
+  auto_deactivation_enabled: boolean;
   auto_logout_enabled: boolean;
   database_status: string;
   date_format: string;
@@ -185,8 +188,13 @@ function isAdminSettingsProfile(value: unknown): value is AdminSettingsProfile {
   );
 }
 
+const LIFECYCLE_ROLE_OPTIONS = ['Student', 'Intern', 'Staff'];
+
 const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   admin_rfid_enabled: true,
+  auto_deactivation_applicable_roles: ['Student', 'Intern', 'Staff'],
+  auto_deactivation_duration_days: 7,
+  auto_deactivation_enabled: false,
   auto_logout_enabled: true,
   database_status: 'Healthy',
   date_format: 'MM/DD/YYYY',
@@ -3853,6 +3861,15 @@ export function SettingsPage() {
     setSettings((current) => ({ ...current, [key]: value }));
   };
 
+  const toggleApplicableRole = (role: string, checked: boolean) => {
+    setSettings((current) => ({
+      ...current,
+      auto_deactivation_applicable_roles: checked
+        ? [...current.auto_deactivation_applicable_roles, role]
+        : current.auto_deactivation_applicable_roles.filter((existing) => existing !== role),
+    }));
+  };
+
   const isDirty = JSON.stringify(settings) !== JSON.stringify(lastSavedSettings);
 
   async function saveSettings() {
@@ -3887,10 +3904,13 @@ export function SettingsPage() {
           autoLogoutEnabled: settings.auto_logout_enabled,
           keepMeLoggedIn: settings.keep_me_logged_in,
           adminRfidEnabled: settings.admin_rfid_enabled,
+          autoDeactivationEnabled: settings.auto_deactivation_enabled,
+          autoDeactivationDurationDays: settings.auto_deactivation_duration_days,
+          autoDeactivationApplicableRoles: settings.auto_deactivation_applicable_roles,
         }),
       });
       const data = (await response.json().catch(() => null)) as
-        | SystemSettings
+        | (SystemSettings & { lifecycleRun?: { ran: boolean; deactivatedCount: number } | null })
         | { error?: string }
         | null;
 
@@ -3898,12 +3918,19 @@ export function SettingsPage() {
         throw new Error(data && 'error' in data ? data.error : 'Unable to save settings.');
       }
 
-      const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...data };
+      const { lifecycleRun, ...settingsData } = data as SystemSettings & {
+        lifecycleRun?: { ran: boolean; deactivatedCount: number } | null;
+      };
+      const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settingsData };
       setSettings(merged);
       setLastSavedSettings(merged);
       setDateTimeSettings(merged);
       setSecuritySettings(merged);
-      setMessage('Settings saved successfully.');
+      setMessage(
+        lifecycleRun?.ran && lifecycleRun.deactivatedCount > 0
+          ? `Settings saved successfully. Account lifecycle policy applied: ${lifecycleRun.deactivatedCount} account(s) deactivated.`
+          : 'Settings saved successfully.',
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save settings.');
     } finally {
@@ -4251,6 +4278,60 @@ export function SettingsPage() {
                 <span />
                 Enable lockout policy
               </label>
+            </div>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>Account Lifecycle</h2>
+            <p>
+              Automatically deactivate inactive accounts based on a configured duration and role.
+            </p>
+            <hr className="settings-card-divider" />
+            <div className="lifecycle-toggle-field">
+              <span className="lifecycle-toggle-label">Enable Automatic Account Deactivation</span>
+              <label className="toggle-setting">
+                <input
+                  checked={settings.auto_deactivation_enabled}
+                  onChange={(event) =>
+                    updateSetting('auto_deactivation_enabled', event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                <span />
+                {settings.auto_deactivation_enabled ? 'Enabled' : 'Disabled'}
+              </label>
+            </div>
+            <div className="security-fields lifecycle-fields">
+              <div className="lifecycle-duration-field">
+                <span className="lifecycle-duration-label">Auto-Deactivation Duration</span>
+                <div className="lifecycle-duration-input-row">
+                  <input
+                    disabled={!settings.auto_deactivation_enabled}
+                    min="1"
+                    type="number"
+                    value={settings.auto_deactivation_duration_days}
+                    onChange={(event) =>
+                      updateSetting('auto_deactivation_duration_days', Number(event.target.value))
+                    }
+                  />
+                  <span>Days</span>
+                </div>
+              </div>
+              <div className="applicable-roles-field">
+                <span className="applicable-roles-label">Applicable Roles</span>
+                <div className="applicable-roles-options">
+                  {LIFECYCLE_ROLE_OPTIONS.map((role) => (
+                    <label className="role-checkbox" key={role}>
+                      <input
+                        checked={settings.auto_deactivation_applicable_roles.includes(role)}
+                        disabled={!settings.auto_deactivation_enabled}
+                        onChange={(event) => toggleApplicableRole(role, event.target.checked)}
+                        type="checkbox"
+                      />
+                      <span>{role}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             </div>
           </section>
           <section className="module-panel settings-card">

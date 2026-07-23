@@ -185,6 +185,9 @@ CREATE TABLE IF NOT EXISTS system_settings (
   auto_logout_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   keep_me_logged_in BOOLEAN NOT NULL DEFAULT FALSE,
   admin_rfid_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  auto_deactivation_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  auto_deactivation_duration_days INTEGER NOT NULL DEFAULT 7,
+  auto_deactivation_applicable_roles TEXT[] NOT NULL DEFAULT ARRAY['Student', 'Intern', 'Staff']::TEXT[],
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
