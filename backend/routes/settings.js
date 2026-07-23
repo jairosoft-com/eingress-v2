@@ -3,6 +3,7 @@ import express from 'express';
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { runAutoDeactivation } from '../lib/accountLifecycle.js';
+import { createNotification } from '../lib/notifications.js';
 
 export const settingsRouter = express.Router();
 settingsRouter.use(authMiddleware);
@@ -198,6 +199,12 @@ settingsRouter.patch('/', async (req, res, next) => {
       const runResult = await runAutoDeactivation({ actorAdminId: req.user.adminId, ip: req.ip });
       lifecycleRun = { ran: runResult.ran, deactivatedCount: runResult.deactivatedUsers.length };
     }
+
+    await createNotification(
+      'Settings Updated',
+      'General system settings were updated successfully.',
+      'success',
+    );
 
     res.json({ ...updatedSettings, lifecycleRun });
   } catch (error) {
