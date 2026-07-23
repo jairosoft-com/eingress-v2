@@ -8,6 +8,9 @@ import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
+import { getDuplicateUserMessage } from './users.js';
+import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
+import { createNotification } from '../lib/notifications.js';
 
 export const enrollmentRequestsRouter = express.Router();
 
@@ -139,6 +142,11 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       status: 'Info',
       time: result.rows[0].submitted_at,
     });
+    await createNotification(
+      'New Access Request',
+      `${result.rows[0].full_name} submitted an access request (${result.rows[0].request_code}).`,
+      'info',
+    );
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -200,6 +208,11 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
       status: 'Info',
       time: result.rows[0].submitted_at,
     });
+    await createNotification(
+      'New Access Request',
+      `${result.rows[0].full_name} submitted an access request (${result.rows[0].request_code}).`,
+      'info',
+    );
     res.status(201).json(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
@@ -245,17 +258,21 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
         return res.status(400).json({ error: 'RFID UID is required before approving enrollment.' });
       }
 
+      const expirationDate = getDefaultExpirationForRole(request.department);
+
       await client.query(
         `INSERT INTO users
-          (employee_id, full_name, email, phone, department, fingerprint_id, rfid_uid)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+          (employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, expiration_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (employee_id) DO UPDATE
          SET full_name = EXCLUDED.full_name,
            email = EXCLUDED.email,
            phone = EXCLUDED.phone,
            department = EXCLUDED.department,
+           role = EXCLUDED.role,
            fingerprint_id = EXCLUDED.fingerprint_id,
            rfid_uid = EXCLUDED.rfid_uid,
+           expiration_date = EXCLUDED.expiration_date,
            updated_at = NOW()`,
         [
           request.employee_id,
@@ -263,8 +280,10 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
           request.email,
           request.phone,
           request.department,
+          request.department,
           request.fingerprint_template,
           rfidUid,
+          expirationDate,
         ],
       );
     }

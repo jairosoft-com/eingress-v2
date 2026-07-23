@@ -3,6 +3,7 @@ import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { App } from '../App';
 import { ProtectedRoute } from '../auth/ProtectedRoute';
 import { AccessLogsPage } from '../pages/AccessLogsPage';
+import { ChangePasswordPage } from '../pages/ChangePasswordPage';
 import {
   AttendanceManagementPage,
   EnrollmentRequestsPage,
@@ -90,6 +91,10 @@ export const router = createBrowserRouter([
           {
             path: 'settings',
             element: <SettingsPage />,
+          },
+          {
+            path: 'settings/change-password',
+            element: <ChangePasswordPage />,
           },
           {
             path: '*',

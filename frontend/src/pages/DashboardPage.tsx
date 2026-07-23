@@ -13,6 +13,8 @@ import { useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
+import { formatDate, formatTime, formatWeekdayShort } from '../lib/dateTimeFormat';
+import { DateTimeSettings, useDateTimeSettings } from '../lib/systemSettingsStore';
 
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
@@ -88,10 +90,6 @@ function toAccessEvent(event: RecentActivityEvent) {
     area: event.area ?? 'System',
     device: event.device ?? event.device_name ?? 'EIngress',
     sortTime: eventTimestamp,
-    time: new Date(eventTimestamp).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    }),
     status:
       status === 'Granted' || status === 'Success'
         ? 'Success'
@@ -107,35 +105,20 @@ function sortAccessEventsByTime(events: ReturnType<typeof toAccessEvent>[]) {
   );
 }
 
-function formatAttendanceTime(value?: string | null) {
+function formatAttendanceTime(value: string | null | undefined, settings: DateTimeSettings) {
   if (!value) {
     return '';
   }
 
-  try {
-    return new Date(value).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return '';
-  }
+  return formatTime(value, settings);
 }
 
-function formatTrendLabel(value?: string | null) {
+function formatTrendLabel(value: string | null | undefined, settings: DateTimeSettings) {
   if (!value) {
     return '—';
   }
 
-  try {
-    return new Date(value)
-      .toLocaleDateString([], {
-        weekday: 'short',
-      })
-      .toUpperCase();
-  } catch {
-    return '—';
-  }
+  return formatWeekdayShort(value, settings);
 }
 
 function hasCheckedOut(checkInAt?: string | null, checkOutAt?: string | null) {
@@ -202,6 +185,7 @@ const initialAccessEvents: ReturnType<typeof toAccessEvent>[] = [];
 
 export function DashboardPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [accessEvents, setAccessEvents] = useState(initialAccessEvents);
   const [attendanceRecords, setAttendanceRecords] = useState<DashboardAttendanceRecord[]>([]);
@@ -313,16 +297,12 @@ export function DashboardPage() {
     const barHeight = Math.max(16, Math.round((total / maxTrendValue) * 130));
 
     return {
-      label: formatTrendLabel(point.attendance_date),
+      label: formatTrendLabel(point.attendance_date, dateTimeSettings),
       value: total,
       barHeight,
     };
   });
-  const todayLabel = new Intl.DateTimeFormat(undefined, {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date());
+  const todayLabel = formatDate(new Date(), dateTimeSettings);
 
   return (
     <section className="dashboard-page" aria-labelledby="dashboard-title">
@@ -427,7 +407,7 @@ export function DashboardPage() {
                       <small>{event.area}</small>
                     </td>
                     <td>{event.device}</td>
-                    <td>{event.time}</td>
+                    <td>{formatTime(event.sortTime, dateTimeSettings)}</td>
                     <td>
                       <span className={event.status === 'Failed' ? 'status failed' : 'status'}>
                         {event.status}
@@ -472,10 +452,10 @@ export function DashboardPage() {
                     <td>{record.employee_id ?? '—'}</td>
                     <td>{record.name ?? 'Unknown user'}</td>
                     <td>{record.department ?? '—'}</td>
-                    <td>{formatAttendanceTime(record.check_in_at) || '—'}</td>
+                    <td>{formatAttendanceTime(record.check_in_at, dateTimeSettings) || '—'}</td>
                     <td>
                       {hasCheckedOut(record.check_in_at, record.check_out_at)
-                        ? formatAttendanceTime(record.check_out_at)
+                        ? formatAttendanceTime(record.check_out_at, dateTimeSettings)
                         : '—'}
                     </td>
                     <td>

@@ -22,8 +22,16 @@ import {
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth';
+import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
+import { setSecuritySettings } from '../lib/securitySettingsStore';
+import {
+  DateTimeSettings,
+  setDateTimeSettings,
+  useDateTimeSettings,
+} from '../lib/systemSettingsStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
@@ -107,10 +115,10 @@ type UserDisplayRow = {
   avatarTone: string;
   biometricStatus: 'Registered' | 'Missing';
   biometricTone: 'success' | 'danger';
+  department: string;
   employeeId: string;
   expirationDate: string | null;
   id: number;
-  isExpired: boolean;
   name: string;
   online: boolean;
   rfidUid: string;
@@ -138,6 +146,9 @@ const AUDIT_LOGS_PAGE_SIZE = 10;
 
 type SystemSettings = {
   admin_rfid_enabled: boolean;
+  auto_deactivation_applicable_roles: string[];
+  auto_deactivation_duration_days: number;
+  auto_deactivation_enabled: boolean;
   auto_logout_enabled: boolean;
   database_status: string;
   date_format: string;
@@ -163,8 +174,27 @@ type AdminSettingsProfile = {
   role: string;
 };
 
+function isAdminSettingsProfile(value: unknown): value is AdminSettingsProfile {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<AdminSettingsProfile>;
+  return (
+    typeof candidate.email === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.rfidUid === 'string' &&
+    typeof candidate.role === 'string'
+  );
+}
+
+const LIFECYCLE_ROLE_OPTIONS = ['Student', 'Intern', 'Staff'];
+
 const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   admin_rfid_enabled: true,
+  auto_deactivation_applicable_roles: ['Student', 'Intern', 'Staff'],
+  auto_deactivation_duration_days: 7,
+  auto_deactivation_enabled: false,
   auto_logout_enabled: true,
   database_status: 'Healthy',
   date_format: 'MM/DD/YYYY',
@@ -183,6 +213,29 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   time_zone: '(UTC+08:00) Asia/Manila',
 };
 
+const DATE_FORMAT_OPTIONS = ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD'];
+
+const TIME_FORMAT_OPTIONS = ['12-Hour (hh:mm AM/PM)', '24-Hour (HH:mm)'];
+
+const FIRST_DAY_OF_WEEK_OPTIONS = ['Monday', 'Sunday'];
+
+const TIME_ZONE_OPTIONS = [
+  '(UTC-08:00) America/Los_Angeles',
+  '(UTC-05:00) America/New_York',
+  '(UTC+00:00) UTC',
+  '(UTC+00:00) Europe/London',
+  '(UTC+08:00) Asia/Manila',
+  '(UTC+08:00) Asia/Singapore',
+  '(UTC+08:00) Asia/Hong_Kong',
+  '(UTC+08:00) Asia/Shanghai',
+  '(UTC+09:00) Asia/Tokyo',
+  '(UTC+10:00) Australia/Sydney',
+];
+
+function withCurrentOption(options: string[], current: string): string[] {
+  return options.includes(current) ? options : [current, ...options];
+}
+
 type UserEditForm = {
   fullName: string;
   rfidUid: string;
@@ -199,7 +252,6 @@ type CreateUserForm = {
   role: string;
   rfidUid: string;
   fingerprintId: string;
-  scanBiometrics: boolean;
 };
 
 type KioskInput = {
@@ -228,53 +280,36 @@ function PageHeader({ description, title }: { description: string; title: string
 }
 
 function EnrollmentFilterRow({
+  dateFilter,
   departmentFilter,
   departments,
-  endDateFilter,
   nameFilter,
   onClear,
+  onDateChange,
   onDepartmentChange,
-  onEndDateChange,
   onNameChange,
   onStatusChange,
-  onStartDateChange,
-  resultCount,
-  startDateFilter,
   statusFilter,
 }: {
+  dateFilter: string;
   departmentFilter: string;
   departments: string[];
-  endDateFilter: string;
   nameFilter: string;
   onClear: () => void;
+  onDateChange: (value: string) => void;
   onDepartmentChange: (value: string) => void;
-  onEndDateChange: (value: string) => void;
   onNameChange: (value: string) => void;
   onStatusChange: (value: EnrollmentStatusFilter) => void;
-  onStartDateChange: (value: string) => void;
-  resultCount: number;
-  startDateFilter: string;
   statusFilter: EnrollmentStatusFilter;
 }) {
   return (
-    <div className="module-filter-row enrollment-filter-row">
+    <div className="enrollment-search-row">
       <input
-        aria-label="Filter by name"
-        onChange={(event) => onNameChange(event.target.value)}
-        placeholder="Filter by name..."
-        type="search"
-        value={nameFilter}
+        aria-label="Filter by date"
+        onChange={(event) => onDateChange(event.target.value)}
+        type="date"
+        value={dateFilter}
       />
-      <select
-        aria-label="Filter by status"
-        onChange={(event) => onStatusChange(event.target.value as EnrollmentStatusFilter)}
-        value={statusFilter}
-      >
-        <option value="All">All Status</option>
-        <option value="Pending">Pending</option>
-        <option value="Approved">Approved</option>
-        <option value="Rejected">Rejected</option>
-      </select>
       <select
         aria-label="Filter by department"
         onChange={(event) => onDepartmentChange(event.target.value)}
@@ -287,31 +322,34 @@ function EnrollmentFilterRow({
           </option>
         ))}
       </select>
+      <select
+        aria-label="Filter by status"
+        onChange={(event) => onStatusChange(event.target.value as EnrollmentStatusFilter)}
+        value={statusFilter}
+      >
+        <option value="All">All Status</option>
+        <option value="Pending">Pending</option>
+        <option value="Approved">Approved</option>
+        <option value="Rejected">Rejected</option>
+      </select>
       <input
-        aria-label="Filter start date"
-        onChange={(event) => onStartDateChange(event.target.value)}
-        type="date"
-        value={startDateFilter}
-      />
-      <input
-        aria-label="Filter end date"
-        onChange={(event) => onEndDateChange(event.target.value)}
-        type="date"
-        value={endDateFilter}
+        aria-label="Search by name or ID"
+        onChange={(event) => onNameChange(event.target.value)}
+        placeholder="Search by name or ID..."
+        type="search"
+        value={nameFilter}
       />
       <button className="filter-button" onClick={onClear} type="button">
-        Clear
+        Filter
         <Filter size={16} />
       </button>
-      <span className="filter-result-count" aria-live="polite">
-        {resultCount} shown
-      </span>
     </div>
   );
 }
 
 function ModuleTable({
   actionRenderer,
+  actionsWidth = 182,
   columns,
   emptyMessage = 'No records found.',
   errorMessage,
@@ -323,6 +361,7 @@ function ModuleTable({
   withActions = false,
 }: {
   actionRenderer?: (rowIndex: number) => ReactNode;
+  actionsWidth?: number;
   columns: string[];
   emptyMessage?: string;
   errorMessage?: string;
@@ -338,7 +377,7 @@ function ModuleTable({
       ? pagination.pageSize - rows.length
       : 0;
 
-  const columnCount = columns.length + (withActions ? 1 : 0);
+  const tableMinWidth = Math.max(900, columns.length * 130 + (withActions ? actionsWidth : 0));
 
   return (
     <section className="module-panel" aria-labelledby={`${title.replaceAll(' ', '-')}-title`}>
@@ -346,14 +385,14 @@ function ModuleTable({
       <div className="module-table-wrap">
         <table
           className={withActions ? 'module-table has-actions' : 'module-table'}
-          style={{ minWidth: Math.max(900, columnCount * 130) }}
+          style={{ minWidth: tableMinWidth }}
         >
           <thead>
             <tr>
               {columns.map((column) => (
                 <th key={column}>{column}</th>
               ))}
-              {withActions ? <th>Actions</th> : null}
+              {withActions ? <th style={{ width: actionsWidth }}>Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -399,7 +438,7 @@ function ModuleTable({
                     </td>
                   ))}
                   {withActions ? (
-                    <td>
+                    <td style={{ width: actionsWidth }}>
                       {actionRenderer ? (
                         actionRenderer(rowIndex)
                       ) : (
@@ -527,32 +566,41 @@ function statusTone(status: string) {
   return 'danger';
 }
 
-function formatSubmittedDate(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
+function formatSubmittedDate(value: string, settings: DateTimeSettings) {
+  return formatDate(value, settings);
 }
 
-function formatClockTime(value: string | null) {
+function formatExpiryCountdown(
+  expirationDate: string,
+  now: number,
+): { isExpired: boolean; label: string } {
+  const remainingMs = new Date(expirationDate).getTime() - now;
+
+  if (Number.isNaN(remainingMs) || remainingMs <= 0) {
+    return { isExpired: true, label: 'Expired' };
+  }
+
+  const days = Math.floor(remainingMs / 86_400_000);
+  const hours = Math.floor((remainingMs % 86_400_000) / 3_600_000);
+  const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
+
+  if (days > 0) {
+    return { isExpired: false, label: `${days}d ${hours}h` };
+  }
+
+  if (hours > 0) {
+    return { isExpired: false, label: `${hours}h ${minutes}m` };
+  }
+
+  return { isExpired: false, label: `${minutes}m` };
+}
+
+function formatClockTime(value: string | null, settings: DateTimeSettings) {
   if (!value) {
     return '-';
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return formatTime(value, settings) || '-';
 }
 
 function hasCheckedOut(checkInAt: string | null, checkOutAt: string | null) {
@@ -628,7 +676,6 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
   const hasBiometric = Boolean(user.fingerprint_id);
   const isStudent = (user.role || '').trim().toLowerCase() === 'student';
   const expirationDate = isStudent ? (user.expiration_date ?? null) : null;
-  const isExpired = Boolean(expirationDate) && new Date() > new Date(expirationDate as string);
 
   return {
     accessStatus: user.is_active ? 'Active' : 'Disabled',
@@ -637,10 +684,10 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     avatarTone: getAvatarTone(index),
     biometricStatus: hasBiometric ? 'Registered' : 'Missing',
     biometricTone: hasBiometric ? 'success' : 'danger',
+    department: user.department || '-',
     employeeId: user.employee_id,
     expirationDate,
     id: user.id,
-    isExpired,
     name: user.full_name,
     online: user.is_active,
     rfidUid: user.rfid_uid || '-',
@@ -672,6 +719,8 @@ function MetricCards({
   );
 }
 
+const USER_MANAGEMENT_PAGE_SIZE = 10;
+
 function attendanceStatusIcon(status: string) {
   if (status === 'Registered') {
     return <Fingerprint size={14} />;
@@ -690,13 +739,15 @@ function attendanceStatusIcon(status: string) {
 
 export function UserManagementPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
+  const [now, setNow] = useState(() => Date.now());
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [usersErrorMessage, setUsersErrorMessage] = useState('');
   const [userSearch, setUserSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('All Roles');
   const [statusFilter, setStatusFilter] = useState('All Status');
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
   const [editForm, setEditForm] = useState<UserEditForm>({
@@ -716,7 +767,6 @@ export function UserManagementPage() {
     role: 'Employee',
     rfidUid: '',
     fingerprintId: '',
-    scanBiometrics: false,
   });
   const [createFormError, setCreateFormError] = useState('');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -726,6 +776,11 @@ export function UserManagementPage() {
   const [fingerprintScanInput, setFingerprintScanInput] = useState('');
   const [rfidScanBaselineNonce, setRfidScanBaselineNonce] = useState(0);
   const [visibleRfidUserIds, setVisibleRfidUserIds] = useState<Set<number>>(() => new Set());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1185,7 +1240,6 @@ export function UserManagementPage() {
         role: 'Employee',
         rfidUid: '',
         fingerprintId: '',
-        scanBiometrics: false,
       });
       window.alert('User created successfully.');
     } catch (error) {
@@ -1230,10 +1284,68 @@ export function UserManagementPage() {
     });
   }, [departmentFilter, statusFilter, userSearch, users]);
 
+  const userFilterKey = `${departmentFilter}|${statusFilter}|${userSearch}`;
+  const [lastUserFilterKey, setLastUserFilterKey] = useState(userFilterKey);
+
+  if (userFilterKey !== lastUserFilterKey) {
+    setLastUserFilterKey(userFilterKey);
+    setCurrentPage(1);
+  }
+
+  const totalUserRecords = filteredUsers.length;
+  const totalUserPages = Math.max(1, Math.ceil(totalUserRecords / USER_MANAGEMENT_PAGE_SIZE));
+  const currentUserPage = Math.min(currentPage, totalUserPages);
+
+  const userPageNumbers = useMemo(() => {
+    const windowStart = Math.max(1, Math.min(currentUserPage - 1, totalUserPages - 2));
+    const windowEnd = Math.min(totalUserPages, windowStart + 2);
+    const numbers: number[] = [];
+
+    for (let pageNumber = windowStart; pageNumber <= windowEnd; pageNumber += 1) {
+      numbers.push(pageNumber);
+    }
+
+    return numbers;
+  }, [currentUserPage, totalUserPages]);
+
   const visibleUsers = useMemo(
-    () => filteredUsers.slice(0, rowsPerPage).map(toUserDisplayRow),
-    [filteredUsers, rowsPerPage],
+    () =>
+      filteredUsers
+        .slice(
+          (currentUserPage - 1) * USER_MANAGEMENT_PAGE_SIZE,
+          currentUserPage * USER_MANAGEMENT_PAGE_SIZE,
+        )
+        .map(toUserDisplayRow),
+    [currentUserPage, filteredUsers],
   );
+
+  function exportUsersCsv() {
+    const header = [
+      'Employee ID',
+      'Name',
+      'Role',
+      'Department',
+      'Biometric Status',
+      'Access Status',
+      'RFID UID',
+    ];
+    const rows = filteredUsers.map((user) => [
+      user.employee_id,
+      user.full_name,
+      user.role || 'Employee',
+      user.department || '-',
+      user.fingerprint_id ? 'Registered' : 'Missing',
+      user.is_active ? 'Active' : 'Disabled',
+      user.rfid_uid || '-',
+    ]);
+    const blob = new Blob([buildCsv(header, rows)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `user-management_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   const registeredBiometricCount = users.filter((user) => user.fingerprint_id).length;
   const missingBiometricCount = users.length - registeredBiometricCount;
@@ -1302,13 +1414,6 @@ export function UserManagementPage() {
             <button
               className="primary-action-button"
               type="button"
-              onClick={() => window.alert('Save Changes functionality is not available yet.')}
-            >
-              Save Changes
-            </button>
-            <button
-              className="primary-action-button"
-              type="button"
               onClick={() => {
                 setIsCreateUserOpen(true);
                 setCreateFormError('');
@@ -1321,19 +1426,14 @@ export function UserManagementPage() {
                   role: 'Employee',
                   rfidUid: '',
                   fingerprintId: '',
-                  scanBiometrics: false,
                 });
               }}
             >
               + Add New User
             </button>
-            <button className="soft-action-button" type="button">
+            <button className="soft-action-button" onClick={exportUsersCsv} type="button">
               <Download size={16} />
               Export
-            </button>
-            <button className="soft-action-button" type="button">
-              <Filter size={16} />
-              Filter
             </button>
           </div>
         </header>
@@ -1402,7 +1502,7 @@ export function UserManagementPage() {
         </div>
 
         <div className="user-table-wrap">
-          <table className="user-management-table">
+          <table className="managed-table user-management-table">
             <thead>
               <tr>
                 <th>User</th>
@@ -1433,105 +1533,120 @@ export function UserManagementPage() {
                   </td>
                 </tr>
               ) : (
-                visibleUsers.map((user) => (
-                  <tr key={user.id}>
-                    <td>
-                      <span className="managed-user-cell">
-                        <span className={`managed-avatar ${user.avatarTone}`}>
-                          {user.avatar}
-                          {user.online ? <i aria-hidden="true" /> : null}
+                visibleUsers.map((user) => {
+                  const countdown = user.expirationDate
+                    ? formatExpiryCountdown(user.expirationDate, now)
+                    : null;
+
+                  return (
+                    <tr key={user.id}>
+                      <td>
+                        <span className="managed-user-cell">
+                          <span className={`managed-avatar ${user.avatarTone}`}>
+                            {user.avatar}
+                            {user.online ? <i aria-hidden="true" /> : null}
+                          </span>
+                          <span>
+                            <strong>{user.name}</strong>
+                            <small>
+                              {user.employeeId}
+                              {countdown ? (
+                                <span
+                                  className={`expiry-badge${countdown.isExpired ? ' expired' : ''}`}
+                                  title={formatSubmittedDate(
+                                    user.expirationDate as string,
+                                    dateTimeSettings,
+                                  )}
+                                >
+                                  {' · '}
+                                  {countdown.isExpired
+                                    ? 'Expired'
+                                    : `Expires in ${countdown.label}`}
+                                </span>
+                              ) : null}
+                            </small>
+                          </span>
                         </span>
-                        <span>
-                          <strong>{user.name}</strong>
-                          <small>
-                            {user.employeeId}
-                            {user.expirationDate ? (
-                              <span className={`expiry-badge${user.isExpired ? ' expired' : ''}`}>
-                                {' · '}
-                                {user.isExpired ? 'Expired' : 'Expires'}{' '}
-                                {formatSubmittedDate(user.expirationDate)}
-                              </span>
-                            ) : null}
-                          </small>
+                      </td>
+                      <td>{user.role}</td>
+                      <td>
+                        <span className={`user-status-pill ${user.biometricTone}`}>
+                          {attendanceStatusIcon(user.biometricStatus)}
+                          {user.biometricStatus}
                         </span>
-                      </span>
-                    </td>
-                    <td>{user.role}</td>
-                    <td>
-                      <span className={`user-status-pill ${user.biometricTone}`}>
-                        {attendanceStatusIcon(user.biometricStatus)}
-                        {user.biometricStatus}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`user-status-pill ${user.accessTone}`}>
-                        {attendanceStatusIcon(user.accessStatus)}
-                        {user.accessStatus}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="rfid-mask-cell">
-                        <span>
-                          {visibleRfidUserIds.has(user.id) ? user.rfidUid : maskRfid(user.rfidUid)}
+                      </td>
+                      <td>
+                        <span className={`user-status-pill ${user.accessTone}`}>
+                          {attendanceStatusIcon(user.accessStatus)}
+                          {user.accessStatus}
                         </span>
-                        {user.rfidUid !== '-' ? (
+                      </td>
+                      <td>
+                        <span className="rfid-mask-cell">
+                          <span>
+                            {visibleRfidUserIds.has(user.id)
+                              ? user.rfidUid
+                              : maskRfid(user.rfidUid)}
+                          </span>
+                          {user.rfidUid !== '-' ? (
+                            <button
+                              aria-label={
+                                visibleRfidUserIds.has(user.id)
+                                  ? `Hide RFID for ${user.name}`
+                                  : `Show RFID for ${user.name}`
+                              }
+                              onClick={() => toggleRfidVisibility(user.id)}
+                              type="button"
+                            >
+                              {visibleRfidUserIds.has(user.id) ? (
+                                <EyeOff size={13} />
+                              ) : (
+                                <Eye size={13} />
+                              )}
+                            </button>
+                          ) : null}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="user-row-actions">
                           <button
-                            aria-label={
-                              visibleRfidUserIds.has(user.id)
-                                ? `Hide RFID for ${user.name}`
-                                : `Show RFID for ${user.name}`
-                            }
-                            onClick={() => toggleRfidVisibility(user.id)}
+                            className={user.accessStatus === 'Active' ? 'activate' : 'deactivate'}
                             type="button"
+                            aria-label={
+                              user.accessStatus === 'Disabled'
+                                ? `Activate ${user.name}`
+                                : `Deactivate ${user.name}`
+                            }
+                            disabled={updatingUserId === user.id}
+                            onClick={() =>
+                              void updateUserStatus(user.id, user.accessStatus === 'Disabled')
+                            }
                           >
-                            {visibleRfidUserIds.has(user.id) ? (
-                              <EyeOff size={13} />
-                            ) : (
-                              <Eye size={13} />
-                            )}
+                            <Power size={15} />
                           </button>
-                        ) : null}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="user-row-actions">
-                        <button
-                          className={user.accessStatus === 'Active' ? 'activate' : 'deactivate'}
-                          type="button"
-                          aria-label={
-                            user.accessStatus === 'Disabled'
-                              ? `Activate ${user.name}`
-                              : `Deactivate ${user.name}`
-                          }
-                          disabled={updatingUserId === user.id}
-                          onClick={() =>
-                            void updateUserStatus(user.id, user.accessStatus === 'Disabled')
-                          }
-                        >
-                          <Power size={15} />
-                        </button>
-                        <button
-                          className="archive"
-                          type="button"
-                          aria-label={`Archive ${user.name}`}
-                          disabled={updatingUserId === user.id}
-                          onClick={() => void archiveUser(user.id)}
-                        >
-                          <Archive size={15} />
-                        </button>
-                        <button
-                          className="edit"
-                          type="button"
-                          aria-label={`Edit ${user.name}`}
-                          disabled={updatingUserId === user.id}
-                          onClick={() => openUserEditor(user.id)}
-                        >
-                          <Pencil size={15} />
-                        </button>
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                          <button
+                            className="archive"
+                            type="button"
+                            aria-label={`Archive ${user.name}`}
+                            disabled={updatingUserId === user.id}
+                            onClick={() => void archiveUser(user.id)}
+                          >
+                            <Archive size={15} />
+                          </button>
+                          <button
+                            className="edit"
+                            type="button"
+                            aria-label={`Edit ${user.name}`}
+                            disabled={updatingUserId === user.id}
+                            onClick={() => openUserEditor(user.id)}
+                          >
+                            <Pencil size={15} />
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -1539,36 +1654,39 @@ export function UserManagementPage() {
 
         <footer className="user-table-footer">
           <span>
-            Showing {visibleUsers.length === 0 ? 0 : 1} to {visibleUsers.length} of{' '}
-            {filteredUsers.length.toLocaleString()} entries
+            Showing{' '}
+            {totalUserRecords === 0 ? 0 : (currentUserPage - 1) * USER_MANAGEMENT_PAGE_SIZE + 1} to{' '}
+            {Math.min(currentUserPage * USER_MANAGEMENT_PAGE_SIZE, totalUserRecords)} of{' '}
+            {totalUserRecords.toLocaleString()} entries
           </span>
           <div className="user-pagination" aria-label="Pagination">
-            <button type="button" aria-label="Previous page">
+            <button
+              type="button"
+              aria-label="Previous page"
+              disabled={currentUserPage <= 1}
+              onClick={() => setCurrentPage(currentUserPage - 1)}
+            >
               <ChevronLeft size={15} />
             </button>
-            <button className="active" type="button">
-              1
-            </button>
-            <button type="button">2</button>
-            <button type="button">3</button>
-            <button type="button">...</button>
-            <button type="button">156</button>
-            <button type="button" aria-label="Next page">
+            {userPageNumbers.map((pageNumber) => (
+              <button
+                className={pageNumber === currentUserPage ? 'active' : ''}
+                key={pageNumber}
+                onClick={() => setCurrentPage(pageNumber)}
+                type="button"
+              >
+                {pageNumber}
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-label="Next page"
+              disabled={currentUserPage >= totalUserPages}
+              onClick={() => setCurrentPage(currentUserPage + 1)}
+            >
               <ChevronRight size={15} />
             </button>
           </div>
-          <label className="rows-per-page">
-            Rows per page:
-            <select
-              aria-label="Rows per page"
-              onChange={(event) => setRowsPerPage(Number(event.target.value))}
-              value={String(rowsPerPage)}
-            >
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-            </select>
-          </label>
         </footer>
       </section>
 
@@ -1892,7 +2010,7 @@ export function UserManagementPage() {
                 <span>2</span>
                 Hardware Enrollment
               </h3>
-              <div className="user-edit-grid three-columns">
+              <div className="user-edit-grid hardware-columns">
                 <label className="user-edit-field">
                   <span>RFID UID</span>
                   <input readOnly value={createForm.rfidUid} placeholder="Scan or enter RFID UID" />
@@ -1916,36 +2034,15 @@ export function UserManagementPage() {
                     placeholder="Scan or enter fingerprint"
                   />
                 </label>
-              </div>
-              <div className="user-edit-grid two-columns" style={{ marginTop: '16px' }}>
-                <label
-                  className="user-edit-field"
-                  style={{ alignItems: 'center', gridTemplateColumns: 'auto 1fr' }}
+
+                <button
+                  className="user-edit-scan-button"
+                  onClick={openFingerprintScanner}
+                  type="button"
                 >
-                  <input
-                    type="checkbox"
-                    checked={createForm.scanBiometrics}
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        scanBiometrics: event.target.checked,
-                      }))
-                    }
-                  />
-                  <span style={{ marginLeft: '12px' }}>
-                    Scan Biometrics
-                    <small
-                      style={{
-                        display: 'block',
-                        marginTop: '4px',
-                        color: '#667089',
-                        fontWeight: 400,
-                      }}
-                    >
-                      Biometrics scanning is not available yet; status will remain Missing.
-                    </small>
-                  </span>
-                </label>
+                  <Fingerprint size={14} />
+                  <span>Scan Fingerprint</span>
+                </button>
               </div>
             </section>
 
@@ -2142,6 +2239,7 @@ export function UserManagementPage() {
 
 export function AttendanceManagementPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [summary, setSummary] = useState<AttendanceSummary | null>(null);
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
@@ -2220,14 +2318,14 @@ export function AttendanceManagementPage() {
         record.employee_id,
         record.full_name,
         record.role || '-',
-        formatClockTime(record.check_in_at),
+        formatClockTime(record.check_in_at, dateTimeSettings),
         hasCheckedOut(record.check_in_at, record.check_out_at)
-          ? formatClockTime(record.check_out_at)
+          ? formatClockTime(record.check_out_at, dateTimeSettings)
           : '-',
         record.status,
         formatTotalHours(record.check_in_at, record.check_out_at),
       ]),
-    [records],
+    [records, dateTimeSettings],
   );
 
   const attendanceMetrics = [
@@ -2293,6 +2391,7 @@ export function AttendanceManagementPage() {
 
 export function EnrollmentRequestsPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [requests, setRequests] = useState<EnrollmentRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -2301,8 +2400,7 @@ export function EnrollmentRequestsPage() {
   const [nameFilter, setNameFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<EnrollmentStatusFilter>('All');
   const [departmentFilter, setDepartmentFilter] = useState('All');
-  const [startDateFilter, setStartDateFilter] = useState('');
-  const [endDateFilter, setEndDateFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2428,36 +2526,17 @@ export function EnrollmentRequestsPage() {
       const matchesStatus = statusFilter === 'All' || request.status === statusFilter;
       const matchesDepartment =
         departmentFilter === 'All' || request.department === departmentFilter;
-      const matchesStartDate = !startDateFilter || submittedDate >= startDateFilter;
-      const matchesEndDate = !endDateFilter || submittedDate <= endDateFilter;
+      const matchesDate = !dateFilter || submittedDate === dateFilter;
 
-      return (
-        matchesName && matchesStatus && matchesDepartment && matchesStartDate && matchesEndDate
-      );
+      return matchesName && matchesStatus && matchesDepartment && matchesDate;
     });
-  }, [departmentFilter, endDateFilter, nameFilter, requests, startDateFilter, statusFilter]);
-
-  const enrollmentRows = useMemo(
-    () =>
-      filteredRequests.map((request) => [
-        request.request_code,
-        request.full_name,
-        request.employee_id,
-        request.department,
-        request.rfid_uid || '-',
-        request.request_type,
-        formatSubmittedDate(request.submitted_at),
-        request.status,
-      ]),
-    [filteredRequests],
-  );
+  }, [dateFilter, departmentFilter, nameFilter, requests, statusFilter]);
 
   function clearEnrollmentFilters() {
     setNameFilter('');
     setStatusFilter('All');
     setDepartmentFilter('All');
-    setStartDateFilter('');
-    setEndDateFilter('');
+    setDateFilter('');
   }
 
   return (
@@ -2467,73 +2546,125 @@ export function EnrollmentRequestsPage() {
         description="Review and manage biometric and RFID enrollment requests."
       />
       <EnrollmentFilterRow
+        dateFilter={dateFilter}
         departmentFilter={departmentFilter}
         departments={departmentOptions}
-        endDateFilter={endDateFilter}
         nameFilter={nameFilter}
         onClear={clearEnrollmentFilters}
+        onDateChange={setDateFilter}
         onDepartmentChange={setDepartmentFilter}
-        onEndDateChange={setEndDateFilter}
         onNameChange={setNameFilter}
-        onStartDateChange={setStartDateFilter}
         onStatusChange={setStatusFilter}
-        resultCount={filteredRequests.length}
-        startDateFilter={startDateFilter}
         statusFilter={statusFilter}
       />
-      <ModuleTable
-        title="Enrollment Requests"
-        columns={[
-          'Request ID',
-          'Name',
-          'Employee ID',
-          'Department',
-          'RFID UID',
-          'Request Type',
-          'Submitted',
-          'Status',
-        ]}
-        rows={enrollmentRows}
-        isLoading={isLoading}
-        errorMessage={errorMessage}
-        emptyMessage="No enrollment requests found."
-        withActions
-        actionRenderer={(rowIndex) => {
-          const request = filteredRequests[rowIndex];
-          const isUpdating = updatingRequestId === request.id;
-          const isPending = request.status === 'Pending';
+      <section className="module-panel" aria-labelledby="enrollment-table-title">
+        <h2 id="enrollment-table-title">Enrollment Requests</h2>
+        <div className="module-table-wrap">
+          <table className="module-table has-actions enrollment-requests-table">
+            <thead>
+              <tr>
+                <th>Request ID</th>
+                <th>Name</th>
+                <th>Employee ID</th>
+                <th>Department</th>
+                <th>Request Type</th>
+                <th>Submitted</th>
+                <th>Status</th>
+                <th>
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr>
+                  <td className="module-table-message" colSpan={8}>
+                    Loading enrollment requests...
+                  </td>
+                </tr>
+              ) : errorMessage ? (
+                <tr>
+                  <td className="module-table-message error" colSpan={8}>
+                    {errorMessage}
+                  </td>
+                </tr>
+              ) : filteredRequests.length === 0 ? (
+                <tr>
+                  <td className="module-table-message" colSpan={8}>
+                    No enrollment requests found.
+                  </td>
+                </tr>
+              ) : (
+                filteredRequests.map((request) => {
+                  const isUpdating = updatingRequestId === request.id;
+                  const isPending = request.status === 'Pending';
 
-          return (
-            <span className="table-actions">
-              <button
-                className="tiny-action approve"
-                type="button"
-                aria-label="Approve"
-                disabled={!isPending || isUpdating}
-                onClick={() => void updateEnrollmentStatus(request.id, 'Approved')}
-              >
-                <Check size={14} />
-              </button>
-              <button
-                className="tiny-action reject"
-                type="button"
-                aria-label="Reject"
-                disabled={!isPending || isUpdating}
-                onClick={() => void updateEnrollmentStatus(request.id, 'Rejected')}
-              >
-                <X size={14} />
-              </button>
-              <button
-                className="tiny-view"
-                onClick={() => setSelectedRequest(request)}
-                type="button"
-              >
-                View
-              </button>
-            </span>
-          );
-        }}
-      />
+                  return (
+                    <tr key={request.id}>
+                      <td>{request.request_code}</td>
+                      <td>
+                        <strong className="module-cell-text">{request.full_name}</strong>
+                      </td>
+                      <td>{request.employee_id}</td>
+                      <td>{request.department}</td>
+                      <td>{request.request_type}</td>
+                      <td>{formatSubmittedDate(request.submitted_at, dateTimeSettings)}</td>
+                      <td>
+                        <span className={`module-status ${statusTone(request.status)}`}>
+                          {request.status}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="table-actions">
+                          <button
+                            className="tiny-action approve"
+                            type="button"
+                            aria-label="Approve"
+                            disabled={!isPending || isUpdating}
+                            onClick={() => void updateEnrollmentStatus(request.id, 'Approved')}
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            className="tiny-action reject"
+                            type="button"
+                            aria-label="Reject"
+                            disabled={!isPending || isUpdating}
+                            onClick={() => void updateEnrollmentStatus(request.id, 'Rejected')}
+                          >
+                            <X size={14} />
+                          </button>
+                          <button
+                            className="tiny-view"
+                            onClick={() => setSelectedRequest(request)}
+                            type="button"
+                          >
+                            View
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="enrollment-pagination-row">
+          <span>
+            Showing {filteredRequests.length === 0 ? 0 : 1} to {filteredRequests.length} entries
+          </span>
+          <span className="module-pagination-controls">
+            <button className="active" type="button">
+              1
+            </button>
+            <button type="button">2</button>
+            <button type="button">3</button>
+            <button type="button">&gt;</button>
+          </span>
+        </div>
+      </section>
 
       {selectedRequest ? (
         <div className="request-drawer-backdrop" onMouseDown={() => setSelectedRequest(null)}>
@@ -2573,7 +2704,7 @@ export function EnrollmentRequestsPage() {
                 </div>
                 <div>
                   <dt>Submitted On</dt>
-                  <dd>{formatSubmittedDate(selectedRequest.submitted_at)}</dd>
+                  <dd>{formatSubmittedDate(selectedRequest.submitted_at, dateTimeSettings)}</dd>
                 </div>
                 <div>
                   <dt>Status</dt>
@@ -2923,6 +3054,7 @@ function ReportPreviewModal({
 
 export function ReportsPage() {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [reportType, setReportType] = useState<ReportType>('Attendance Summary');
@@ -3013,9 +3145,9 @@ export function ReportsPage() {
         report.report_name,
         report.report_type,
         report.generated_by || 'System',
-        formatAuditTimestamp(report.created_at),
+        formatAuditTimestamp(report.created_at, dateTimeSettings),
       ]),
-    [generatedReports],
+    [generatedReports, dateTimeSettings],
   );
 
   const onGenerateReport = async () => {
@@ -3093,7 +3225,7 @@ export function ReportsPage() {
         [
           format === 'csv'
             ? buildCsv(data.columns, data.rows)
-            : buildPdf(data.reportName, data.columns, data.rows),
+            : buildPdf(data.reportName, data.columns, data.rows, dateTimeSettings),
         ],
         { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
       );
@@ -3279,6 +3411,7 @@ export function ReportsPage() {
             pagination={reportsPagination}
             onPageChange={setReportsCurrentPage}
             withActions
+            actionsWidth={270}
             actionRenderer={(rowIndex) => {
               const report = generatedReports[rowIndex];
               if (!report) return null;
@@ -3332,17 +3465,8 @@ export function ReportsPage() {
   );
 }
 
-function formatAuditTimestamp(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
+function formatAuditTimestamp(value: string, settings: DateTimeSettings) {
+  return formatDateTime(value, settings);
 }
 
 function escapeCsvValue(value: string) {
@@ -3357,10 +3481,10 @@ function buildCsv(header: string[], rows: string[][]) {
   return content;
 }
 
-function buildPdf(title: string, header: string[], rows: string[][]) {
+function buildPdf(title: string, header: string[], rows: string[][], settings: DateTimeSettings) {
   const lines = [
     title,
-    `Generated ${new Date().toLocaleString()}`,
+    `Generated ${formatDateTime(new Date(), settings)}`,
     '',
     header.join(' | '),
     ...rows.map((row) => row.join(' | ')),
@@ -3403,6 +3527,7 @@ function buildPdf(title: string, header: string[], rows: string[][]) {
 
 export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   const { session } = useAuth();
+  const dateTimeSettings = useDateTimeSettings();
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(session?.accessToken));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -3533,13 +3658,13 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   const tableRows = useMemo(
     () =>
       auditLogs.map((log) => [
-        formatAuditTimestamp(log.created_at),
+        formatAuditTimestamp(log.created_at, dateTimeSettings),
         log.admin_name || 'System',
         log.action,
         log.module,
         log.details || '—',
       ]),
-    [auditLogs],
+    [auditLogs, dateTimeSettings],
   );
 
   const onApplyFilters = () => {
@@ -3576,7 +3701,7 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
       [
         format === 'csv'
           ? buildCsv(auditHeader, tableRows)
-          : buildPdf('EINGRESS Audit Logs', auditHeader, tableRows),
+          : buildPdf('EINGRESS Audit Logs', auditHeader, tableRows, dateTimeSettings),
       ],
       { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf' },
     );
@@ -3676,10 +3801,47 @@ export function SettingsPage() {
   const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<'general' | 'security'>('general');
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
+  const [lastSavedSettings, setLastSavedSettings] =
+    useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
   const [profile, setProfile] = useState<AdminSettingsProfile | null>(null);
   const [totalUsers, setTotalUsers] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [profileMessage, setProfileMessage] = useState('');
+  const [isVerifyRfidOpen, setIsVerifyRfidOpen] = useState(false);
+  const [verifyRfidInput, setVerifyRfidInput] = useState('');
+  const [verifyRfidError, setVerifyRfidError] = useState('');
+  const [verifyRfidStep, setVerifyRfidStep] = useState<'idle' | 'saving' | 'success' | 'error'>(
+    'idle',
+  );
+  const [verifySuccessCountdown, setVerifySuccessCountdown] = useState(5);
+  const isSavingProfile = verifyRfidStep === 'saving';
+  const [isChangeRfidOpen, setIsChangeRfidOpen] = useState(false);
+  const [changeRfidInput, setChangeRfidInput] = useState('');
+  const [changeRfidError, setChangeRfidError] = useState('');
+  const [isChangingRfid, setIsChangingRfid] = useState(false);
+
+  useEffect(() => {
+    if (verifyRfidStep !== 'success') return;
+
+    const intervalId = window.setInterval(() => {
+      setVerifySuccessCountdown((current) => {
+        if (current <= 1) {
+          window.clearInterval(intervalId);
+          setIsVerifyRfidOpen(false);
+          setVerifyRfidStep('idle');
+          return 5;
+        }
+
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [verifyRfidStep]);
 
   useEffect(() => {
     if (!session?.accessToken) return;
@@ -3701,8 +3863,11 @@ export function SettingsPage() {
           .catch(() => null)) as AdminSettingsProfile | null;
         const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
 
-        if (settingsResponse.ok && settingsData)
-          setSettings({ ...DEFAULT_SYSTEM_SETTINGS, ...settingsData });
+        if (settingsResponse.ok && settingsData) {
+          const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settingsData };
+          setSettings(merged);
+          setLastSavedSettings(merged);
+        }
         if (profileResponse.ok && profileData) setProfile(profileData);
         if (usersResponse.ok && Array.isArray(usersData)) {
           setTotalUsers(usersData.filter((user) => !user.is_archived).length);
@@ -3723,8 +3888,24 @@ export function SettingsPage() {
     setSettings((current) => ({ ...current, [key]: value }));
   };
 
+  const toggleApplicableRole = (role: string, checked: boolean) => {
+    setSettings((current) => ({
+      ...current,
+      auto_deactivation_applicable_roles: checked
+        ? [...current.auto_deactivation_applicable_roles, role]
+        : current.auto_deactivation_applicable_roles.filter((existing) => existing !== role),
+    }));
+  };
+
+  const isDirty = JSON.stringify(settings) !== JSON.stringify(lastSavedSettings);
+
   async function saveSettings() {
     if (!session?.accessToken) return;
+
+    if (settings.idle_timeout_warning_minutes >= settings.session_timeout_minutes) {
+      setMessage('Idle Timeout Warning must be less than Session Timeout.');
+      return;
+    }
 
     try {
       setIsSaving(true);
@@ -3750,10 +3931,13 @@ export function SettingsPage() {
           autoLogoutEnabled: settings.auto_logout_enabled,
           keepMeLoggedIn: settings.keep_me_logged_in,
           adminRfidEnabled: settings.admin_rfid_enabled,
+          autoDeactivationEnabled: settings.auto_deactivation_enabled,
+          autoDeactivationDurationDays: settings.auto_deactivation_duration_days,
+          autoDeactivationApplicableRoles: settings.auto_deactivation_applicable_roles,
         }),
       });
       const data = (await response.json().catch(() => null)) as
-        | SystemSettings
+        | (SystemSettings & { lifecycleRun?: { ran: boolean; deactivatedCount: number } | null })
         | { error?: string }
         | null;
 
@@ -3761,12 +3945,147 @@ export function SettingsPage() {
         throw new Error(data && 'error' in data ? data.error : 'Unable to save settings.');
       }
 
-      setSettings({ ...DEFAULT_SYSTEM_SETTINGS, ...data });
-      setMessage('Settings saved successfully.');
+      const { lifecycleRun, ...settingsData } = data as SystemSettings & {
+        lifecycleRun?: { ran: boolean; deactivatedCount: number } | null;
+      };
+      const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settingsData };
+      setSettings(merged);
+      setLastSavedSettings(merged);
+      setDateTimeSettings(merged);
+      setSecuritySettings(merged);
+      setMessage(
+        lifecycleRun?.ran && lifecycleRun.deactivatedCount > 0
+          ? `Settings saved successfully. Account lifecycle policy applied: ${lifecycleRun.deactivatedCount} account(s) deactivated.`
+          : 'Settings saved successfully.',
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Unable to save settings.');
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  function startEditingProfile() {
+    setEditedName(profile?.name ?? session?.adminName ?? '');
+    setProfileError('');
+    setProfileMessage('');
+    setIsEditingProfile(true);
+  }
+
+  function openVerifyRfidModal() {
+    if (!editedName.trim()) {
+      setProfileError('Admin name is required.');
+      return;
+    }
+    setProfileError('');
+    setVerifyRfidInput('');
+    setVerifyRfidError('');
+    setVerifyRfidStep('idle');
+    setIsVerifyRfidOpen(true);
+  }
+
+  function closeVerifyRfidModal() {
+    setIsVerifyRfidOpen(false);
+    setVerifyRfidStep('idle');
+    setVerifyRfidInput('');
+    setVerifyRfidError('');
+  }
+
+  function retryVerifyRfid() {
+    setVerifyRfidInput('');
+    setVerifyRfidError('');
+    setVerifyRfidStep('idle');
+  }
+
+  async function submitProfileNameChange() {
+    if (!session?.accessToken) return;
+
+    if (!verifyRfidInput.trim()) {
+      setVerifyRfidError('Please scan or enter your RFID card.');
+      return;
+    }
+
+    setVerifyRfidStep('saving');
+    setVerifyRfidError('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: editedName.trim(), rfidCode: verifyRfidInput.trim() }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | AdminSettingsProfile
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !isAdminSettingsProfile(data)) {
+        const errorMessage =
+          data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+            ? data.error
+            : 'Unable to update admin name.';
+        throw new Error(errorMessage);
+      }
+
+      setProfile(data);
+      setIsEditingProfile(false);
+      setProfileMessage('Admin name updated successfully.');
+      setVerifySuccessCountdown(5);
+      setVerifyRfidStep('success');
+    } catch (error) {
+      setVerifyRfidError(error instanceof Error ? error.message : 'Unable to update admin name.');
+      setVerifyRfidStep('error');
+    }
+  }
+
+  function openChangeRfidModal() {
+    setChangeRfidInput('');
+    setChangeRfidError('');
+    setIsChangeRfidOpen(true);
+  }
+
+  async function submitRfidChange() {
+    if (!session?.accessToken) return;
+
+    if (!changeRfidInput.trim()) {
+      setChangeRfidError('Please scan or enter the new RFID card.');
+      return;
+    }
+
+    try {
+      setIsChangingRfid(true);
+      setChangeRfidError('');
+      const response = await fetch(`${API_BASE_URL}/auth/me/rfid`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rfidUid: changeRfidInput.trim() }),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | AdminSettingsProfile
+        | { error?: string }
+        | null;
+
+      if (!response.ok || !isAdminSettingsProfile(data)) {
+        const errorMessage =
+          data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+            ? data.error
+            : 'Unable to update RFID card.';
+        throw new Error(errorMessage);
+      }
+
+      setProfile(data);
+      setIsChangeRfidOpen(false);
+      setProfileMessage('RFID card updated successfully.');
+    } catch (error) {
+      setChangeRfidError(error instanceof Error ? error.message : 'Unable to update RFID card.');
+    } finally {
+      setIsChangingRfid(false);
     }
   }
 
@@ -3799,30 +4118,61 @@ export function SettingsPage() {
             <div className="settings-fields">
               <label>
                 Admin Name
-                <input disabled value={profile?.name ?? session?.adminName ?? 'Administrator'} />
+                <input
+                  disabled={!isEditingProfile}
+                  onChange={(event) => setEditedName(event.target.value)}
+                  value={
+                    isEditingProfile
+                      ? editedName
+                      : (profile?.name ?? session?.adminName ?? 'Administrator')
+                  }
+                />
               </label>
               <label>
                 Email
                 <input disabled value={profile?.email ?? session?.email ?? ''} />
               </label>
               <label>
-                RFID Number
-                <input disabled value={profile?.rfidUid ?? '—'} />
+                System Language
+                <select disabled value={settings.system_language}>
+                  <option>English</option>
+                  <option>Filipino</option>
+                </select>
               </label>
               <label>
                 Role
                 <input disabled value={profile?.role ?? 'Administrator'} />
               </label>
-              <label>
-                System Language
-                <select
-                  value={settings.system_language}
-                  onChange={(event) => updateSetting('system_language', event.target.value)}
+              <div className="admin-profile-rfid-row">
+                <label>
+                  RFID Number
+                  <input disabled value={profile?.rfidUid ?? '—'} />
+                </label>
+                <button
+                  className="change-rfid-button"
+                  disabled={isEditingProfile}
+                  onClick={openChangeRfidModal}
+                  type="button"
                 >
-                  <option>English</option>
-                  <option>Filipino</option>
-                </select>
-              </label>
+                  Change RFID
+                </button>
+              </div>
+            </div>
+            {profileError ? (
+              <p className="module-table-message error" role="alert">
+                {profileError}
+              </p>
+            ) : null}
+            {profileMessage ? <p className="module-table-message">{profileMessage}</p> : null}
+            <div className="admin-profile-footer">
+              <button
+                className="admin-profile-edit-button"
+                disabled={isSavingProfile}
+                onClick={() => (isEditingProfile ? openVerifyRfidModal() : startEditingProfile())}
+                type="button"
+              >
+                {isEditingProfile ? 'Save Changes' : 'Edit'}
+              </button>
             </div>
           </section>
           <section className="module-panel settings-card system-info-card">
@@ -3840,7 +4190,7 @@ export function SettingsPage() {
                 <dt>Last Backup</dt>
                 <dd>
                   {settings.last_backup_at
-                    ? formatAuditTimestamp(settings.last_backup_at)
+                    ? formatAuditTimestamp(settings.last_backup_at, settings)
                     : 'Not available'}
                 </dd>
               </div>
@@ -3859,17 +4209,25 @@ export function SettingsPage() {
             <div className="security-fields four-columns">
               <label>
                 Date Format
-                <input
+                <select
                   value={settings.date_format}
                   onChange={(event) => updateSetting('date_format', event.target.value)}
-                />
+                >
+                  {withCurrentOption(DATE_FORMAT_OPTIONS, settings.date_format).map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
               </label>
               <label>
                 Time Format
-                <input
+                <select
                   value={settings.time_format}
                   onChange={(event) => updateSetting('time_format', event.target.value)}
-                />
+                >
+                  {withCurrentOption(TIME_FORMAT_OPTIONS, settings.time_format).map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
               </label>
               <label>
                 First Day of Week
@@ -3877,16 +4235,23 @@ export function SettingsPage() {
                   value={settings.first_day_of_week}
                   onChange={(event) => updateSetting('first_day_of_week', event.target.value)}
                 >
-                  <option>Monday</option>
-                  <option>Sunday</option>
+                  {withCurrentOption(FIRST_DAY_OF_WEEK_OPTIONS, settings.first_day_of_week).map(
+                    (option) => (
+                      <option key={option}>{option}</option>
+                    ),
+                  )}
                 </select>
               </label>
               <label>
                 Time Zone
-                <input
+                <select
                   value={settings.time_zone}
                   onChange={(event) => updateSetting('time_zone', event.target.value)}
-                />
+                >
+                  {withCurrentOption(TIME_ZONE_OPTIONS, settings.time_zone).map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
               </label>
             </div>
           </section>
@@ -3936,6 +4301,60 @@ export function SettingsPage() {
                 <span />
                 Enable lockout policy
               </label>
+            </div>
+          </section>
+          <section className="module-panel settings-card">
+            <h2>Account Lifecycle</h2>
+            <p>
+              Automatically deactivate inactive accounts based on a configured duration and role.
+            </p>
+            <hr className="settings-card-divider" />
+            <div className="lifecycle-toggle-field">
+              <span className="lifecycle-toggle-label">Enable Automatic Account Deactivation</span>
+              <label className="toggle-setting">
+                <input
+                  checked={settings.auto_deactivation_enabled}
+                  onChange={(event) =>
+                    updateSetting('auto_deactivation_enabled', event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                <span />
+                {settings.auto_deactivation_enabled ? 'Enabled' : 'Disabled'}
+              </label>
+            </div>
+            <div className="security-fields lifecycle-fields">
+              <div className="lifecycle-duration-field">
+                <span className="lifecycle-duration-label">Auto-Deactivation Duration</span>
+                <div className="lifecycle-duration-input-row">
+                  <input
+                    disabled={!settings.auto_deactivation_enabled}
+                    min="1"
+                    type="number"
+                    value={settings.auto_deactivation_duration_days}
+                    onChange={(event) =>
+                      updateSetting('auto_deactivation_duration_days', Number(event.target.value))
+                    }
+                  />
+                  <span>Days</span>
+                </div>
+              </div>
+              <div className="applicable-roles-field">
+                <span className="applicable-roles-label">Applicable Roles</span>
+                <div className="applicable-roles-options">
+                  {LIFECYCLE_ROLE_OPTIONS.map((role) => (
+                    <label className="role-checkbox" key={role}>
+                      <input
+                        checked={settings.auto_deactivation_applicable_roles.includes(role)}
+                        disabled={!settings.auto_deactivation_enabled}
+                        onChange={(event) => toggleApplicableRole(role, event.target.checked)}
+                        type="checkbox"
+                      />
+                      <span>{role}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             </div>
           </section>
           <section className="module-panel settings-card">
@@ -3997,19 +4416,209 @@ export function SettingsPage() {
               Administrator Enable RFID
             </label>
           </section>
+          <section className="module-panel settings-card">
+            <h2>Password</h2>
+            <p>Update your account password regularly to keep your account secure.</p>
+            <Link className="text-link change-password-link" to="/settings/change-password">
+              Change Password
+            </Link>
+          </section>
         </div>
       )}
-      <div className="settings-save-row">
-        <span>{message}</span>
-        <button
-          className="save-settings-button"
-          disabled={isSaving}
-          onClick={() => void saveSettings()}
-          type="button"
-        >
-          {isSaving ? 'Saving…' : 'Save Changes'}
-        </button>
-      </div>
+      {activeTab === 'security' ? (
+        <div className="settings-save-row">
+          <span>{message || (isDirty && !isSaving ? 'You have unsaved changes.' : '')}</span>
+          <button
+            className="save-settings-button"
+            disabled={isSaving || !isDirty}
+            onClick={() => void saveSettings()}
+            type="button"
+          >
+            {isSaving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      ) : null}
+
+      {isVerifyRfidOpen ? (
+        <div className="rfid-scan-backdrop" role="presentation">
+          <section className="rfid-scan-modal" aria-labelledby="verify-rfid-title" role="dialog">
+            <header>
+              <div className="rfid-scan-brand">
+                <span aria-hidden="true">ID</span>
+                <div>
+                  <strong>EINGRESS</strong>
+                  <small>ATTENDANCE KIOSK</small>
+                </div>
+              </div>
+              <button
+                aria-label="Close RFID verification"
+                onClick={closeVerifyRfidModal}
+                type="button"
+              >
+                X
+              </button>
+            </header>
+
+            {verifyRfidStep === 'saving' ? (
+              <>
+                <div className="rfid-scan-visual" aria-hidden="true">
+                  <span className="rfid-id-card-symbol">
+                    <i />
+                    <span>
+                      <b />
+                      <b />
+                      <b />
+                    </span>
+                  </span>
+                </div>
+                <h2 id="verify-rfid-title">Saving changes...</h2>
+                <p>Please wait while we save your profile changes.</p>
+              </>
+            ) : verifyRfidStep === 'success' ? (
+              <>
+                <div className="rfid-scan-visual rfid-scan-visual-success" aria-hidden="true">
+                  <Check size={64} strokeWidth={3} />
+                </div>
+                <h2 id="verify-rfid-title">Verification Successful</h2>
+                <p>
+                  Returning to home screen in {verifySuccessCountdown} second
+                  {verifySuccessCountdown === 1 ? '' : 's'}...
+                </p>
+              </>
+            ) : verifyRfidStep === 'error' ? (
+              <>
+                <div className="rfid-scan-visual rfid-scan-visual-error" aria-hidden="true">
+                  <X size={64} strokeWidth={3} />
+                </div>
+                <h2 id="verify-rfid-title">Verification Failed</h2>
+                <p>{verifyRfidError || 'Please try again.'}</p>
+                <div className="rfid-scan-result-actions">
+                  <button
+                    className="rfid-scan-capture-button"
+                    onClick={retryVerifyRfid}
+                    type="button"
+                  >
+                    Scan Again
+                  </button>
+                  <button
+                    className="rfid-scan-cancel-button"
+                    onClick={closeVerifyRfidModal}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="rfid-scan-visual" aria-hidden="true">
+                  <span className="rfid-id-card-symbol">
+                    <i />
+                    <span>
+                      <b />
+                      <b />
+                      <b />
+                    </span>
+                  </span>
+                </div>
+                <h2 id="verify-rfid-title">Verify Your Identity</h2>
+                <p>Tap your admin RFID card to confirm this change.</p>
+                <label className="rfid-scan-input">
+                  <span>RFID Number</span>
+                  <input
+                    autoFocus
+                    inputMode="numeric"
+                    onChange={(event) => setVerifyRfidInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void submitProfileNameChange();
+                      }
+                    }}
+                    placeholder="Tap card or enter RFID"
+                    value={verifyRfidInput}
+                  />
+                </label>
+                <button
+                  className="rfid-scan-capture-button"
+                  onClick={() => void submitProfileNameChange()}
+                  type="button"
+                >
+                  Confirm Changes
+                </button>
+              </>
+            )}
+            <div className="rfid-scan-dots" aria-hidden="true" />
+          </section>
+        </div>
+      ) : null}
+
+      {isChangeRfidOpen ? (
+        <div className="rfid-scan-backdrop" role="presentation">
+          <section className="rfid-scan-modal" aria-labelledby="change-rfid-title" role="dialog">
+            <header>
+              <div className="rfid-scan-brand">
+                <span aria-hidden="true">ID</span>
+                <div>
+                  <strong>EINGRESS</strong>
+                  <small>ATTENDANCE KIOSK</small>
+                </div>
+              </div>
+              <button
+                aria-label="Close RFID scanner"
+                onClick={() => setIsChangeRfidOpen(false)}
+                type="button"
+              >
+                X
+              </button>
+            </header>
+
+            <div className="rfid-scan-visual" aria-hidden="true">
+              <span className="rfid-id-card-symbol">
+                <i />
+                <span>
+                  <b />
+                  <b />
+                  <b />
+                </span>
+              </span>
+            </div>
+
+            <h2 id="change-rfid-title">Place New ID</h2>
+            <p>Your new ID is being registered... Please wait.</p>
+            <label className="rfid-scan-input">
+              <span>RFID Number</span>
+              <input
+                autoFocus
+                inputMode="numeric"
+                onChange={(event) => setChangeRfidInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void submitRfidChange();
+                  }
+                }}
+                placeholder="Tap card or enter RFID"
+                value={changeRfidInput}
+              />
+            </label>
+            <button
+              className="rfid-scan-capture-button"
+              disabled={isChangingRfid}
+              onClick={() => void submitRfidChange()}
+              type="button"
+            >
+              {isChangingRfid ? 'Saving...' : 'Use RFID'}
+            </button>
+            {changeRfidError ? (
+              <p className="module-table-message error" role="alert">
+                {changeRfidError}
+              </p>
+            ) : null}
+            <div className="rfid-scan-dots" aria-hidden="true" />
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

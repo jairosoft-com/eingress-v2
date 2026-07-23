@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS admins (
   rfid_uid VARCHAR(120) NOT NULL UNIQUE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   password_changed_at TIMESTAMPTZ,
+  failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+  last_failed_login_at TIMESTAMPTZ,
+  locked_until TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -63,6 +66,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_archived BOOLEAN NOT NULL DEFAULT FALSE,
   deactivated_at TIMESTAMPTZ,
   deactivation_reason TEXT,
+  expiration_date TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -181,6 +185,9 @@ CREATE TABLE IF NOT EXISTS system_settings (
   auto_logout_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   keep_me_logged_in BOOLEAN NOT NULL DEFAULT FALSE,
   admin_rfid_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  auto_deactivation_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  auto_deactivation_duration_days INTEGER NOT NULL DEFAULT 7,
+  auto_deactivation_applicable_roles TEXT[] NOT NULL DEFAULT ARRAY['Student', 'Intern', 'Staff']::TEXT[],
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
