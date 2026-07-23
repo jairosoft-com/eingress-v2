@@ -3,6 +3,7 @@ import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
+import { createNotification } from '../lib/notifications.js';
 
 export const usersRouter = express.Router();
 usersRouter.use(authMiddleware);
@@ -105,6 +106,11 @@ usersRouter.post('/', async (req, res) => {
       status: 'Info',
       time: user.created_at,
     });
+    await createNotification(
+      'New User Added',
+      `${user.full_name} (${user.employee_id}) was added successfully.`,
+      'success',
+    );
     res.status(201).json(result.rows[0]);
   } catch (error) {
     const duplicateError = getDuplicateUserMessage(error);
@@ -190,6 +196,11 @@ usersRouter.patch('/:id', async (req, res) => {
       status: 'Info',
       time: user.updated_at,
     });
+    await createNotification(
+      'User Updated',
+      `${user.full_name} (${user.employee_id}) details were updated successfully.`,
+      'success',
+    );
     res.json(result.rows[0]);
   } catch (error) {
     const duplicateError = getDuplicateUserMessage(error);

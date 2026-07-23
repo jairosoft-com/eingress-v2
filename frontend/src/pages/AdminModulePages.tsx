@@ -252,7 +252,6 @@ type CreateUserForm = {
   role: string;
   rfidUid: string;
   fingerprintId: string;
-  scanBiometrics: boolean;
 };
 
 type KioskInput = {
@@ -720,6 +719,8 @@ function MetricCards({
   );
 }
 
+const USER_MANAGEMENT_PAGE_SIZE = 10;
+
 function attendanceStatusIcon(status: string) {
   if (status === 'Registered') {
     return <Fingerprint size={14} />;
@@ -746,7 +747,7 @@ export function UserManagementPage() {
   const [userSearch, setUserSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('All Roles');
   const [statusFilter, setStatusFilter] = useState('All Status');
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
   const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
   const [editForm, setEditForm] = useState<UserEditForm>({
@@ -766,7 +767,6 @@ export function UserManagementPage() {
     role: 'Employee',
     rfidUid: '',
     fingerprintId: '',
-    scanBiometrics: false,
   });
   const [createFormError, setCreateFormError] = useState('');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -1240,7 +1240,6 @@ export function UserManagementPage() {
         role: 'Employee',
         rfidUid: '',
         fingerprintId: '',
-        scanBiometrics: false,
       });
       window.alert('User created successfully.');
     } catch (error) {
@@ -1285,10 +1284,68 @@ export function UserManagementPage() {
     });
   }, [departmentFilter, statusFilter, userSearch, users]);
 
+  const userFilterKey = `${departmentFilter}|${statusFilter}|${userSearch}`;
+  const [lastUserFilterKey, setLastUserFilterKey] = useState(userFilterKey);
+
+  if (userFilterKey !== lastUserFilterKey) {
+    setLastUserFilterKey(userFilterKey);
+    setCurrentPage(1);
+  }
+
+  const totalUserRecords = filteredUsers.length;
+  const totalUserPages = Math.max(1, Math.ceil(totalUserRecords / USER_MANAGEMENT_PAGE_SIZE));
+  const currentUserPage = Math.min(currentPage, totalUserPages);
+
+  const userPageNumbers = useMemo(() => {
+    const windowStart = Math.max(1, Math.min(currentUserPage - 1, totalUserPages - 2));
+    const windowEnd = Math.min(totalUserPages, windowStart + 2);
+    const numbers: number[] = [];
+
+    for (let pageNumber = windowStart; pageNumber <= windowEnd; pageNumber += 1) {
+      numbers.push(pageNumber);
+    }
+
+    return numbers;
+  }, [currentUserPage, totalUserPages]);
+
   const visibleUsers = useMemo(
-    () => filteredUsers.slice(0, rowsPerPage).map(toUserDisplayRow),
-    [filteredUsers, rowsPerPage],
+    () =>
+      filteredUsers
+        .slice(
+          (currentUserPage - 1) * USER_MANAGEMENT_PAGE_SIZE,
+          currentUserPage * USER_MANAGEMENT_PAGE_SIZE,
+        )
+        .map(toUserDisplayRow),
+    [currentUserPage, filteredUsers],
   );
+
+  function exportUsersCsv() {
+    const header = [
+      'Employee ID',
+      'Name',
+      'Role',
+      'Department',
+      'Biometric Status',
+      'Access Status',
+      'RFID UID',
+    ];
+    const rows = filteredUsers.map((user) => [
+      user.employee_id,
+      user.full_name,
+      user.role || 'Employee',
+      user.department || '-',
+      user.fingerprint_id ? 'Registered' : 'Missing',
+      user.is_active ? 'Active' : 'Disabled',
+      user.rfid_uid || '-',
+    ]);
+    const blob = new Blob([buildCsv(header, rows)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `user-management_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   const registeredBiometricCount = users.filter((user) => user.fingerprint_id).length;
   const missingBiometricCount = users.length - registeredBiometricCount;
@@ -1357,13 +1414,6 @@ export function UserManagementPage() {
             <button
               className="primary-action-button"
               type="button"
-              onClick={() => window.alert('Save Changes functionality is not available yet.')}
-            >
-              Save Changes
-            </button>
-            <button
-              className="primary-action-button"
-              type="button"
               onClick={() => {
                 setIsCreateUserOpen(true);
                 setCreateFormError('');
@@ -1376,19 +1426,14 @@ export function UserManagementPage() {
                   role: 'Employee',
                   rfidUid: '',
                   fingerprintId: '',
-                  scanBiometrics: false,
                 });
               }}
             >
               + Add New User
             </button>
-            <button className="soft-action-button" type="button">
+            <button className="soft-action-button" onClick={exportUsersCsv} type="button">
               <Download size={16} />
               Export
-            </button>
-            <button className="soft-action-button" type="button">
-              <Filter size={16} />
-              Filter
             </button>
           </div>
         </header>
@@ -1609,36 +1654,39 @@ export function UserManagementPage() {
 
         <footer className="user-table-footer">
           <span>
-            Showing {visibleUsers.length === 0 ? 0 : 1} to {visibleUsers.length} of{' '}
-            {filteredUsers.length.toLocaleString()} entries
+            Showing{' '}
+            {totalUserRecords === 0 ? 0 : (currentUserPage - 1) * USER_MANAGEMENT_PAGE_SIZE + 1} to{' '}
+            {Math.min(currentUserPage * USER_MANAGEMENT_PAGE_SIZE, totalUserRecords)} of{' '}
+            {totalUserRecords.toLocaleString()} entries
           </span>
           <div className="user-pagination" aria-label="Pagination">
-            <button type="button" aria-label="Previous page">
+            <button
+              type="button"
+              aria-label="Previous page"
+              disabled={currentUserPage <= 1}
+              onClick={() => setCurrentPage(currentUserPage - 1)}
+            >
               <ChevronLeft size={15} />
             </button>
-            <button className="active" type="button">
-              1
-            </button>
-            <button type="button">2</button>
-            <button type="button">3</button>
-            <button type="button">...</button>
-            <button type="button">156</button>
-            <button type="button" aria-label="Next page">
+            {userPageNumbers.map((pageNumber) => (
+              <button
+                className={pageNumber === currentUserPage ? 'active' : ''}
+                key={pageNumber}
+                onClick={() => setCurrentPage(pageNumber)}
+                type="button"
+              >
+                {pageNumber}
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-label="Next page"
+              disabled={currentUserPage >= totalUserPages}
+              onClick={() => setCurrentPage(currentUserPage + 1)}
+            >
               <ChevronRight size={15} />
             </button>
           </div>
-          <label className="rows-per-page">
-            Rows per page:
-            <select
-              aria-label="Rows per page"
-              onChange={(event) => setRowsPerPage(Number(event.target.value))}
-              value={String(rowsPerPage)}
-            >
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-            </select>
-          </label>
         </footer>
       </section>
 
@@ -1962,7 +2010,7 @@ export function UserManagementPage() {
                 <span>2</span>
                 Hardware Enrollment
               </h3>
-              <div className="user-edit-grid three-columns">
+              <div className="user-edit-grid hardware-columns">
                 <label className="user-edit-field">
                   <span>RFID UID</span>
                   <input readOnly value={createForm.rfidUid} placeholder="Scan or enter RFID UID" />
@@ -1986,36 +2034,15 @@ export function UserManagementPage() {
                     placeholder="Scan or enter fingerprint"
                   />
                 </label>
-              </div>
-              <div className="user-edit-grid two-columns" style={{ marginTop: '16px' }}>
-                <label
-                  className="user-edit-field"
-                  style={{ alignItems: 'center', gridTemplateColumns: 'auto 1fr' }}
+
+                <button
+                  className="user-edit-scan-button"
+                  onClick={openFingerprintScanner}
+                  type="button"
                 >
-                  <input
-                    type="checkbox"
-                    checked={createForm.scanBiometrics}
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        scanBiometrics: event.target.checked,
-                      }))
-                    }
-                  />
-                  <span style={{ marginLeft: '12px' }}>
-                    Scan Biometrics
-                    <small
-                      style={{
-                        display: 'block',
-                        marginTop: '4px',
-                        color: '#667089',
-                        fontWeight: 400,
-                      }}
-                    >
-                      Biometrics scanning is not available yet; status will remain Missing.
-                    </small>
-                  </span>
-                </label>
+                  <Fingerprint size={14} />
+                  <span>Scan Fingerprint</span>
+                </button>
               </div>
             </section>
 
@@ -4107,11 +4134,7 @@ export function SettingsPage() {
               </label>
               <label>
                 System Language
-                <select
-                  disabled={isEditingProfile}
-                  value={settings.system_language}
-                  onChange={(event) => updateSetting('system_language', event.target.value)}
-                >
+                <select disabled value={settings.system_language}>
                   <option>English</option>
                   <option>Filipino</option>
                 </select>
@@ -4402,17 +4425,19 @@ export function SettingsPage() {
           </section>
         </div>
       )}
-      <div className="settings-save-row">
-        <span>{message || (isDirty && !isSaving ? 'You have unsaved changes.' : '')}</span>
-        <button
-          className="save-settings-button"
-          disabled={isSaving || !isDirty}
-          onClick={() => void saveSettings()}
-          type="button"
-        >
-          {isSaving ? 'Saving…' : 'Save Changes'}
-        </button>
-      </div>
+      {activeTab === 'security' ? (
+        <div className="settings-save-row">
+          <span>{message || (isDirty && !isSaving ? 'You have unsaved changes.' : '')}</span>
+          <button
+            className="save-settings-button"
+            disabled={isSaving || !isDirty}
+            onClick={() => void saveSettings()}
+            type="button"
+          >
+            {isSaving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      ) : null}
 
       {isVerifyRfidOpen ? (
         <div className="rfid-scan-backdrop" role="presentation">

@@ -2,6 +2,7 @@ import express from 'express';
 
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { createNotification } from '../lib/notifications.js';
 
 export const reportsRouter = express.Router();
 reportsRouter.use(authMiddleware);
@@ -412,6 +413,8 @@ reportsRouter.post('/', async (req, res, next) => {
        VALUES ($1, $2, $3, $4, $5)`,
       [req.user.adminId || null, 'Generated Report', 'Reports', `Generated "${reportName}" (${reportType})`, req.ip],
     );
+
+    await createNotification('Report Ready', `"${reportName}" (${reportType}) is ready to view.`, 'success');
 
     res.status(201).json(result.rows[0]);
   } catch (error) {

@@ -7,6 +7,7 @@ import nodemailer from 'nodemailer';
 import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
+import { createNotification } from '../lib/notifications.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
 const PERSISTENT_SESSION_MINUTES = 7 * 24 * 60;
@@ -328,6 +329,11 @@ authRouter.patch('/me', authMiddleware, async (req, res, next) => {
     const admin = adminResult.rows[0];
 
     if (admin.rfid_uid !== rfidCode) {
+      await createNotification(
+        'RFID Verification Failed',
+        `RFID verification failed for ${admin.username}. The scanned card did not match the assigned admin RFID.`,
+        'error',
+      );
       return res.status(403).json({ error: 'RFID verification failed. Please tap your admin card.' });
     }
 
@@ -345,6 +351,12 @@ authRouter.patch('/me', authMiddleware, async (req, res, next) => {
       `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
        VALUES ($1, $2, $3, $4, $5)`,
       [admin.id, 'Profile Updated', 'Settings', `Admin name changed to ${name}`, req.ip],
+    );
+
+    await createNotification(
+      'Settings Updated',
+      `General settings were updated: admin name changed to ${name}.`,
+      'success',
     );
 
     return res.json({

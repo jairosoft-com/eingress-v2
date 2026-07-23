@@ -103,6 +103,21 @@ async function fetchPendingEnrollmentCount(accessToken: string, signal?: AbortSi
   return data.filter((request) => request.status === 'Pending').length;
 }
 
+async function fetchNotifications(accessToken: string, signal?: AbortSignal) {
+  const response = await fetch(`${API_BASE_URL}/notifications`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal,
+  });
+
+  const data = (await response.json().catch(() => null)) as Notification[] | null;
+
+  if (!response.ok || !Array.isArray(data)) {
+    return null;
+  }
+
+  return data;
+}
+
 export function App() {
   const { session, signOut } = useAuth();
   const accessToken = session?.accessToken;
@@ -119,12 +134,9 @@ export function App() {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/notifications`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const data = (await response.json().catch(() => null)) as Notification[] | null;
+      const data = await fetchNotifications(accessToken);
 
-      if (response.ok && Array.isArray(data)) {
+      if (data) {
         setNotifications(data);
       }
     } catch {
@@ -143,6 +155,16 @@ export function App() {
       .then((count) => {
         if (!controller.signal.aborted && count !== null) {
           setPendingEnrollmentCount(count);
+        }
+      })
+      .catch(() => {
+        // Request was aborted (e.g. effect cleanup) or failed; ignore.
+      });
+
+    void fetchNotifications(session.accessToken, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted && data) {
+          setNotifications(data);
         }
       })
       .catch(() => {

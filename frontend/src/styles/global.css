@@ -1362,6 +1362,10 @@ button {
   background: #19ad6a;
 }
 
+.notification-item.error i {
+  background: #e2483d;
+}
+
 .notifications-empty {
   padding: 34px;
   color: #667089;
@@ -2554,6 +2558,10 @@ td small {
 
 .user-edit-grid.two-columns .user-edit-field:last-child {
   grid-column: 1 / 2;
+}
+
+.user-edit-grid.hardware-columns {
+  grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr) 140px;
 }
 
 .user-edit-grid.three-columns {
