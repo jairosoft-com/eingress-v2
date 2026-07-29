@@ -2584,13 +2584,11 @@ export function EnrollmentRequestsPage() {
                 <th>Request ID</th>
                 <th>Name</th>
                 <th>Employee ID</th>
-                <th>Department</th>
+                <th>Role</th>
                 <th>Request Type</th>
                 <th>Submitted</th>
                 <th>Status</th>
-                <th>
-                  <span className="sr-only">Actions</span>
-                </th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>

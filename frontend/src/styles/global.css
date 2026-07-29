@@ -2162,15 +2162,29 @@ td small {
   min-width: 1040px;
 }
 
+.module-panel:has(.enrollment-requests-table) {
+  padding: 12px 18px 18px;
+  border-color: #7887a3;
+  border-radius: 7px;
+}
+
+.module-panel:has(.enrollment-requests-table) h2 {
+  margin-bottom: 12px;
+  font-size: 1rem;
+  line-height: 1.1;
+}
+
 .enrollment-requests-table th,
 .enrollment-requests-table td {
-  padding: 12px;
-  border-bottom-color: #e5e9f1;
+  padding: 8px 16px;
+  border-bottom-color: #68758e;
 }
 
 .enrollment-requests-table th {
-  color: #46536b;
-  background: #f4f6fa;
+  color: #101936;
+  font-size: 0.88rem;
+  font-weight: 700;
+  background: #e0e6ef;
 }
 
 .enrollment-requests-table td:nth-child(1) {
