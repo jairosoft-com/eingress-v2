@@ -323,8 +323,35 @@ reportsRouter.get('/', async (req, res, next) => {
         : DEFAULT_PAGE_SIZE;
 
     const offset = (page - 1) * pageSize;
+    const search = req.query.search ? String(req.query.search).trim() : '';
+    const date = req.query.date ? String(req.query.date).trim() : '';
+    const department = req.query.department ? String(req.query.department).trim() : '';
+    const status = req.query.status ? String(req.query.status).trim() : '';
 
-    const countResult = await query(`SELECT COUNT(*)::int AS total FROM generated_reports`);
+    const params = [];
+    const where = [];
+    if (search) {
+      params.push(`%${search}%`);
+      where.push(`(r.report_name ILIKE $${params.length} OR r.report_type ILIKE $${params.length})`);
+    }
+    if (date) {
+      params.push(date);
+      where.push(`r.created_at::date = $${params.length}`);
+    }
+    if (department) {
+      params.push(department);
+      where.push(`r.parameters->>'department' = $${params.length}`);
+    }
+    if (status) {
+      params.push(status);
+      where.push(`r.parameters->>'status' = $${params.length}`);
+    }
+    const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+
+    const countResult = await query(
+      `SELECT COUNT(*)::int AS total FROM generated_reports r ${whereClause}`,
+      params,
+    );
     const totalRecords = countResult.rows[0]?.total ?? 0;
     const totalPages = Math.max(Math.ceil(totalRecords / pageSize), 1);
 
@@ -333,9 +360,10 @@ reportsRouter.get('/', async (req, res, next) => {
         a.username AS generated_by
        FROM generated_reports r
        LEFT JOIN admins a ON a.id = r.generated_by
+       ${whereClause}
        ORDER BY r.created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [pageSize, offset],
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, offset],
     );
 
     res.json({
