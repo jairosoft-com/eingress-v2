@@ -280,35 +280,47 @@ function PageHeader({ description, title }: { description: string; title: string
 }
 
 function EnrollmentFilterRow({
-  dateFilter,
+  endDateFilter,
   departmentFilter,
   departments,
   nameFilter,
   onClear,
-  onDateChange,
+  onEndDateChange,
   onDepartmentChange,
   onNameChange,
+  onStartDateChange,
   onStatusChange,
+  startDateFilter,
   statusFilter,
 }: {
-  dateFilter: string;
+  endDateFilter: string;
   departmentFilter: string;
   departments: string[];
   nameFilter: string;
   onClear: () => void;
-  onDateChange: (value: string) => void;
+  onEndDateChange: (value: string) => void;
   onDepartmentChange: (value: string) => void;
   onNameChange: (value: string) => void;
+  onStartDateChange: (value: string) => void;
   onStatusChange: (value: EnrollmentStatusFilter) => void;
+  startDateFilter: string;
   statusFilter: EnrollmentStatusFilter;
 }) {
   return (
     <div className="enrollment-search-row">
       <input
-        aria-label="Filter by date"
-        onChange={(event) => onDateChange(event.target.value)}
+        aria-label="Filter start date"
+        max={endDateFilter || undefined}
+        onChange={(event) => onStartDateChange(event.target.value)}
         type="date"
-        value={dateFilter}
+        value={startDateFilter}
+      />
+      <input
+        aria-label="Filter end date"
+        min={startDateFilter || undefined}
+        onChange={(event) => onEndDateChange(event.target.value)}
+        type="date"
+        value={endDateFilter}
       />
       <select
         aria-label="Filter by department"
@@ -340,8 +352,7 @@ function EnrollmentFilterRow({
         value={nameFilter}
       />
       <button className="filter-button" onClick={onClear} type="button">
-        Filter
-        <Filter size={16} />
+        Clear
       </button>
     </div>
   );
@@ -2400,7 +2411,8 @@ export function EnrollmentRequestsPage() {
   const [nameFilter, setNameFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<EnrollmentStatusFilter>('All');
   const [departmentFilter, setDepartmentFilter] = useState('All');
-  const [dateFilter, setDateFilter] = useState('');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2526,17 +2538,21 @@ export function EnrollmentRequestsPage() {
       const matchesStatus = statusFilter === 'All' || request.status === statusFilter;
       const matchesDepartment =
         departmentFilter === 'All' || request.department === departmentFilter;
-      const matchesDate = !dateFilter || submittedDate === dateFilter;
+      const matchesStartDate = !startDateFilter || submittedDate >= startDateFilter;
+      const matchesEndDate = !endDateFilter || submittedDate <= endDateFilter;
 
-      return matchesName && matchesStatus && matchesDepartment && matchesDate;
+      return (
+        matchesName && matchesStatus && matchesDepartment && matchesStartDate && matchesEndDate
+      );
     });
-  }, [dateFilter, departmentFilter, nameFilter, requests, statusFilter]);
+  }, [departmentFilter, endDateFilter, nameFilter, requests, startDateFilter, statusFilter]);
 
   function clearEnrollmentFilters() {
     setNameFilter('');
     setStatusFilter('All');
     setDepartmentFilter('All');
-    setDateFilter('');
+    setStartDateFilter('');
+    setEndDateFilter('');
   }
 
   return (
@@ -2546,15 +2562,17 @@ export function EnrollmentRequestsPage() {
         description="Review and manage biometric and RFID enrollment requests."
       />
       <EnrollmentFilterRow
-        dateFilter={dateFilter}
+        endDateFilter={endDateFilter}
         departmentFilter={departmentFilter}
         departments={departmentOptions}
         nameFilter={nameFilter}
         onClear={clearEnrollmentFilters}
-        onDateChange={setDateFilter}
+        onEndDateChange={setEndDateFilter}
         onDepartmentChange={setDepartmentFilter}
         onNameChange={setNameFilter}
+        onStartDateChange={setStartDateFilter}
         onStatusChange={setStatusFilter}
+        startDateFilter={startDateFilter}
         statusFilter={statusFilter}
       />
       <section className="module-panel" aria-labelledby="enrollment-table-title">

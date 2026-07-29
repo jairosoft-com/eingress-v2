@@ -1,7 +1,8 @@
-import { Check, CircleUserRound, Fingerprint, IdCard, KeyRound, Users, X } from 'lucide-react';
+import { Check, CircleUserRound, IdCard, KeyRound, Plus, Users, X } from 'lucide-react';
+import QRCode from 'qrcode';
 import { useEffect, useRef, useState } from 'react';
 
-type KioskBioState = 'idle' | 'processing' | 'recognized' | 'unrecognized';
+type KioskBioState = 'idle' | 'processing' | 'recognized' | 'unrecognized' | 'enrolled';
 type KioskBioTerminalInput = {
   fingerprintId: string | null;
   nonce: number;
@@ -14,6 +15,12 @@ type KioskFingerprintScanResponse = {
   timeType?: 'in' | 'out' | null;
   userName?: string;
 };
+type NetworkInfoResponse = {
+  lanIp?: string | null;
+};
+type RealtimeMessage = {
+  type?: string;
+};
 type RecognizedUser = {
   department: string;
   employeeId: string;
@@ -23,6 +30,8 @@ type RecognizedUser = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
+const QR_CODE_SIZE = 260;
 const kioskTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
   minute: '2-digit',
@@ -33,13 +42,159 @@ const kioskDateFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
 });
 
+function getRegistrationUrl() {
+  const configuredUrl = import.meta.env.VITE_REGISTRATION_URL;
+
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  if (typeof window === 'undefined') {
+    return '/register';
+  }
+
+  return new URL('/register', window.location.origin).toString();
+}
+
+function getRegistrationUrlForHost(hostname: string) {
+  if (typeof window === 'undefined') {
+    return '/register';
+  }
+
+  const url = new URL('/register', window.location.origin);
+  url.hostname = hostname;
+
+  return url.toString();
+}
+
 export function KioskBioPage() {
   const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
   const [kioskState, setKioskState] = useState<KioskBioState>('idle');
   const [recognizedUser, setRecognizedUser] = useState<RecognizedUser | null>(null);
   const [recognizedCountdown, setRecognizedCountdown] = useState(5);
   const [unrecognizedCountdown, setUnrecognizedCountdown] = useState(5);
+  const [manualFingerprintId, setManualFingerprintId] = useState('');
+  const [adminRfidInput, setAdminRfidInput] = useState('');
+  const [isAwaitingNewRfid, setIsAwaitingNewRfid] = useState(false);
+  const [newRfidCountdown, setNewRfidCountdown] = useState(5);
+  const [enrollmentError, setEnrollmentError] = useState('');
+  const [enrolledCountdown, setEnrolledCountdown] = useState(60);
   const lastProcessedNonce = useRef(0);
+
+  function processFingerprintScan(fingerprintId: string) {
+    setIsAwaitingNewRfid(false);
+    setKioskState('processing');
+
+    window.setTimeout(() => {
+      void fetch(`${API_BASE_URL}/kiosk/fingerprint-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fingerprintId }),
+      })
+        .then(async (response) => {
+          const data = (await response
+            .json()
+            .catch(() => null)) as KioskFingerprintScanResponse | null;
+
+          if (!response.ok || data?.result !== 'Granted') {
+            setUnrecognizedCountdown(5);
+            setKioskState('unrecognized');
+            return;
+          }
+
+          setRecognizedUser({
+            department: data.department ?? 'Unassigned',
+            employeeId: data.employeeId ?? 'Unknown',
+            name: data.userName ?? 'Recognized User',
+            role: data.role ?? 'Employee',
+            timeType: data.timeType === 'out' ? 'out' : 'in',
+          });
+          setRecognizedCountdown(5);
+          setKioskState('recognized');
+        })
+        .catch(() => {
+          setUnrecognizedCountdown(5);
+          setKioskState('unrecognized');
+        });
+    }, 1200);
+  }
+
+  function processEnrollmentRfid(rfidUid: string) {
+    setEnrollmentError('');
+    setKioskState('processing');
+
+    window.setTimeout(() => {
+      void fetch(`${API_BASE_URL}/kiosk/enrollment-rfid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rfidUid }),
+      })
+        .then(async (response) => {
+          const data = (await response.json().catch(() => null)) as { error?: string } | null;
+
+          if (!response.ok) {
+            setEnrollmentError(data?.error ?? 'Unable to capture RFID. Tap a new RFID.');
+            setNewRfidCountdown(5);
+            setIsAwaitingNewRfid(true);
+            setKioskState('idle');
+            return;
+          }
+
+          setEnrolledCountdown(60);
+          setKioskState('enrolled');
+        })
+        .catch(() => {
+          setEnrollmentError('Unable to capture RFID. Tap a new RFID.');
+          setNewRfidCountdown(5);
+          setIsAwaitingNewRfid(true);
+          setKioskState('idle');
+        });
+    }, 1200);
+  }
+
+  function submitManualFingerprintId() {
+    const trimmed = manualFingerprintId.trim();
+
+    if (!trimmed || kioskState !== 'idle') {
+      return;
+    }
+
+    setManualFingerprintId('');
+
+    if (isAwaitingNewRfid) {
+      processEnrollmentRfid(trimmed);
+    } else {
+      processFingerprintScan(trimmed);
+    }
+  }
+
+  function submitAdminRfid() {
+    const trimmed = adminRfidInput.trim();
+
+    if (!trimmed || kioskState !== 'unrecognized') {
+      return;
+    }
+
+    setAdminRfidInput('');
+
+    void fetch(`${API_BASE_URL}/kiosk/admin-rfid-scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rfidUid: trimmed }),
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as { authorized?: boolean } | null;
+
+        if (response.ok && data?.authorized) {
+          setNewRfidCountdown(5);
+          setIsAwaitingNewRfid(true);
+          setKioskState('idle');
+        }
+      })
+      .catch(() => {
+        // Ignore network errors; the admin can retry the scan.
+      });
+  }
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -67,40 +222,12 @@ export function KioskBioPage() {
           }
 
           lastProcessedNonce.current = input.nonce;
-          setKioskState('processing');
 
-          window.setTimeout(() => {
-            void fetch(`${API_BASE_URL}/kiosk/fingerprint-scan`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fingerprintId }),
-            })
-              .then(async (response) => {
-                const data = (await response
-                  .json()
-                  .catch(() => null)) as KioskFingerprintScanResponse | null;
-
-                if (!response.ok || data?.result !== 'Granted') {
-                  setUnrecognizedCountdown(5);
-                  setKioskState('unrecognized');
-                  return;
-                }
-
-                setRecognizedUser({
-                  department: data.department ?? 'Unassigned',
-                  employeeId: data.employeeId ?? 'Unknown',
-                  name: data.userName ?? 'Recognized User',
-                  role: data.role ?? 'Employee',
-                  timeType: data.timeType === 'out' ? 'out' : 'in',
-                });
-                setRecognizedCountdown(5);
-                setKioskState('recognized');
-              })
-              .catch(() => {
-                setUnrecognizedCountdown(5);
-                setKioskState('unrecognized');
-              });
-          }, 1200);
+          if (isAwaitingNewRfid) {
+            processEnrollmentRfid(fingerprintId);
+          } else {
+            processFingerprintScan(fingerprintId);
+          }
         })
         .catch(() => {
           // The terminal bridge is optional while no scan is in progress.
@@ -108,7 +235,7 @@ export function KioskBioPage() {
     }, 600);
 
     return () => window.clearInterval(intervalId);
-  }, [kioskState]);
+  }, [isAwaitingNewRfid, kioskState]);
 
   useEffect(() => {
     if (kioskState !== 'recognized' && kioskState !== 'unrecognized') {
@@ -134,6 +261,88 @@ export function KioskBioPage() {
     };
   }, [kioskState]);
 
+  useEffect(() => {
+    if (kioskState !== 'enrolled') {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setEnrolledCountdown((current) => Math.max(current - 1, 0));
+    }, 1000);
+
+    const timeoutId = window.setTimeout(() => {
+      setKioskState('idle');
+    }, 60000);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [kioskState]);
+
+  useEffect(() => {
+    let socket: WebSocket | null = null;
+    let reconnectTimeoutId: number | null = null;
+    let shouldReconnect = true;
+
+    function connectRealtimeSocket() {
+      socket = new WebSocket(WS_BASE_URL);
+
+      socket.addEventListener('message', (event) => {
+        try {
+          const message = JSON.parse(event.data as string) as RealtimeMessage;
+
+          if (message.type !== 'enrollment:submitted') {
+            return;
+          }
+
+          setKioskState('idle');
+        } catch {
+          // Ignore realtime messages that are not JSON.
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        if (!shouldReconnect) {
+          return;
+        }
+
+        reconnectTimeoutId = window.setTimeout(connectRealtimeSocket, 2000);
+      });
+    }
+
+    connectRealtimeSocket();
+
+    return () => {
+      shouldReconnect = false;
+
+      if (reconnectTimeoutId) {
+        window.clearTimeout(reconnectTimeoutId);
+      }
+
+      socket?.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (kioskState !== 'idle' || !isAwaitingNewRfid) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setNewRfidCountdown((current) => Math.max(current - 1, 0));
+    }, 1000);
+
+    const timeoutId = window.setTimeout(() => {
+      setIsAwaitingNewRfid(false);
+    }, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [isAwaitingNewRfid, kioskState]);
+
   return (
     <main className="kiosk-screen" aria-label="Kiosk Frontend System">
       <section className={`kiosk-stage kiosk-${kioskState}`}>
@@ -158,9 +367,24 @@ export function KioskBioPage() {
           {kioskState === 'recognized' && recognizedUser ? (
             <RecognizedState countdown={recognizedCountdown} user={recognizedUser} />
           ) : kioskState === 'unrecognized' ? (
-            <UnrecognizedState countdown={unrecognizedCountdown} />
+            <UnrecognizedState
+              adminRfidValue={adminRfidInput}
+              countdown={unrecognizedCountdown}
+              onAdminRfidChange={setAdminRfidInput}
+              onAdminRfidSubmit={submitAdminRfid}
+            />
+          ) : kioskState === 'enrolled' ? (
+            <EnrolledState countdown={enrolledCountdown} />
           ) : (
-            <FingerprintPrompt isProcessing={kioskState === 'processing'} />
+            <FingerprintPrompt
+              error={enrollmentError}
+              isAwaitingNewRfid={isAwaitingNewRfid}
+              isProcessing={kioskState === 'processing'}
+              newRfidCountdown={newRfidCountdown}
+              onChange={setManualFingerprintId}
+              onSubmit={submitManualFingerprintId}
+              value={manualFingerprintId}
+            />
           )}
         </div>
 
@@ -170,19 +394,66 @@ export function KioskBioPage() {
   );
 }
 
-function FingerprintPrompt({ isProcessing }: { isProcessing: boolean }) {
+function FingerprintPrompt({
+  error,
+  isAwaitingNewRfid,
+  isProcessing,
+  newRfidCountdown,
+  onChange,
+  onSubmit,
+  value,
+}: {
+  error: string;
+  isAwaitingNewRfid: boolean;
+  isProcessing: boolean;
+  newRfidCountdown: number;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  value: string;
+}) {
   return (
     <section className="fingerprint-prompt" aria-live="polite">
       <div className={isProcessing ? 'fingerprint-orb processing' : 'fingerprint-orb'}>
         <span className="id-tap-symbol" aria-hidden="true">
-          <Fingerprint size={58} strokeWidth={2} />
+          <IdCard size={58} strokeWidth={2} />
         </span>
       </div>
-      <h2>{isProcessing ? 'Verifying Fingerprint' : 'Scan Your Fingerprint'}</h2>
-      <p>
-        {isProcessing ? 'Please keep your finger on the scanner.' : 'Place finger on the scanner.'}
-      </p>
-      {isProcessing ? <span className="processing-bar" aria-hidden="true" /> : null}
+      <h2>
+        {isProcessing
+          ? 'Verifying RFID'
+          : isAwaitingNewRfid
+            ? 'Tap Your New RFID'
+            : 'Tap Your RFID'}
+      </h2>
+      <p>{isProcessing ? 'Please keep your card on the reader.' : 'Tap your ID on the reader.'}</p>
+      {isProcessing ? (
+        <span className="processing-bar" aria-hidden="true" />
+      ) : (
+        <>
+          <label className="rfid-scan-input">
+            <span>RFID Number</span>
+            <input
+              autoFocus
+              inputMode="numeric"
+              onChange={(event) => onChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onSubmit();
+                }
+              }}
+              placeholder="Enter RFID number"
+              value={value}
+            />
+          </label>
+          {isAwaitingNewRfid ? (
+            <>
+              {error ? <p className="kiosk-error-note">{error}</p> : null}
+              <p className="return-note">Returning to normal in {newRfidCountdown} seconds...</p>
+            </>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
@@ -237,7 +508,88 @@ function RecognizedState({ countdown, user }: { countdown: number; user: Recogni
   );
 }
 
-function UnrecognizedState({ countdown }: { countdown: number }) {
+function EnrolledState({ countdown }: { countdown: number }) {
+  const [registrationUrl, setRegistrationUrl] = useState(getRegistrationUrl);
+  const [qrCodeUrl, setQrCodeUrl] = useState('');
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      import.meta.env.VITE_REGISTRATION_URL ||
+      (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE_URL}/network-info`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as NetworkInfoResponse | null;
+
+        if (response.ok && data?.lanIp) {
+          setRegistrationUrl(getRegistrationUrlForHost(data.lanIp));
+        }
+      })
+      .catch(() => {
+        // Keep the current URL visible if network discovery is unavailable.
+      });
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void QRCode.toDataURL(registrationUrl, {
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: QR_CODE_SIZE,
+    }).then((dataUrl) => {
+      if (isMounted) {
+        setQrCodeUrl(dataUrl);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [registrationUrl]);
+
+  return (
+    <section className="enrollment-layout enrollment-qr-layout" aria-live="polite">
+      <div className="enrollment-symbol">
+        <CircleUserRound size={58} />
+        <Plus size={28} />
+      </div>
+
+      <div className="enrollment-copy enrollment-qr-copy">
+        <p>Enrollment Mode</p>
+        <h2>Register New User</h2>
+
+        <div className="qr-panel">
+          <span>Scan this QR to continue on your phone</span>
+          {qrCodeUrl ? <img alt="Enrollment form QR code" src={qrCodeUrl} /> : null}
+          <small>{registrationUrl}</small>
+        </div>
+      </div>
+
+      <p className="return-note">Returning to home screen in {countdown} seconds...</p>
+    </section>
+  );
+}
+
+function UnrecognizedState({
+  adminRfidValue,
+  countdown,
+  onAdminRfidChange,
+  onAdminRfidSubmit,
+}: {
+  adminRfidValue: string;
+  countdown: number;
+  onAdminRfidChange: (value: string) => void;
+  onAdminRfidSubmit: () => void;
+}) {
   return (
     <section className="unregistered-layout kiosk-unrecognized" aria-live="assertive">
       <div className="unregistered-symbol">
@@ -248,7 +600,7 @@ function UnrecognizedState({ countdown }: { countdown: number }) {
       </div>
 
       <div className="unregistered-copy">
-        <small>Fingerprint scan failed.</small>
+        <small>RFID tap failed.</small>
         <h2>Unrecognized</h2>
         <p>Please contact an administrator for assistance.</p>
       </div>
@@ -256,10 +608,26 @@ function UnrecognizedState({ countdown }: { countdown: number }) {
       <div className="admin-rfid-card">
         <KeyRound size={26} />
         <span>
-          <strong>Scan Admin RFID</strong>
+          <strong>Tap Admin RFID</strong>
           <small>Place admin card on the RFID reader.</small>
         </span>
       </div>
+
+      <label className="rfid-scan-input admin-rfid-input">
+        <span>Admin RFID</span>
+        <input
+          autoFocus
+          onChange={(event) => onAdminRfidChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onAdminRfidSubmit();
+            }
+          }}
+          placeholder="Enter admin RFID"
+          value={adminRfidValue}
+        />
+      </label>
 
       <p className="return-note">Returning to home screen in {countdown} seconds...</p>
     </section>

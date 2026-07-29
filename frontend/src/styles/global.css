@@ -4943,6 +4943,14 @@ td small {
   text-align: center;
 }
 
+.kiosk-error-note {
+  margin: 14px 0 0;
+  color: #ff6b81;
+  font-size: 0.85rem;
+  font-weight: 800;
+  text-align: center;
+}
+
 .recognized-detail-label {
   display: inline-flex;
   align-items: center;
@@ -5059,6 +5067,11 @@ td small {
 .admin-rfid-card small {
   margin-top: 4px;
   color: #c7d2e4;
+}
+
+.admin-rfid-input {
+  grid-column: 1 / -1;
+  margin: -6px auto 0;
 }
 
 .enrollment-layout {
