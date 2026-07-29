@@ -15,7 +15,7 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 
 import eingressIcon from './assets/icons/eingress-icon.png';
 import sidebarShieldIcon from './assets/icons/sidebar-shield.png';
@@ -120,6 +120,7 @@ async function fetchNotifications(accessToken: string, signal?: AbortSignal) {
 
 export function App() {
   const { session, signOut } = useAuth();
+  const navigate = useNavigate();
   const accessToken = session?.accessToken;
   const [pendingEnrollmentCount, setPendingEnrollmentCount] = useState<number | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -443,10 +444,23 @@ export function App() {
                 <dd>{profile?.rfidUid ?? '—'}</dd>
               </div>
             </dl>
-            <button className="profile-dialog-logout" onClick={signOut} type="button">
-              <LogOut size={19} />
-              Log Out
-            </button>
+            <div className="profile-dialog-actions">
+              <button
+                className="profile-dialog-view-profile"
+                onClick={() => {
+                  setIsProfileOpen(false);
+                  navigate('/settings');
+                }}
+                type="button"
+              >
+                <ContactRound size={19} />
+                View Full Profile
+              </button>
+              <button className="profile-dialog-logout" onClick={signOut} type="button">
+                <LogOut size={19} />
+                Log Out
+              </button>
+            </div>
           </section>
         </div>
       ) : null}

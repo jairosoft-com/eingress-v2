@@ -1132,18 +1132,33 @@ button {
   font-weight: 800;
 }
 
+.profile-dialog-actions {
+  display: flex;
+  gap: 14px;
+  margin: 28px auto 0;
+}
+
+.profile-dialog-view-profile,
 .profile-dialog-logout {
   display: flex;
-  width: min(100%, 240px);
+  flex: 1;
   min-height: 50px;
   align-items: center;
   justify-content: center;
   gap: 9px;
-  margin: 28px auto 0;
-  color: #ffffff;
   font-weight: 800;
-  border: 0;
   border-radius: 8px;
+}
+
+.profile-dialog-view-profile {
+  color: #2a5bd7;
+  border: 1px solid #2a5bd7;
+  background: #ffffff;
+}
+
+.profile-dialog-logout {
+  color: #ffffff;
+  border: 0;
   background: #e3292f;
 }
 
@@ -4167,6 +4182,10 @@ td small {
 }
 .system-info-card .healthy {
   color: #16ad61;
+}
+
+.system-info-card .unhealthy {
+  color: #e01835;
 }
 
 .security-settings-stack {
