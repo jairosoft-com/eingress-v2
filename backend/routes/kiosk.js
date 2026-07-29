@@ -205,7 +205,7 @@ kioskRouter.post('/fingerprint-scan', async (req, res, next) => {
   }
 
   req.body = {
-    fingerprintId,
+    rfidUid: fingerprintId,
     authenticationMethod: 'Fingerprint',
     deviceId: req.body.deviceId,
   };
