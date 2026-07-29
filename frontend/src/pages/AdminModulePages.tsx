@@ -161,7 +161,6 @@ type SystemSettings = {
   max_failed_attempts: number;
   reset_failed_attempts_after_minutes: number;
   session_timeout_minutes: number;
-  system_language: string;
   system_version: string;
   time_format: string;
   time_zone: string;
@@ -196,7 +195,7 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   auto_deactivation_duration_days: 7,
   auto_deactivation_enabled: false,
   auto_logout_enabled: true,
-  database_status: 'Healthy',
+  database_status: 'Disconnected',
   date_format: 'MM/DD/YYYY',
   first_day_of_week: 'Monday',
   idle_timeout_warning_minutes: 5,
@@ -207,7 +206,6 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   max_failed_attempts: 5,
   reset_failed_attempts_after_minutes: 15,
   session_timeout_minutes: 30,
-  system_language: 'English',
   system_version: 'v2.1.0',
   time_format: '12-Hour (hh:mm AM/PM)',
   time_zone: '(UTC+08:00) Asia/Manila',
@@ -3959,7 +3957,6 @@ export function SettingsPage() {
           timeZone: settings.time_zone,
           dateFormat: settings.date_format,
           timeFormat: settings.time_format,
-          systemLanguage: settings.system_language,
           sessionTimeoutMinutes: settings.session_timeout_minutes,
           firstDayOfWeek: settings.first_day_of_week,
           maxFailedAttempts: settings.max_failed_attempts,
@@ -4172,13 +4169,6 @@ export function SettingsPage() {
                 <input disabled value={profile?.email ?? session?.email ?? ''} />
               </label>
               <label>
-                System Language
-                <select disabled value={settings.system_language}>
-                  <option>English</option>
-                  <option>Filipino</option>
-                </select>
-              </label>
-              <label>
                 Role
                 <input disabled value={profile?.role ?? 'Administrator'} />
               </label>
@@ -4223,7 +4213,9 @@ export function SettingsPage() {
               </div>
               <div>
                 <dt>Database Status</dt>
-                <dd className="healthy">{settings.database_status}</dd>
+                <dd className={settings.database_status === 'Connected' ? 'healthy' : 'unhealthy'}>
+                  {settings.database_status}
+                </dd>
               </div>
               <div>
                 <dt>Last Backup</dt>
