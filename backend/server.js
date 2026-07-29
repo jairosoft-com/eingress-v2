@@ -1,8 +1,11 @@
+
+
 import dotenv from 'dotenv';
 import express from 'express';
 import http from 'http';
 import os from 'os';
 import cors from 'cors';
+import { Server as SocketIOServer } from 'socket.io';
 
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
@@ -72,6 +75,20 @@ app.use((error, req, res, next) => {
 
 function startServer(port) {
   const server = http.createServer(app);
+  const io = new SocketIOServer(server, {
+    cors: {
+      origin: true,
+      credentials: true,
+    },
+  });
+
+  io.on('connection', (socket) => {
+    console.log(`Socket.IO client connected: ${socket.id}`);
+
+    socket.on('disconnect', () => {
+      console.log(`Socket.IO client disconnected: ${socket.id}`);
+    });
+  });
 
   server.once('error', (error) => {
     if (error.code === 'EADDRINUSE') {
