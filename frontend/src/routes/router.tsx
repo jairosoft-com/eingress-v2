@@ -14,7 +14,6 @@ import {
 import { DashboardPage } from '../pages/DashboardPage';
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { KioskBioPage } from '../pages/KioskBioPage';
-import { KioskPage } from '../pages/KioskPage';
 import { LoginPage } from '../pages/LoginPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { RegistrationPage } from '../pages/RegistrationPage';
@@ -36,10 +35,6 @@ export const router = createBrowserRouter([
   {
     path: '/register',
     element: <RegistrationPage />,
-  },
-  {
-    path: '/kiosk',
-    element: <KioskPage />,
   },
   {
     path: '/attendance-kiosk',

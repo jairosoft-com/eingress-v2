@@ -4,6 +4,7 @@ import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
+import { createNotification } from '../lib/notifications.js';
 
 export const kioskRouter = express.Router();
 
@@ -98,6 +99,11 @@ async function processKioskScanUnsafe(req, res) {
       status: 'Failed',
       time: logResult.rows[0].access_time,
     });
+    await createNotification(
+      'Access Denied',
+      `An unrecognized ${method} (${rfidUid || fingerprintId}) attempted access at the Kiosk.`,
+      'error',
+    );
     return res.status(404).json({
       error: 'User not found',
       failedAttempts: accessMetrics.failed_attempts,
@@ -184,6 +190,11 @@ async function processKioskScanUnsafe(req, res) {
     status: result === 'Granted' ? 'Success' : 'Failed',
     time: log.accessTime,
   });
+  await createNotification(
+    result === 'Granted' ? 'Access Granted' : 'Access Denied',
+    `${user.full_name} (${user.employee_id}) ${result === 'Granted' ? 'was granted' : 'was denied'} access at the Kiosk via ${method}.`,
+    result === 'Granted' ? 'success' : 'error',
+  );
   res.json(log);
 }
 
@@ -205,7 +216,7 @@ kioskRouter.post('/fingerprint-scan', async (req, res, next) => {
   }
 
   req.body = {
-    fingerprintId,
+    rfidUid: fingerprintId,
     authenticationMethod: 'Fingerprint',
     deviceId: req.body.deviceId,
   };

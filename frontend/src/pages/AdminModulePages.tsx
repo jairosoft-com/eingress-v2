@@ -90,7 +90,7 @@ type AttendanceSummary = {
   present: number;
   total_records: number;
 };
-
+//changes
 type UserRecord = {
   created_at: string;
   department: string | null;
@@ -161,7 +161,6 @@ type SystemSettings = {
   max_failed_attempts: number;
   reset_failed_attempts_after_minutes: number;
   session_timeout_minutes: number;
-  system_language: string;
   system_version: string;
   time_format: string;
   time_zone: string;
@@ -196,7 +195,7 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   auto_deactivation_duration_days: 7,
   auto_deactivation_enabled: false,
   auto_logout_enabled: true,
-  database_status: 'Healthy',
+  database_status: 'Disconnected',
   date_format: 'MM/DD/YYYY',
   first_day_of_week: 'Monday',
   idle_timeout_warning_minutes: 5,
@@ -207,7 +206,6 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   max_failed_attempts: 5,
   reset_failed_attempts_after_minutes: 15,
   session_timeout_minutes: 30,
-  system_language: 'English',
   system_version: 'v2.1.0',
   time_format: '12-Hour (hh:mm AM/PM)',
   time_zone: '(UTC+08:00) Asia/Manila',
@@ -280,35 +278,47 @@ function PageHeader({ description, title }: { description: string; title: string
 }
 
 function EnrollmentFilterRow({
-  dateFilter,
+  endDateFilter,
   departmentFilter,
   departments,
   nameFilter,
   onClear,
-  onDateChange,
+  onEndDateChange,
   onDepartmentChange,
   onNameChange,
+  onStartDateChange,
   onStatusChange,
+  startDateFilter,
   statusFilter,
 }: {
-  dateFilter: string;
+  endDateFilter: string;
   departmentFilter: string;
   departments: string[];
   nameFilter: string;
   onClear: () => void;
-  onDateChange: (value: string) => void;
+  onEndDateChange: (value: string) => void;
   onDepartmentChange: (value: string) => void;
   onNameChange: (value: string) => void;
+  onStartDateChange: (value: string) => void;
   onStatusChange: (value: EnrollmentStatusFilter) => void;
+  startDateFilter: string;
   statusFilter: EnrollmentStatusFilter;
 }) {
   return (
     <div className="enrollment-search-row">
       <input
-        aria-label="Filter by date"
-        onChange={(event) => onDateChange(event.target.value)}
+        aria-label="Filter start date"
+        max={endDateFilter || undefined}
+        onChange={(event) => onStartDateChange(event.target.value)}
         type="date"
-        value={dateFilter}
+        value={startDateFilter}
+      />
+      <input
+        aria-label="Filter end date"
+        min={startDateFilter || undefined}
+        onChange={(event) => onEndDateChange(event.target.value)}
+        type="date"
+        value={endDateFilter}
       />
       <select
         aria-label="Filter by department"
@@ -340,8 +350,7 @@ function EnrollmentFilterRow({
         value={nameFilter}
       />
       <button className="filter-button" onClick={onClear} type="button">
-        Filter
-        <Filter size={16} />
+        Clear
       </button>
     </div>
   );
@@ -2400,7 +2409,8 @@ export function EnrollmentRequestsPage() {
   const [nameFilter, setNameFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<EnrollmentStatusFilter>('All');
   const [departmentFilter, setDepartmentFilter] = useState('All');
-  const [dateFilter, setDateFilter] = useState('');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2526,17 +2536,21 @@ export function EnrollmentRequestsPage() {
       const matchesStatus = statusFilter === 'All' || request.status === statusFilter;
       const matchesDepartment =
         departmentFilter === 'All' || request.department === departmentFilter;
-      const matchesDate = !dateFilter || submittedDate === dateFilter;
+      const matchesStartDate = !startDateFilter || submittedDate >= startDateFilter;
+      const matchesEndDate = !endDateFilter || submittedDate <= endDateFilter;
 
-      return matchesName && matchesStatus && matchesDepartment && matchesDate;
+      return (
+        matchesName && matchesStatus && matchesDepartment && matchesStartDate && matchesEndDate
+      );
     });
-  }, [dateFilter, departmentFilter, nameFilter, requests, statusFilter]);
+  }, [departmentFilter, endDateFilter, nameFilter, requests, startDateFilter, statusFilter]);
 
   function clearEnrollmentFilters() {
     setNameFilter('');
     setStatusFilter('All');
     setDepartmentFilter('All');
-    setDateFilter('');
+    setStartDateFilter('');
+    setEndDateFilter('');
   }
 
   return (
@@ -2546,15 +2560,17 @@ export function EnrollmentRequestsPage() {
         description="Review and manage biometric and RFID enrollment requests."
       />
       <EnrollmentFilterRow
-        dateFilter={dateFilter}
+        endDateFilter={endDateFilter}
         departmentFilter={departmentFilter}
         departments={departmentOptions}
         nameFilter={nameFilter}
         onClear={clearEnrollmentFilters}
-        onDateChange={setDateFilter}
+        onEndDateChange={setEndDateFilter}
         onDepartmentChange={setDepartmentFilter}
         onNameChange={setNameFilter}
+        onStartDateChange={setStartDateFilter}
         onStatusChange={setStatusFilter}
+        startDateFilter={startDateFilter}
         statusFilter={statusFilter}
       />
       <section className="module-panel" aria-labelledby="enrollment-table-title">
@@ -2566,13 +2582,11 @@ export function EnrollmentRequestsPage() {
                 <th>Request ID</th>
                 <th>Name</th>
                 <th>Employee ID</th>
-                <th>Department</th>
+                <th>Role</th>
                 <th>Request Type</th>
                 <th>Submitted</th>
                 <th>Status</th>
-                <th>
-                  <span className="sr-only">Actions</span>
-                </th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -3062,6 +3076,12 @@ export function ReportsPage() {
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
+  const [appliedReportFilters, setAppliedReportFilters] = useState({
+    date: '',
+    department: '',
+    status: '',
+    search: '',
+  });
   const [generatedReports, setGeneratedReports] = useState<GeneratedReport[]>([]);
   const [isLoadingReports, setIsLoadingReports] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -3107,7 +3127,10 @@ export function ReportsPage() {
     return Array.from(departments).sort();
   }, [users]);
 
-  const fetchGeneratedReports = async (page: number) => {
+  const fetchGeneratedReports = async (
+    page: number,
+    filters: { date: string; department: string; status: string; search: string },
+  ) => {
     if (!session?.accessToken) return;
 
     setIsLoadingReports(true);
@@ -3116,6 +3139,10 @@ export function ReportsPage() {
         page: String(page),
         pageSize: String(REPORTS_PAGE_SIZE),
       });
+      if (filters.search) params.set('search', filters.search);
+      if (filters.date) params.set('date', filters.date);
+      if (filters.department) params.set('department', filters.department);
+      if (filters.status) params.set('status', filters.status);
       const response = await fetch(`${API_BASE_URL}/reports?${params.toString()}`, {
         headers: { Authorization: `Bearer ${session.accessToken}` },
       });
@@ -3135,9 +3162,21 @@ export function ReportsPage() {
   };
 
   useEffect(() => {
-    void Promise.resolve().then(() => fetchGeneratedReports(reportsCurrentPage));
+    void Promise.resolve().then(() =>
+      fetchGeneratedReports(reportsCurrentPage, appliedReportFilters),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.accessToken, reportsCurrentPage]);
+  }, [session?.accessToken, reportsCurrentPage, appliedReportFilters]);
+
+  const onFilterReports = () => {
+    setAppliedReportFilters({
+      date: dateFilter,
+      department: departmentFilter,
+      status: statusFilter,
+      search: searchFilter,
+    });
+    setReportsCurrentPage(1);
+  };
 
   const reportRows = useMemo(
     () =>
@@ -3180,7 +3219,7 @@ export function ReportsPage() {
       }
 
       if (reportsCurrentPage === 1) {
-        await fetchGeneratedReports(1);
+        await fetchGeneratedReports(1, appliedReportFilters);
       } else {
         setReportsCurrentPage(1);
       }
@@ -3357,6 +3396,10 @@ export function ReportsPage() {
               placeholder="Search by name or ID..."
               value={searchFilter}
             />
+            <button className="filter-button" onClick={onFilterReports} type="button">
+              Filter
+              <Filter size={16} />
+            </button>
             <button
               className="dark-action-button"
               disabled={isGenerating}
@@ -3531,11 +3574,7 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   const [auditLogs, setAuditLogs] = useState<AuditLogRecord[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(session?.accessToken));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [draftSearch, setDraftSearch] = useState('');
-  const [draftModule, setDraftModule] = useState('');
-  const [draftAction, setDraftAction] = useState('');
-  const [draftDateFrom, setDraftDateFrom] = useState('');
-  const [draftDateTo, setDraftDateTo] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [appliedFilters, setAppliedFilters] = useState({
     action: '',
     dateFrom: '',
@@ -3550,6 +3589,23 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
     totalPages: 1,
     totalRecords: 0,
   });
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setCurrentPage(1);
+      setAppliedFilters((previous) => ({ ...previous, search: searchInput }));
+    }, 300);
+
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  const onFilterFieldChange = (
+    field: 'action' | 'dateFrom' | 'dateTo' | 'module',
+    value: string,
+  ) => {
+    setCurrentPage(1);
+    setAppliedFilters((previous) => ({ ...previous, [field]: value }));
+  };
 
   useEffect(() => {
     const accessToken = session?.accessToken;
@@ -3667,23 +3723,8 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
     [auditLogs, dateTimeSettings],
   );
 
-  const onApplyFilters = () => {
-    setCurrentPage(1);
-    setAppliedFilters({
-      action: draftAction,
-      dateFrom: draftDateFrom,
-      dateTo: draftDateTo,
-      module: draftModule,
-      search: draftSearch,
-    });
-  };
-
   const onClearFilters = () => {
-    setDraftSearch('');
-    setDraftModule('');
-    setDraftAction('');
-    setDraftDateFrom('');
-    setDraftDateTo('');
+    setSearchInput('');
     setCurrentPage(1);
     setAppliedFilters({
       action: '',
@@ -3721,15 +3762,15 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
       <div className="module-filter-row enrollment-filter-row">
         <input
           aria-label="Search audit logs"
-          onChange={(event) => setDraftSearch(event.target.value)}
+          onChange={(event) => setSearchInput(event.target.value)}
           placeholder="Search by action, module, or details"
           type="search"
-          value={draftSearch}
+          value={searchInput}
         />
         <select
           aria-label="Filter by action"
-          onChange={(event) => setDraftAction(event.target.value)}
-          value={draftAction}
+          onChange={(event) => onFilterFieldChange('action', event.target.value)}
+          value={appliedFilters.action}
         >
           <option value="">All Actions</option>
           {actionOptions.map((action) => (
@@ -3740,8 +3781,8 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
         </select>
         <select
           aria-label="Filter by module"
-          onChange={(event) => setDraftModule(event.target.value)}
-          value={draftModule}
+          onChange={(event) => onFilterFieldChange('module', event.target.value)}
+          value={appliedFilters.module}
         >
           <option value="">All Modules</option>
           {moduleOptions.map((module) => (
@@ -3752,20 +3793,16 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
         </select>
         <input
           aria-label="Filter start date"
-          onChange={(event) => setDraftDateFrom(event.target.value)}
+          onChange={(event) => onFilterFieldChange('dateFrom', event.target.value)}
           type="date"
-          value={draftDateFrom}
+          value={appliedFilters.dateFrom}
         />
         <input
           aria-label="Filter end date"
-          onChange={(event) => setDraftDateTo(event.target.value)}
+          onChange={(event) => onFilterFieldChange('dateTo', event.target.value)}
           type="date"
-          value={draftDateTo}
+          value={appliedFilters.dateTo}
         />
-        <button className="filter-button" onClick={onApplyFilters} type="button">
-          Filter
-          <Filter size={16} />
-        </button>
         <button className="filter-button" onClick={onClearFilters} type="button">
           Clear
         </button>
@@ -3920,7 +3957,6 @@ export function SettingsPage() {
           timeZone: settings.time_zone,
           dateFormat: settings.date_format,
           timeFormat: settings.time_format,
-          systemLanguage: settings.system_language,
           sessionTimeoutMinutes: settings.session_timeout_minutes,
           firstDayOfWeek: settings.first_day_of_week,
           maxFailedAttempts: settings.max_failed_attempts,
@@ -4133,13 +4169,6 @@ export function SettingsPage() {
                 <input disabled value={profile?.email ?? session?.email ?? ''} />
               </label>
               <label>
-                System Language
-                <select disabled value={settings.system_language}>
-                  <option>English</option>
-                  <option>Filipino</option>
-                </select>
-              </label>
-              <label>
                 Role
                 <input disabled value={profile?.role ?? 'Administrator'} />
               </label>
@@ -4184,7 +4213,9 @@ export function SettingsPage() {
               </div>
               <div>
                 <dt>Database Status</dt>
-                <dd className="healthy">{settings.database_status}</dd>
+                <dd className={settings.database_status === 'Connected' ? 'healthy' : 'unhealthy'}>
+                  {settings.database_status}
+                </dd>
               </div>
               <div>
                 <dt>Last Backup</dt>
