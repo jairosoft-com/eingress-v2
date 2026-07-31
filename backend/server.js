@@ -20,10 +20,23 @@ import { reportsRouter } from './routes/reports.js';
 import { auditLogsRouter } from './routes/auditLogs.js';
 import { settingsRouter } from './routes/settings.js';
 import { createWebSocketServer } from './ws.js';
+import { runAccessExpirationCheck } from './lib/accessExpiration.js';
 
 dotenv.config();
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
+const ACCESS_EXPIRATION_CHECK_INTERVAL_MS = 60 * 1000;
+
+function startAccessExpirationCheck() {
+  const check = () => {
+    runAccessExpirationCheck().catch((error) => {
+      console.error('Access expiration check failed:', error);
+    });
+  };
+
+  check();
+  setInterval(check, ACCESS_EXPIRATION_CHECK_INTERVAL_MS);
+}
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -104,6 +117,7 @@ function startServer(port) {
 
   server.listen(port, () => {
     createWebSocketServer(server);
+    startAccessExpirationCheck();
     console.log(`EIngress backend is running on http://localhost:${port}`);
   });
 }
