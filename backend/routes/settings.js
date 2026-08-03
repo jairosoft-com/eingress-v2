@@ -38,7 +38,7 @@ settingsRouter.get('/', async (req, res, next) => {
     await settingsReady;
     const result = await query(
       `SELECT company_name, time_zone, date_format, time_format,
-        system_language, session_timeout_minutes, database_status, last_backup_at,
+        session_timeout_minutes, last_backup_at,
         system_version, updated_at, first_day_of_week, max_failed_attempts,
         lockout_duration_minutes, reset_failed_attempts_after_minutes, lockout_enabled,
         idle_timeout_warning_minutes, auto_logout_enabled, keep_me_logged_in,
@@ -49,7 +49,8 @@ settingsRouter.get('/', async (req, res, next) => {
        LIMIT 1`,
     );
 
-    res.json(result.rows[0] || null);
+    // Reaching this point means the query above succeeded, so the database is reachable.
+    res.json(result.rows[0] ? { ...result.rows[0], database_status: 'Connected' } : null);
   } catch (error) {
     next(error);
   }
@@ -63,7 +64,6 @@ settingsRouter.patch('/', async (req, res, next) => {
       timeZone,
       dateFormat,
       timeFormat,
-      systemLanguage,
       sessionTimeoutMinutes,
       firstDayOfWeek,
       maxFailedAttempts,
@@ -149,20 +149,19 @@ settingsRouter.patch('/', async (req, res, next) => {
          time_zone = COALESCE($2, time_zone),
          date_format = COALESCE($3, date_format),
          time_format = COALESCE($4, time_format),
-         system_language = COALESCE($5, system_language),
-         session_timeout_minutes = COALESCE($6, session_timeout_minutes),
-         first_day_of_week = COALESCE($7, first_day_of_week),
-         max_failed_attempts = COALESCE($8, max_failed_attempts),
-         lockout_duration_minutes = COALESCE($9, lockout_duration_minutes),
-         reset_failed_attempts_after_minutes = COALESCE($10, reset_failed_attempts_after_minutes),
-         lockout_enabled = COALESCE($11, lockout_enabled),
-         idle_timeout_warning_minutes = COALESCE($12, idle_timeout_warning_minutes),
-         auto_logout_enabled = COALESCE($13, auto_logout_enabled),
-         keep_me_logged_in = COALESCE($14, keep_me_logged_in),
-         admin_rfid_enabled = COALESCE($15, admin_rfid_enabled),
-         auto_deactivation_enabled = COALESCE($16, auto_deactivation_enabled),
-         auto_deactivation_duration_days = COALESCE($17, auto_deactivation_duration_days),
-         auto_deactivation_applicable_roles = COALESCE($18, auto_deactivation_applicable_roles),
+         session_timeout_minutes = COALESCE($5, session_timeout_minutes),
+         first_day_of_week = COALESCE($6, first_day_of_week),
+         max_failed_attempts = COALESCE($7, max_failed_attempts),
+         lockout_duration_minutes = COALESCE($8, lockout_duration_minutes),
+         reset_failed_attempts_after_minutes = COALESCE($9, reset_failed_attempts_after_minutes),
+         lockout_enabled = COALESCE($10, lockout_enabled),
+         idle_timeout_warning_minutes = COALESCE($11, idle_timeout_warning_minutes),
+         auto_logout_enabled = COALESCE($12, auto_logout_enabled),
+         keep_me_logged_in = COALESCE($13, keep_me_logged_in),
+         admin_rfid_enabled = COALESCE($14, admin_rfid_enabled),
+         auto_deactivation_enabled = COALESCE($15, auto_deactivation_enabled),
+         auto_deactivation_duration_days = COALESCE($16, auto_deactivation_duration_days),
+         auto_deactivation_applicable_roles = COALESCE($17, auto_deactivation_applicable_roles),
          updated_at = NOW()
        WHERE id = (SELECT id FROM system_settings ORDER BY id LIMIT 1)
        RETURNING *`,
@@ -171,7 +170,6 @@ settingsRouter.patch('/', async (req, res, next) => {
         timeZone ?? null,
         dateFormat ?? null,
         timeFormat ?? null,
-        systemLanguage ?? null,
         sessionTimeoutMinutes ?? null,
         firstDayOfWeek ?? null,
         maxFailedAttempts ?? null,
@@ -206,7 +204,8 @@ settingsRouter.patch('/', async (req, res, next) => {
       'success',
     );
 
-    res.json({ ...updatedSettings, lifecycleRun });
+    // Reaching this point means the update above succeeded, so the database is reachable.
+    res.json({ ...updatedSettings, database_status: 'Connected', lifecycleRun });
   } catch (error) {
     next(error);
   }
