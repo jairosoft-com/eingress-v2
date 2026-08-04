@@ -160,3 +160,4 @@ finally:
     server.close()
 
     if os.path.exists(SOCKET_PATH):
+        os.remove(SOCKET_PATH)
