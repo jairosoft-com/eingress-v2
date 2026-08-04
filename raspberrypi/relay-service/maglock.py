@@ -2,6 +2,7 @@
 
 import os
 import socket
+import time
 from threading import Timer
 from gpiozero import OutputDevice, Button
 
@@ -10,14 +11,22 @@ from gpiozero import OutputDevice, Button
 # ----------------------------
 
 RELAY_PIN = 17
-BUTTON_PIN = 22
+BUTTON_PIN = 23
 
 SOCKET_PATH = "/tmp/maglock.sock"
 
 UNLOCK_DURATION = 8
 
-relay = OutputDevice(RELAY_PIN, active_high=True, initial_value=False)
-emergency_btn = Button(BUTTON_PIN, pull_up=True)
+relay = OutputDevice(
+    RELAY_PIN,
+    active_high=True,
+    initial_value=False
+)
+
+emergency_btn = Button(
+    BUTTON_PIN,
+    pull_up=True
+)
 
 lock_timer = None
 is_unlocked = False
@@ -52,7 +61,14 @@ def unlock_door():
 
     print(f"[MAGLOCK] Door UNLOCKED for {UNLOCK_DURATION} seconds")
 
-    lock_timer = Timer(UNLOCK_DURATION, lock_door)
+    if lock_timer:
+        lock_timer.cancel()
+
+    lock_timer = Timer(
+        UNLOCK_DURATION,
+        lock_door
+    )
+
     lock_timer.start()
 
 
@@ -60,12 +76,19 @@ def unlock_door():
 # Emergency Button
 # ----------------------------
 
-def emergency_pressed():
-    print("[MAGLOCK] Emergency button pressed")
-    unlock_door()
+last_button_state = False
 
+def check_emergency_button():
+    global last_button_state
 
-emergency_btn.when_pressed = emergency_pressed
+    current_state = emergency_btn.is_pressed
+
+    # Detect False -> True transition
+    if current_state and not last_button_state:
+        print("[MAGLOCK] Emergency button pressed")
+        unlock_door()
+
+    last_button_state = current_state
 
 
 # ----------------------------
@@ -81,29 +104,51 @@ server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 server.bind(SOCKET_PATH)
 server.listen(1)
 
+server.settimeout(0.1)
+
 print("===================================")
 print(" MAGLOCK SERVICE RUNNING")
 print(" Waiting for UNLOCK commands...")
 print("===================================")
 
+
+# ----------------------------
+# Main Loop
+# ----------------------------
+
 try:
 
     while True:
 
-        conn, _ = server.accept()
+        # Check emergency button
+        check_emergency_button()
 
-        with conn:
+        # Check Unix socket
+        try:
 
-            command = conn.recv(1024).decode().strip()
+            conn, _ = server.accept()
 
-            print("[MAGLOCK] Command:", command)
+            with conn:
 
-            if command == "UNLOCK":
-                unlock_door()
-                conn.sendall(b"OK")
+                command = conn.recv(1024).decode().strip()
 
-            else:
-                conn.sendall(b"UNKNOWN")
+                print("[MAGLOCK] Command:", command)
+
+                if command == "UNLOCK":
+
+                    unlock_door()
+
+                    conn.sendall(b"OK")
+
+                else:
+
+                    conn.sendall(b"UNKNOWN")
+
+        except socket.timeout:
+            pass
+
+        time.sleep(0.01)
+
 
 finally:
 
@@ -115,4 +160,3 @@ finally:
     server.close()
 
     if os.path.exists(SOCKET_PATH):
-        os.remove(SOCKET_PATH)
