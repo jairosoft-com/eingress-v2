@@ -1,0 +1,688 @@
+import express from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
+import nodemailer from 'nodemailer';
+
+import { pool, query } from '../db.js';
+import { authMiddleware } from '../middleware/auth.js';
+import { broadcastMessage } from '../ws.js';
+import { createNotification } from '../lib/notifications.js';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
+const PERSISTENT_SESSION_MINUTES = 7 * 24 * 60;
+const RESET_TOKEN_EXPIRES_MINUTES = Number.parseInt(
+  process.env.RESET_TOKEN_EXPIRES_MINUTES || '30',
+  10,
+);
+const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5174').replace(/\/$/, '');
+const MAIL_FROM = process.env.MAIL_FROM || 'EINGRESS Support <no-reply@eingress.local>';
+
+export const authRouter = express.Router();
+
+async function ensureAdminPasswordColumns() {
+  try {
+    await query(`
+      ALTER TABLE admins
+        ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ
+    `);
+  } catch (error) {
+    console.error('Unable to ensure admin password_changed_at column exists', error);
+  }
+}
+
+void ensureAdminPasswordColumns();
+
+let ensuredPasswordResetTable = false;
+
+async function ensurePasswordResetTable() {
+  if (ensuredPasswordResetTable) {
+    return;
+  }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id BIGSERIAL PRIMARY KEY,
+      admin_id BIGINT NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(
+    'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_admin_id ON password_reset_tokens(admin_id)',
+  );
+  await query(
+    'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at)',
+  );
+
+  ensuredPasswordResetTable = true;
+}
+
+function getResetTokenHash(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function validatePasswordPolicy(password) {
+  if (!password || password.length < 8) {
+    return 'Password must be at least 8 characters long';
+  }
+  if (!/[A-Z]/.test(password)) {
+    return 'Password must include at least one uppercase letter';
+  }
+  if (!/[a-z]/.test(password)) {
+    return 'Password must include at least one lowercase letter';
+  }
+  if (!/[0-9]/.test(password)) {
+    return 'Password must include at least one number';
+  }
+  if (!/[^A-Za-z0-9]/.test(password)) {
+    return 'Password must include at least one special character';
+  }
+  return null;
+}
+
+function getMailTransport() {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_PORT) {
+    return null;
+  }
+
+  const auth =
+    process.env.SMTP_USER && process.env.SMTP_PASS
+      ? {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        }
+      : undefined;
+
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number.parseInt(process.env.SMTP_PORT, 10),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth,
+  });
+}
+
+async function sendResetEmail({ email, resetUrl, username }) {
+  const transport = getMailTransport();
+
+  if (!transport) {
+    console.info(`Password reset link for ${email}: ${resetUrl}`);
+    return;
+  }
+
+  await transport.sendMail({
+    from: MAIL_FROM,
+    to: email,
+    subject: 'Reset your EINGRESS password',
+    text: `Hi ${username},\n\nUse this link to reset your EINGRESS password:\n${resetUrl}\n\nThis link expires in ${RESET_TOKEN_EXPIRES_MINUTES} minutes. If you did not request this, you can ignore this email.`,
+    html: `
+      <p>Hi ${username},</p>
+      <p>Use the link below to reset your EINGRESS password:</p>
+      <p><a href="${resetUrl}">Reset password</a></p>
+      <p>This link expires in ${RESET_TOKEN_EXPIRES_MINUTES} minutes.</p>
+      <p>If you did not request this, you can ignore this email.</p>
+    `,
+  });
+}
+
+authRouter.get('/login-options', async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT admin_rfid_enabled FROM system_settings ORDER BY id LIMIT 1`,
+    );
+
+    res.json({ rfidRequired: result.rows[0]?.admin_rfid_enabled ?? true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.post('/login', async (req, res) => {
+  const usernameOrEmail = req.body.usernameOrEmail || req.body.username || req.body.email;
+  const { password, rfidCode } = req.body;
+
+  if (!usernameOrEmail || !password) {
+    return res.status(400).json({ error: 'usernameOrEmail and password are required' });
+  }
+
+  try {
+    const settingsResult = await query(
+      `SELECT session_timeout_minutes, auto_logout_enabled, keep_me_logged_in, admin_rfid_enabled,
+        lockout_enabled, max_failed_attempts, lockout_duration_minutes, reset_failed_attempts_after_minutes
+       FROM system_settings
+       ORDER BY id
+       LIMIT 1`,
+    );
+    const settings = settingsResult.rows[0] || {};
+    const sessionTimeoutMinutes = settings.session_timeout_minutes ?? 30;
+    const autoLogoutEnabled = settings.auto_logout_enabled ?? true;
+    const keepMeLoggedIn = settings.keep_me_logged_in ?? false;
+    const adminRfidEnabled = settings.admin_rfid_enabled ?? true;
+    const lockoutEnabled = settings.lockout_enabled ?? false;
+    const maxFailedAttempts = settings.max_failed_attempts ?? 5;
+    const lockoutDurationMinutes = settings.lockout_duration_minutes ?? 30;
+    const resetFailedAttemptsAfterMinutes = settings.reset_failed_attempts_after_minutes ?? 15;
+    const effectiveSessionMinutes =
+      keepMeLoggedIn || !autoLogoutEnabled ? PERSISTENT_SESSION_MINUTES : sessionTimeoutMinutes;
+
+    if (adminRfidEnabled && !rfidCode) {
+      return res.status(400).json({ error: 'usernameOrEmail, password, and rfidCode are required' });
+    }
+
+    const adminResult = await query(
+      `SELECT id, username, email, password_hash, rfid_uid, is_active,
+        failed_login_attempts, last_failed_login_at, locked_until
+       FROM admins
+       WHERE username = $1 OR email = $1
+       LIMIT 1`,
+      [usernameOrEmail],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const admin = adminResult.rows[0];
+    const now = Date.now();
+
+    if (lockoutEnabled && admin.locked_until && new Date(admin.locked_until).getTime() > now) {
+      const minutesLeft = Math.ceil((new Date(admin.locked_until).getTime() - now) / 60_000);
+
+      return res.status(423).json({
+        error: `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute(s).`,
+      });
+    }
+
+    const passwordMatch = await bcrypt.compare(password, admin.password_hash);
+    const rfidMatch = !adminRfidEnabled || admin.rfid_uid === rfidCode;
+
+    if (!admin.is_active || !passwordMatch || !rfidMatch) {
+      if (lockoutEnabled && admin.is_active) {
+        const resetWindowElapsed =
+          admin.last_failed_login_at &&
+          now - new Date(admin.last_failed_login_at).getTime() > resetFailedAttemptsAfterMinutes * 60_000;
+        const nextAttempts = (resetWindowElapsed ? 0 : admin.failed_login_attempts) + 1;
+        const isNowLocked = nextAttempts >= maxFailedAttempts;
+
+        await query(
+          `UPDATE admins
+           SET failed_login_attempts = $1,
+             last_failed_login_at = NOW(),
+             locked_until = $2
+           WHERE id = $3`,
+          [
+            nextAttempts,
+            isNowLocked ? new Date(now + lockoutDurationMinutes * 60_000) : null,
+            admin.id,
+          ],
+        );
+
+        if (isNowLocked) {
+          return res.status(423).json({
+            error: `Account locked due to too many failed attempts. Try again in ${lockoutDurationMinutes} minute(s).`,
+          });
+        }
+      }
+
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (lockoutEnabled && (admin.failed_login_attempts > 0 || admin.locked_until)) {
+      await query(
+        `UPDATE admins
+         SET failed_login_attempts = 0, last_failed_login_at = NULL, locked_until = NULL
+         WHERE id = $1`,
+        [admin.id],
+      );
+    }
+
+    const token = jwt.sign({ adminId: admin.id, username: admin.username }, JWT_SECRET, {
+      expiresIn: effectiveSessionMinutes * 60,
+    });
+
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [admin.id, 'Login', 'Authentication', 'Admin logged in', req.ip],
+    );
+
+    const notificationResult = await query(
+      `INSERT INTO notifications (title, message, severity)
+       VALUES ($1, $2, $3)
+       RETURNING id, title, message, severity, is_read, created_at`,
+      ['Welcome, administrator', `${admin.username} signed in successfully.`, 'success'],
+    );
+    broadcastMessage({ type: 'notification:created', payload: notificationResult.rows[0] });
+
+    return res.json({
+      accessToken: token,
+      adminName: admin.username,
+      email: admin.email,
+      expiresAt: Date.now() + effectiveSessionMinutes * 60 * 1000,
+      autoLogoutEnabled,
+      idleTimeoutWarningMinutes: settings.idle_timeout_warning_minutes ?? 5,
+      keepMeLoggedIn,
+      sessionTimeoutMinutes,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+authRouter.get('/me', authMiddleware, async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT username, email, rfid_uid
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = result.rows[0];
+    return res.json({
+      name: admin.username,
+      email: admin.email,
+      role: 'Administrator',
+      rfidUid: admin.rfid_uid,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.patch('/me', authMiddleware, async (req, res, next) => {
+  const name = String(req.body.name || '').trim();
+  const rfidCode = String(req.body.rfidCode || '').trim();
+
+  if (!name) {
+    return res.status(400).json({ error: 'Admin name is required' });
+  }
+
+  if (!rfidCode) {
+    return res.status(400).json({ error: 'RFID verification is required' });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT id, username, email, rfid_uid
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = adminResult.rows[0];
+
+    if (admin.rfid_uid !== rfidCode) {
+      await createNotification(
+        'RFID Verification Failed',
+        `RFID verification failed for ${admin.username}. The scanned card did not match the assigned admin RFID.`,
+        'error',
+      );
+      return res.status(403).json({ error: 'RFID verification failed. Please tap your admin card.' });
+    }
+
+    const updateResult = await query(
+      `UPDATE admins
+       SET username = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING username, email, rfid_uid`,
+      [name, admin.id],
+    );
+
+    const updatedAdmin = updateResult.rows[0];
+
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [admin.id, 'Profile Updated', 'Settings', `Admin name changed to ${name}`, req.ip],
+    );
+
+    await createNotification(
+      'Settings Updated',
+      `General settings were updated: admin name changed to ${name}.`,
+      'success',
+    );
+
+    return res.json({
+      name: updatedAdmin.username,
+      email: updatedAdmin.email,
+      role: 'Administrator',
+      rfidUid: updatedAdmin.rfid_uid,
+    });
+  } catch (error) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'That admin name is already taken.' });
+    }
+
+    next(error);
+  }
+});
+
+authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
+  const rfidUid = String(req.body.rfidUid || '').trim();
+
+  if (!rfidUid) {
+    return res.status(400).json({ error: 'A new RFID card is required' });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT id, username, email
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = adminResult.rows[0];
+
+    const updateResult = await query(
+      `UPDATE admins
+       SET rfid_uid = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING username, email, rfid_uid`,
+      [rfidUid, admin.id],
+    );
+
+    const updatedAdmin = updateResult.rows[0];
+
+    await query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [admin.id, 'RFID Changed', 'Settings', `Admin RFID card was changed`, req.ip],
+    );
+
+    return res.json({
+      name: updatedAdmin.username,
+      email: updatedAdmin.email,
+      role: 'Administrator',
+      rfidUid: updatedAdmin.rfid_uid,
+    });
+  } catch (error) {
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'This RFID card is already assigned to another admin.' });
+    }
+
+    next(error);
+  }
+});
+
+authRouter.post('/forgot-password', async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    return res.status(400).json({ error: 'A valid email address is required' });
+  }
+
+  try {
+    await ensurePasswordResetTable();
+
+    const adminResult = await query(
+      `SELECT id, username, email
+       FROM admins
+       WHERE LOWER(email) = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [email],
+    );
+
+    if (adminResult.rowCount > 0) {
+      const admin = adminResult.rows[0];
+      const token = crypto.randomBytes(32).toString('hex');
+      const tokenHash = getResetTokenHash(token);
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRES_MINUTES * 60 * 1000);
+      const resetUrl = `${FRONTEND_URL}/reset-password?token=${encodeURIComponent(token)}`;
+
+      await query(
+        `UPDATE password_reset_tokens
+         SET used_at = NOW()
+         WHERE admin_id = $1 AND used_at IS NULL`,
+        [admin.id],
+      );
+
+      await query(
+        `INSERT INTO password_reset_tokens (admin_id, token_hash, expires_at)
+         VALUES ($1, $2, $3)`,
+        [admin.id, tokenHash, expiresAt],
+      );
+
+      await sendResetEmail({
+        email: admin.email,
+        resetUrl,
+        username: admin.username,
+      });
+    }
+
+    return res.json({
+      message: 'If that email exists, a password reset link has been sent.',
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Unable to send password reset link' });
+  }
+});
+
+authRouter.get('/reset-password/:token', async (req, res) => {
+  const { token } = req.params;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Reset token is required' });
+  }
+
+  try {
+    await ensurePasswordResetTable();
+
+    const tokenHash = getResetTokenHash(token);
+    const tokenResult = await query(
+      `SELECT id
+       FROM password_reset_tokens
+       WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+       LIMIT 1`,
+      [tokenHash],
+    );
+
+    return res.json({ valid: tokenResult.rowCount > 0 });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Unable to verify reset token' });
+  }
+});
+
+authRouter.post('/reset-password', async (req, res) => {
+  const token = String(req.body.token || '');
+  const password = String(req.body.password || '');
+
+  if (!token || !password) {
+    return res.status(400).json({ error: 'Reset token and new password are required' });
+  }
+
+  const passwordPolicyError = validatePasswordPolicy(password);
+
+  if (passwordPolicyError) {
+    return res.status(400).json({ error: passwordPolicyError });
+  }
+
+  try {
+    await ensurePasswordResetTable();
+
+    const tokenHash = getResetTokenHash(token);
+    const tokenResult = await query(
+      `SELECT prt.id, prt.admin_id, admins.username
+       FROM password_reset_tokens prt
+       JOIN admins ON admins.id = prt.admin_id
+       WHERE prt.token_hash = $1
+         AND prt.used_at IS NULL
+         AND prt.expires_at > NOW()
+         AND admins.is_active = TRUE
+       LIMIT 1`,
+      [tokenHash],
+    );
+
+    if (tokenResult.rowCount === 0) {
+      return res.status(400).json({ error: 'Reset link is invalid or has expired' });
+    }
+
+    const resetToken = tokenResult.rows[0];
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE admins
+         SET password_hash = $1, password_changed_at = NOW(), updated_at = NOW()
+         WHERE id = $2`,
+        [passwordHash, resetToken.admin_id],
+      );
+
+      await client.query(
+        `UPDATE password_reset_tokens
+         SET used_at = NOW()
+         WHERE id = $1`,
+        [resetToken.id],
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (admin_id, action, module, details)
+         VALUES ($1, $2, $3, $4)`,
+        [resetToken.admin_id, 'Password Reset', 'Authentication', 'Admin password was reset'],
+      );
+
+      await client.query(
+        `INSERT INTO notifications (title, message, severity)
+         VALUES ($1, $2, $3)`,
+        [
+          'Password changed',
+          `The password for ${resetToken.username} was changed successfully.`,
+          'warning',
+        ],
+      );
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    broadcastMessage({
+      type: 'auth:password-changed',
+      payload: { adminId: resetToken.admin_id },
+    });
+
+    return res.json({ message: 'Password has been reset. You can now sign in.' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Unable to reset password' });
+  }
+});
+
+authRouter.post('/change-password', authMiddleware, async (req, res) => {
+  const currentPassword = String(req.body.currentPassword || '');
+  const newPassword = String(req.body.newPassword || '');
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password are required' });
+  }
+
+  const passwordPolicyError = validatePasswordPolicy(newPassword);
+
+  if (passwordPolicyError) {
+    return res.status(400).json({ error: passwordPolicyError });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT id, username, password_hash
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = adminResult.rows[0];
+    const passwordMatch = await bcrypt.compare(currentPassword, admin.password_hash);
+
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    if (currentPassword === newPassword) {
+      return res
+        .status(400)
+        .json({ error: 'New password must be different from the current password' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE admins
+         SET password_hash = $1, password_changed_at = NOW(), updated_at = NOW()
+         WHERE id = $2`,
+        [passwordHash, admin.id],
+      );
+
+      await client.query(
+        `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [admin.id, 'Password Changed', 'Authentication', 'Admin changed their password', req.ip],
+      );
+
+      await client.query(
+        `INSERT INTO notifications (title, message, severity)
+         VALUES ($1, $2, $3)`,
+        [
+          'Password changed',
+          `The password for ${admin.username} was changed successfully.`,
+          'warning',
+        ],
+      );
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    broadcastMessage({
+      type: 'auth:password-changed',
+      payload: { adminId: admin.id },
+    });
+
+    return res.json({ message: 'Password updated successfully.' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Unable to change password' });
+  }
+});

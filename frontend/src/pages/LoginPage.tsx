@@ -1,0 +1,296 @@
+import {
+  BarChart3,
+  ChevronDown,
+  CircleHelp,
+  Eye,
+  Fingerprint,
+  Globe2,
+  IdCard,
+  LockKeyhole,
+  RadioTower,
+  ShieldCheck,
+  UserRound,
+} from 'lucide-react';
+import { FormEvent, useEffect, useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+
+import authShieldIcon from '../assets/icons/auth-shield.png';
+import eingressIcon from '../assets/icons/eingress-icon.png';
+import { useAuth } from '../auth/useAuth';
+import { API_BASE_URL } from '../lib/api';
+
+type LoginErrors = {
+  form?: string;
+  password?: string;
+  rfidCode?: string;
+  usernameOrEmail?: string;
+};
+
+const loginFeatures = [
+  { label: 'Secure Authentication', Icon: ShieldCheck },
+  { label: 'Biometric Technology', Icon: Fingerprint },
+  { label: 'RFID Integration', Icon: RadioTower },
+  { label: 'Real-time Monitoring', Icon: BarChart3 },
+];
+
+function validateLoginForm(
+  usernameOrEmail: string,
+  password: string,
+  rfidCode: string,
+  rfidRequired: boolean,
+): LoginErrors {
+  const errors: LoginErrors = {};
+
+  if (!usernameOrEmail.trim()) {
+    errors.usernameOrEmail = 'Email or username is required.';
+  }
+
+  if (!password.trim()) {
+    errors.password = 'Password is required.';
+  }
+
+  if (rfidRequired && !rfidCode.trim()) {
+    errors.rfidCode = 'RFID verification is required.';
+  }
+
+  return errors;
+}
+
+export function LoginPage() {
+  const { isAuthenticated, signIn } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [usernameOrEmail, setUsernameOrEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [rfidCode, setRfidCode] = useState('');
+  const [errors, setErrors] = useState<LoginErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rfidRequired, setRfidRequired] = useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(`${API_BASE_URL}/auth/login-options`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { rfidRequired?: boolean } | null) => {
+        if (data && typeof data.rfidRequired === 'boolean') {
+          setRfidRequired(data.rfidRequired);
+        }
+      })
+      .catch(() => {
+        // Keep the safer default (RFID required) if this can't be determined.
+      });
+
+    return () => controller.abort();
+  }, []);
+
+  const redirectTo =
+    (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/dashboard';
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const validationErrors = validateLoginForm(usernameOrEmail, password, rfidCode, rfidRequired);
+    setErrors(validationErrors);
+
+    if (Object.keys(validationErrors).length > 0) {
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      await signIn({ usernameOrEmail, password, rfidCode });
+      navigate(redirectTo, { replace: true });
+    } catch (error) {
+      setErrors({
+        form: error instanceof Error ? error.message : 'Authentication failed.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  if (isAuthenticated) {
+    return <Navigate replace to="/dashboard" />;
+  }
+
+  return (
+    <main className="auth-screen" aria-labelledby="login-title">
+      <section className="auth-card">
+        <header className="auth-topbar">
+          <div className="auth-brand">
+            <span className="logo-mark logo-mark-image" aria-hidden="true">
+              <img src={eingressIcon} alt="" />
+            </span>
+            <strong>EINGRESS</strong>
+          </div>
+
+          <div className="auth-actions">
+            <button className="language-button" type="button">
+              <Globe2 size={18} />
+              English
+              <ChevronDown size={16} />
+            </button>
+            <a className="help-link" href="/login">
+              <CircleHelp size={18} />
+              Need help?
+            </a>
+          </div>
+        </header>
+
+        <div className="auth-layout">
+          <section className="auth-hero" aria-label="EIngress security overview">
+            <div className="hero-copy">
+              <h1>
+                Secure Access.
+                <span>Smart Identity.</span>
+                <em>Seamless Experience.</em>
+              </h1>
+              <p>
+                Advanced biometric identification and RFID technology for a safer and smarter
+                tomorrow.
+              </p>
+            </div>
+
+            <ul className="feature-list">
+              {loginFeatures.map(({ Icon, label }) => (
+                <li key={label}>
+                  <Icon size={24} />
+                  <span>{label}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="shield-visual shield-visual-image hero-shield" aria-hidden="true">
+              <img src={authShieldIcon} alt="" />
+            </div>
+          </section>
+
+          <section className="login-card" aria-label="Login form">
+            <div className="login-heading">
+              <h2 id="login-title">Welcome Back!</h2>
+              <p>Sign in to continue to your account</p>
+            </div>
+
+            <form className="login-form" noValidate onSubmit={handleSubmit}>
+              <div className="form-field">
+                <label htmlFor="usernameOrEmail">Email or Username</label>
+                <div className="input-shell">
+                  <UserRound size={22} aria-hidden="true" />
+                  <input
+                    aria-describedby={errors.usernameOrEmail ? 'username-error' : undefined}
+                    aria-invalid={Boolean(errors.usernameOrEmail)}
+                    autoComplete="username"
+                    id="usernameOrEmail"
+                    name="usernameOrEmail"
+                    onChange={(event) => setUsernameOrEmail(event.target.value)}
+                    placeholder="Enter your email or username"
+                    type="text"
+                    value={usernameOrEmail}
+                  />
+                </div>
+                {errors.usernameOrEmail ? (
+                  <span className="field-error" id="username-error">
+                    {errors.usernameOrEmail}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="form-field">
+                <label htmlFor="password">Password</label>
+                <div className="input-shell">
+                  <LockKeyhole size={22} aria-hidden="true" />
+                  <input
+                    aria-describedby={errors.password ? 'password-error' : undefined}
+                    aria-invalid={Boolean(errors.password)}
+                    autoComplete="current-password"
+                    id="password"
+                    name="password"
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter your password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                  />
+                  <button
+                    className="input-icon-button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    <Eye size={22} />
+                  </button>
+                </div>
+                {errors.password ? (
+                  <span className="field-error" id="password-error">
+                    {errors.password}
+                  </span>
+                ) : null}
+              </div>
+
+              {rfidRequired ? (
+                <div className="form-field">
+                  <label htmlFor="rfidCode">RFID Verification</label>
+                  <div className="input-shell">
+                    <IdCard size={22} aria-hidden="true" />
+                    <input
+                      aria-describedby={errors.rfidCode ? 'rfid-error' : undefined}
+                      aria-invalid={Boolean(errors.rfidCode)}
+                      autoComplete="one-time-code"
+                      id="rfidCode"
+                      name="rfidCode"
+                      onChange={(event) => setRfidCode(event.target.value)}
+                      placeholder="Scan or enter RFID code"
+                      type="text"
+                      value={rfidCode}
+                    />
+                  </div>
+                  {errors.rfidCode ? (
+                    <span className="field-error" id="rfid-error">
+                      {errors.rfidCode}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="form-row">
+                <label className="checkbox-label">
+                  <input type="checkbox" defaultChecked />
+                  <span>Remember me</span>
+                </label>
+                <Link to="/forgot-password">Forgot Password?</Link>
+              </div>
+
+              <button className="gradient-button" disabled={isSubmitting} type="submit">
+                {isSubmitting ? (
+                  <>
+                    <span className="button-spinner" aria-hidden="true" />
+                    Verifying session
+                  </>
+                ) : (
+                  <>
+                    <LockKeyhole size={21} />
+                    Sign In
+                  </>
+                )}
+              </button>
+
+              {errors.form ? <span className="field-error form-error">{errors.form}</span> : null}
+            </form>
+
+            <div className="divider"></div>
+
+            <div className="social-grid"></div>
+
+            <p className="register-prompt">
+              Need access? <Link to="/register">Fill out the registration form</Link>
+            </p>
+          </section>
+        </div>
+      </section>
+
+      <footer className="auth-footer">(c) 2025 Eingress. All rights reserved.</footer>
+    </main>
+  );
+}
