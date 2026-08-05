@@ -4688,6 +4688,30 @@ td small {
   text-align: right;
 }
 
+.kiosk-fullscreen-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 7px 10px;
+  color: #dce8fa;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+  border: 1px solid rgb(185 199 221 / 42%);
+  border-radius: 6px;
+  background: rgb(7 24 47 / 64%);
+}
+
+.kiosk-fullscreen-button:hover,
+.kiosk-fullscreen-button:focus-visible {
+  color: #ffffff;
+  border-color: #ffffff;
+  outline: none;
+}
+
 .kiosk-clock strong {
   margin-bottom: 5px;
   font-size: 1.16rem;
