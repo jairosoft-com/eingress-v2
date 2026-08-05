@@ -14,24 +14,7 @@ import { Link } from 'react-router-dom';
 
 import eingressIcon from '../assets/icons/eingress-icon.png';
 
-function getApiBaseUrl() {
-  const configuredUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
-
-  if (
-    typeof window === 'undefined' ||
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1'
-  ) {
-    return configuredUrl;
-  }
-
-  return configuredUrl.replace(
-    /\/\/(localhost|127\.0\.0\.1)(?=:)/,
-    `//${window.location.hostname}`,
-  );
-}
-
-const API_BASE_URL = getApiBaseUrl();
+import { API_BASE_URL } from '../lib/api';
 
 type RegistrationErrors = {
   department?: string;

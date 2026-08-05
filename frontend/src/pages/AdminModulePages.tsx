@@ -24,6 +24,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { API_BASE_URL } from '../lib/api';
 import { useAuth } from '../auth/useAuth';
 import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
 import { setSecuritySettings } from '../lib/securitySettingsStore';
@@ -33,7 +34,6 @@ import {
   useDateTimeSettings,
 } from '../lib/systemSettingsStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
 const deviceRows = [
@@ -90,7 +90,7 @@ type AttendanceSummary = {
   present: number;
   total_records: number;
 };
-//changes
+//change
 type UserRecord = {
   created_at: string;
   department: string | null;
@@ -325,7 +325,7 @@ function EnrollmentFilterRow({
         onChange={(event) => onDepartmentChange(event.target.value)}
         value={departmentFilter}
       >
-        <option value="All">All Departments</option>
+        <option value="All">All Roles</option>
         {departments.map((department) => (
           <option key={department} value={department}>
             {department}
@@ -1908,7 +1908,7 @@ export function UserManagementPage() {
             <header>
               <div>
                 <h2 id="create-user-title">Add New User</h2>
-                <p>Enter user credentials, RFID UID, and fingerprint tracking details.</p>
+                <p>Update user credentials, RFID details, and biometric summary.</p>
               </div>
               <button
                 aria-label="Close add user form"
@@ -1955,6 +1955,23 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
+                  <span>Role *</span>
+                  <select
+                    onChange={(event) =>
+                      setCreateForm((currentForm) => ({
+                        ...currentForm,
+                        role: event.target.value,
+                      }))
+                    }
+                    value={createForm.role}
+                  >
+                    {roleOptions.map((role) => (
+                      <option key={role}>{role}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="user-edit-field">
                   <span>Email</span>
                   <input
                     onChange={(event) =>
@@ -1983,23 +2000,6 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Role *</span>
-                  <select
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        role: event.target.value,
-                      }))
-                    }
-                    value={createForm.role}
-                  >
-                    {roleOptions.map((role) => (
-                      <option key={role}>{role}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="user-edit-field">
                   <span>Department</span>
                   <input
                     onChange={(event) =>
@@ -2012,17 +2012,18 @@ export function UserManagementPage() {
                   />
                 </label>
               </div>
-            </section>
 
-            <section className="user-edit-section" aria-labelledby="create-user-peripherals-title">
-              <h3 id="create-user-peripherals-title">
-                <span>2</span>
-                Hardware Enrollment
-              </h3>
-              <div className="user-edit-grid hardware-columns">
+              <div className="user-edit-grid three-columns">
                 <label className="user-edit-field">
                   <span>RFID UID</span>
-                  <input readOnly value={createForm.rfidUid} placeholder="Scan or enter RFID UID" />
+                  <input
+                    readOnly
+                    value={createForm.rfidUid}
+                    placeholder="Scan or enter RFID UID"
+                    onKeyDown={(event) => event.preventDefault()}
+                    onPaste={(event) => event.preventDefault()}
+                    autoComplete="off"
+                  />
                 </label>
 
                 <button
@@ -2036,20 +2037,38 @@ export function UserManagementPage() {
                 </button>
 
                 <label className="user-edit-field">
-                  <span>Fingerprint ID</span>
-                  <input
-                    readOnly
-                    value={createForm.fingerprintId}
-                    placeholder="Scan or enter fingerprint"
-                  />
+                  <span>Account Status *</span>
+                  <select disabled value="Active">
+                    <option>Active</option>
+                    <option>Disabled</option>
+                  </select>
                 </label>
+              </div>
+            </section>
 
+            <section className="user-edit-section" aria-labelledby="create-user-fingerprint-title">
+              <h3 id="create-user-fingerprint-title">
+                <span>2</span>
+                Fingerprint Registration
+              </h3>
+              <p>Scan the user's fingerprint to complete biometric setup.</p>
+              <div className="user-edit-fingerprint-row">
+                <div>
+                  <strong>Fingerprint Status:</strong>
+                  <span
+                    className={`user-status-pill ${
+                      createForm.fingerprintId ? 'success' : 'danger'
+                    }`}
+                  >
+                    {createForm.fingerprintId ? 'Registered' : 'Missing'}
+                  </span>
+                </div>
                 <button
-                  className="user-edit-scan-button"
+                  className="primary-action-button user-edit-scan-fingerprint"
                   onClick={openFingerprintScanner}
                   type="button"
                 >
-                  <Fingerprint size={14} />
+                  <Fingerprint size={18} />
                   <span>Scan Fingerprint</span>
                 </button>
               </div>

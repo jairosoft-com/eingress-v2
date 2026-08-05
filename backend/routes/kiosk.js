@@ -5,6 +5,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { createNotification } from '../lib/notifications.js';
+import { emitDoorUnlock } from '../socketio.js';
 
 export const kioskRouter = express.Router();
 
@@ -174,6 +175,16 @@ async function processKioskScanUnsafe(req, res) {
     successfulAttempts: accessMetrics.successful_attempts,
     totalAccess: accessMetrics.total_access,
   };
+
+  if (result === 'Granted') {
+    emitDoorUnlock({
+      userId: user.id,
+      userName: user.full_name,
+      employeeId: user.employee_id,
+      authenticationMethod: method,
+      area: 'Kiosk',
+    });
+  }
 
   broadcastMessage({
     type: 'dashboard:metrics-changed',
