@@ -5,7 +5,6 @@ import express from 'express';
 import http from 'http';
 import os from 'os';
 import cors from 'cors';
-import { Server as SocketIOServer } from 'socket.io';
 
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
@@ -20,6 +19,7 @@ import { reportsRouter } from './routes/reports.js';
 import { auditLogsRouter } from './routes/auditLogs.js';
 import { settingsRouter } from './routes/settings.js';
 import { createWebSocketServer } from './ws.js';
+import { createSocketServer } from './socketio.js';
 import { runAccessExpirationCheck } from './lib/accessExpiration.js';
 
 dotenv.config();
@@ -88,20 +88,7 @@ app.use((error, req, res, next) => {
 
 function startServer(port) {
   const server = http.createServer(app);
-  const io = new SocketIOServer(server, {
-    cors: {
-      origin: true,
-      credentials: true,
-    },
-  });
-
-  io.on('connection', (socket) => {
-    console.log(`Socket.IO client connected: ${socket.id}`);
-
-    socket.on('disconnect', () => {
-      console.log(`Socket.IO client disconnected: ${socket.id}`);
-    });
-  });
+  createSocketServer(server);
 
   server.once('error', (error) => {
     if (error.code === 'EADDRINUSE') {
