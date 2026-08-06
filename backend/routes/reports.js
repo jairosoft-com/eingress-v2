@@ -50,7 +50,7 @@ async function buildReportData(reportType, filters) {
 
     if (department) {
       params.push(department);
-      where.push(`u.department = $${params.length}`);
+      where.push(`u.role = $${params.length}`);
     }
 
     if (status) {
@@ -149,7 +149,7 @@ async function buildReportData(reportType, filters) {
 
     if (department) {
       params.push(department);
-      where.push(`department = $${params.length}`);
+      where.push(`role = $${params.length}`);
     }
 
     if (status) {
@@ -190,7 +190,7 @@ async function buildReportData(reportType, filters) {
 
     if (department) {
       params.push(department);
-      where.push(`department = $${params.length}`);
+      where.push(`role = $${params.length}`);
     }
 
     if (search) {
@@ -232,7 +232,7 @@ reportsRouter.get('/summary', async (req, res, next) => {
     startDate.setUTCDate(startDate.getUTCDate() - (trendDays - 1));
     const startDateString = startDate.toISOString().slice(0, 10);
 
-    const [attendance, departments, trend] = await Promise.all([
+    const [attendance, roles, trend] = await Promise.all([
       query(
         `SELECT
           COUNT(*) FILTER (WHERE status = 'Present')::int AS present,
@@ -244,11 +244,11 @@ reportsRouter.get('/summary', async (req, res, next) => {
         [date],
       ),
       query(
-        `SELECT u.department, COUNT(*)::int AS total
+        `SELECT u.role, COUNT(*)::int AS total
          FROM attendance_records ar
          JOIN users u ON u.id = ar.user_id
          WHERE ar.attendance_date = $1
-         GROUP BY u.department
+         GROUP BY u.role
          ORDER BY total DESC`,
         [date],
       ),
@@ -282,7 +282,12 @@ reportsRouter.get('/summary', async (req, res, next) => {
       });
     }
 
-    res.json({ attendance: attendance.rows[0], departments: departments.rows, trend: filledTrend });
+    res.json({
+      attendance: attendance.rows[0],
+      roles: roles.rows,
+      departments: roles.rows.map((row) => ({ department: row.role, total: row.total })),
+      trend: filledTrend,
+    });
   } catch (error) {
     next(error);
   }

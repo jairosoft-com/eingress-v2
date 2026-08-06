@@ -34,20 +34,20 @@ function getApiBaseUrl() {
 const API_BASE_URL = getApiBaseUrl();
 
 type RegistrationErrors = {
-  department?: string;
   email?: string;
   fullName?: string;
   phoneNumber?: string;
+  role?: string;
   form?: string;
 };
 
-const departments = ['Employee', 'Student', 'Staff', 'Intern'];
+const roles = ['Employee', 'Student', 'Staff', 'Intern'];
 
 function validateRegistrationForm(
   fullName: string,
   email: string,
   phoneNumber: string,
-  department: string,
+  role: string,
 ): RegistrationErrors {
   const errors: RegistrationErrors = {};
 
@@ -67,8 +67,8 @@ function validateRegistrationForm(
     errors.phoneNumber = 'Enter a valid phone number.';
   }
 
-  if (!department) {
-    errors.department = 'Department is required.';
+  if (!role) {
+    errors.role = 'Role is required.';
   }
 
   return errors;
@@ -78,7 +78,7 @@ export function RegistrationPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [department, setDepartment] = useState('');
+  const [role, setRole] = useState('');
   const [errors, setErrors] = useState<RegistrationErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -86,7 +86,7 @@ export function RegistrationPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const validationErrors = validateRegistrationForm(fullName, email, phoneNumber, department);
+    const validationErrors = validateRegistrationForm(fullName, email, phoneNumber, role);
     setErrors(validationErrors);
     setSuccessMessage('');
 
@@ -104,7 +104,7 @@ export function RegistrationPage() {
         },
         body: JSON.stringify({
           fullName,
-          department,
+          role,
           email,
           phone: phoneNumber,
         }),
@@ -142,7 +142,7 @@ export function RegistrationPage() {
       setFullName('');
       setEmail('');
       setPhoneNumber('');
-      setDepartment('');
+      setRole('');
     } catch (error) {
       setErrors({
         form: error instanceof Error ? error.message : 'Registration could not be submitted.',
@@ -259,30 +259,30 @@ export function RegistrationPage() {
           </section>
 
           <section className="question-card">
-            <label htmlFor="department">
-              Department <span aria-hidden="true">*</span>
+            <label htmlFor="role">
+              Role <span aria-hidden="true">*</span>
             </label>
             <div className="google-input-shell select-shell">
               <Building2 size={20} aria-hidden="true" />
               <select
-                aria-describedby={errors.department ? 'department-error' : undefined}
-                aria-invalid={Boolean(errors.department)}
-                id="department"
-                name="department"
-                onChange={(event) => setDepartment(event.target.value)}
-                value={department}
+                aria-describedby={errors.role ? 'role-error' : undefined}
+                aria-invalid={Boolean(errors.role)}
+                id="role"
+                name="role"
+                onChange={(event) => setRole(event.target.value)}
+                value={role}
               >
-                <option value="">Choose department</option>
-                {departments.map((departmentName) => (
-                  <option key={departmentName} value={departmentName}>
-                    {departmentName}
+                <option value="">Choose role</option>
+                {roles.map((roleName) => (
+                  <option key={roleName} value={roleName}>
+                    {roleName}
                   </option>
                 ))}
               </select>
             </div>
-            {errors.department ? (
-              <span className="field-error" id="department-error">
-                {errors.department}
+            {errors.role ? (
+              <span className="field-error" id="role-error">
+                {errors.role}
               </span>
             ) : null}
           </section>
@@ -312,7 +312,7 @@ export function RegistrationPage() {
                 setFullName('');
                 setEmail('');
                 setPhoneNumber('');
-                setDepartment('');
+                setRole('');
                 setErrors({});
                 setSuccessMessage('');
               }}
