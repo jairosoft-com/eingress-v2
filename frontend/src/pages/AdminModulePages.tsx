@@ -24,6 +24,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import { API_BASE_URL } from '../lib/api';
 import { useAuth } from '../auth/useAuth';
 import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
 import { setSecuritySettings } from '../lib/securitySettingsStore';
@@ -33,7 +34,6 @@ import {
   useDateTimeSettings,
 } from '../lib/systemSettingsStore';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
 const deviceRows = [
@@ -90,7 +90,7 @@ type AttendanceSummary = {
   present: number;
   total_records: number;
 };
-//changes
+//change
 type UserRecord = {
   created_at: string;
   department: string | null;

@@ -2,7 +2,11 @@ import { io } from "socket.io-client";
 import EvdevReader from "evdev";
 import net from "net";
 
+<<<<<<< HEAD
+const BACKEND_URL = "http://192.168.53.49:4000";
+=======
 const BACKEND_URL = "http://192.168.53.90:4000";
+>>>>>>> origin/main
 const RFID_DEVICE = "/dev/input/event5";
 const MAGLOCK_SOCKET = "/tmp/maglock.sock";
 

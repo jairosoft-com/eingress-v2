@@ -4,8 +4,10 @@ import dotenv from 'dotenv';
 import express from 'express';
 import http from 'http';
 import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import cors from 'cors';
-import { Server as SocketIOServer } from 'socket.io';
+import { createSocketServer } from './socketio.js';
 
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
@@ -23,6 +25,10 @@ import { createWebSocketServer } from './ws.js';
 import { runAccessExpirationCheck } from './lib/accessExpiration.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const frontendDistPath = path.resolve(__dirname, '../frontend/dist');
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const ACCESS_EXPIRATION_CHECK_INTERVAL_MS = 60 * 1000;
@@ -77,8 +83,14 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/kiosk', kioskRouter);
 
-app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+app.use(express.static(frontendDistPath));
+
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'Route not found' });
+  }
+
+  res.sendFile(path.join(frontendDistPath, 'index.html'));
 });
 
 app.use((error, req, res, next) => {
@@ -88,20 +100,8 @@ app.use((error, req, res, next) => {
 
 function startServer(port) {
   const server = http.createServer(app);
-  const io = new SocketIOServer(server, {
-    cors: {
-      origin: true,
-      credentials: true,
-    },
-  });
-
-  io.on('connection', (socket) => {
-    console.log(`Socket.IO client connected: ${socket.id}`);
-
-    socket.on('disconnect', () => {
-      console.log(`Socket.IO client disconnected: ${socket.id}`);
-    });
-  });
+  createSocketServer(server);
+  createWebSocketServer(server);
 
   server.once('error', (error) => {
     if (error.code === 'EADDRINUSE') {
@@ -115,10 +115,12 @@ function startServer(port) {
     process.exit(1);
   });
 
-  server.listen(port, () => {
-    createWebSocketServer(server);
+  server.listen(port, '0.0.0.0', () => {
     startAccessExpirationCheck();
-    console.log(`EIngress backend is running on http://localhost:${port}`);
+    const lanIp = getLanIpAddress();
+    const hostMessage = lanIp ? `http://${lanIp}:${port}` : `http://localhost:${port}`;
+    console.log(`EIngress backend is running on ${hostMessage}`);
+    console.log(`Also available at http://localhost:${port}`);
   });
 }
 
