@@ -117,10 +117,7 @@ function startServer(port) {
 
   server.listen(port, () => {
     startAccessExpirationCheck();
-    const lanIp = getLanIpAddress();
-    const hostMessage = lanIp ? `http://${lanIp}:${port}` : `http://localhost:${port}`;
-    console.log(`EIngress backend is running on ${hostMessage}`);
-    console.log(`Also available at http://localhost:${port}`);
+    console.log(`EIngress backend is running on http://localhost:${port}`);
   });
 }
 
