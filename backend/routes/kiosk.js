@@ -179,10 +179,10 @@ async function processKioskScanUnsafe(req, res) {
   if (result === 'Granted') {
     emitDoorUnlock({
       userId: user.id,
-      userName: user.full_name,
       employeeId: user.employee_id,
+      userName: user.full_name,
       authenticationMethod: method,
-      area: 'Kiosk',
+      accessLogId: log.id,
     });
   }
 

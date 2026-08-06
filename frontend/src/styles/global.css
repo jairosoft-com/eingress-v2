@@ -2270,6 +2270,81 @@ td small {
   font-size: 0.68rem;
 }
 
+.enrollment-requests-table th {
+  color: #101936;
+  font-size: 0.88rem;
+  font-weight: 700;
+  background: #e0e6ef;
+}
+
+.enrollment-requests-table td:nth-child(1) {
+  white-space: nowrap;
+}
+
+.enrollment-requests-table th:nth-child(1),
+.enrollment-requests-table td:nth-child(1) {
+  width: 12%;
+}
+
+.enrollment-requests-table th:nth-child(2),
+.enrollment-requests-table td:nth-child(2) {
+  width: 13%;
+}
+
+.enrollment-requests-table th:nth-child(3),
+.enrollment-requests-table td:nth-child(3) {
+  width: 13%;
+}
+
+.enrollment-requests-table th:nth-child(4),
+.enrollment-requests-table td:nth-child(4) {
+  width: 12%;
+}
+
+.enrollment-requests-table th:nth-child(5),
+.enrollment-requests-table td:nth-child(5) {
+  width: 13%;
+}
+
+.enrollment-requests-table th:nth-child(6),
+.enrollment-requests-table td:nth-child(6) {
+  width: 11%;
+}
+
+.enrollment-requests-table th:nth-child(7),
+.enrollment-requests-table td:nth-child(7) {
+  width: 10%;
+}
+
+.enrollment-requests-table th:nth-child(8),
+.enrollment-requests-table td:nth-child(8) {
+  width: 16%;
+}
+
+.managed-user-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.managed-user-cell strong,
+.managed-user-cell small {
+  display: block;
+}
+
+.managed-user-cell strong {
+  color: #071435;
+  font-size: 0.8rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.managed-user-cell small {
+  margin-top: 2px;
+  color: #6f7b91;
+  font-size: 0.68rem;
+}
+
 .expiry-badge {
   color: #f97316;
   font-weight: 700;
@@ -3957,6 +4032,13 @@ td small {
   border: 1px solid #aeb8c7;
   border-radius: 8px;
   background: #ffffff;
+  transition: transform 150ms ease;
+}
+.toggle-setting input:checked + span {
+  background: #e32947;
+}
+.toggle-setting input:checked + span::after {
+  transform: translateX(12px);
 }
 
 .settings-menu button {
@@ -4686,30 +4768,6 @@ td small {
 .kiosk-clock {
   color: #ffffff;
   text-align: right;
-}
-
-.kiosk-fullscreen-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin-bottom: 10px;
-  padding: 7px 10px;
-  color: #dce8fa;
-  font: inherit;
-  font-size: 0.72rem;
-  font-weight: 800;
-  cursor: pointer;
-  border: 1px solid rgb(185 199 221 / 42%);
-  border-radius: 6px;
-  background: rgb(7 24 47 / 64%);
-}
-
-.kiosk-fullscreen-button:hover,
-.kiosk-fullscreen-button:focus-visible {
-  color: #ffffff;
-  border-color: #ffffff;
-  outline: none;
 }
 
 .kiosk-clock strong {

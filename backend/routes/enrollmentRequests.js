@@ -49,10 +49,11 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
   const client = await pool.connect();
 
   try {
-    const { fullName, department, email, phone } = req.body;
+    const role = req.body.role || req.body.department;
+    const { fullName, email, phone } = req.body;
 
-    if (!fullName || !department || !email || !phone) {
-      return res.status(400).json({ error: 'fullName, department, email, and phone are required' });
+    if (!fullName || !role || !email || !phone) {
+      return res.status(400).json({ error: 'fullName, role, email, and phone are required' });
     }
 
     await client.query('BEGIN');
@@ -113,7 +114,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       [
         employeeId,
         fullName.trim(),
-        department.trim(),
+        role.trim(),
         'New Enrollment',
         email.trim(),
         phone.trim(),
@@ -179,10 +180,11 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
   const client = await pool.connect();
 
   try {
-    const { employeeId, fullName, department, requestType, email, phone, rfidUid, fingerprintTemplate } = req.body;
+    const role = req.body.role || req.body.department;
+    const { employeeId, fullName, requestType, email, phone, rfidUid, fingerprintTemplate } = req.body;
 
-    if (!employeeId || !fullName || !department || !requestType) {
-      return res.status(400).json({ error: 'employeeId, fullName, department, and requestType are required' });
+    if (!employeeId || !fullName || !role || !requestType) {
+      return res.status(400).json({ error: 'employeeId, fullName, role, and requestType are required' });
     }
 
     await client.query('BEGIN');
@@ -194,7 +196,7 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
         (employee_id, full_name, department, request_type, email, phone, rfid_uid, fingerprint_template)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [employeeId, fullName, department, requestType, email || null, phone || null, rfidUid || null, fingerprintTemplate || null],
+      [employeeId, fullName, role, requestType, email || null, phone || null, rfidUid || null, fingerprintTemplate || null],
     );
 
     await client.query('COMMIT');

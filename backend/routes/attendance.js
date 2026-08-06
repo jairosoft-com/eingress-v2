@@ -18,7 +18,7 @@ attendanceRouter.get('/', async (req, res, next) => {
 
     if (department) {
       params.push(department);
-      where.push(`u.department = $${params.length}`);
+      where.push(`u.role = $${params.length}`);
     }
 
     if (status) {

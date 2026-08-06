@@ -1,7 +1,6 @@
-import { Check, CircleUserRound, IdCard, KeyRound, Maximize, Plus, Users, X } from 'lucide-react';
+import { Check, CircleUserRound, IdCard, KeyRound, Plus, Users, X } from 'lucide-react';
 import QRCode from 'qrcode';
 import { useEffect, useRef, useState } from 'react';
-import { API_BASE_URL } from '../lib/api';
 
 type KioskBioState = 'idle' | 'processing' | 'recognized' | 'unrecognized' | 'enrolled';
 type KioskBioTerminalInput = {
@@ -30,6 +29,7 @@ type RecognizedUser = {
   timeType: 'in' | 'out';
 };
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 const QR_CODE_SIZE = 260;
 const kioskTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -79,14 +79,7 @@ export function KioskBioPage() {
   const [newRfidCountdown, setNewRfidCountdown] = useState(5);
   const [enrollmentError, setEnrollmentError] = useState('');
   const [enrolledCountdown, setEnrolledCountdown] = useState(60);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const lastProcessedNonce = useRef(0);
-
-  function enterFullscreen() {
-    void document.documentElement.requestFullscreen?.().catch(() => {
-      // The browser can reject fullscreen requests outside a user interaction.
-    });
-  }
 
   function processFingerprintScan(fingerprintId: string) {
     setIsAwaitingNewRfid(false);
@@ -209,14 +202,6 @@ export function KioskBioPage() {
     }, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, []);
-
-  useEffect(() => {
-    const updateFullscreenState = () => setIsFullscreen(Boolean(document.fullscreenElement));
-
-    updateFullscreenState();
-    document.addEventListener('fullscreenchange', updateFullscreenState);
-    return () => document.removeEventListener('fullscreenchange', updateFullscreenState);
   }, []);
 
   useEffect(() => {
@@ -373,12 +358,6 @@ export function KioskBioPage() {
           </div>
 
           <div className="kiosk-clock" aria-label="Current kiosk time">
-            {!isFullscreen ? (
-              <button className="kiosk-fullscreen-button" onClick={enterFullscreen} type="button">
-                <Maximize aria-hidden="true" size={15} />
-                Fullscreen
-              </button>
-            ) : null}
             <strong>{kioskTimeFormatter.format(currentDateTime)}</strong>
             <small>{kioskDateFormatter.format(currentDateTime)}</small>
           </div>

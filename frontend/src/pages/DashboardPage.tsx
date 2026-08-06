@@ -438,7 +438,7 @@ export function DashboardPage() {
               <tr>
                 <th>Employee ID</th>
                 <th>Name</th>
-                <th>Department</th>
+                <th>Role</th>
                 <th>Time In</th>
                 <th>Time Out</th>
                 <th>Status</th>
@@ -451,7 +451,7 @@ export function DashboardPage() {
                   <tr key={`${record.employee_id ?? 'record'}-${index}`}>
                     <td>{record.employee_id ?? '—'}</td>
                     <td>{record.name ?? 'Unknown user'}</td>
-                    <td>{record.department ?? '—'}</td>
+                    <td>{record.role ?? record.department ?? '—'}</td>
                     <td>{formatAttendanceTime(record.check_in_at, dateTimeSettings) || '—'}</td>
                     <td>
                       {hasCheckedOut(record.check_in_at, record.check_out_at)

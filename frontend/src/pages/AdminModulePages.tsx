@@ -24,7 +24,6 @@ import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { API_BASE_URL } from '../lib/api';
 import { useAuth } from '../auth/useAuth';
 import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
 import { setSecuritySettings } from '../lib/securitySettingsStore';
@@ -34,6 +33,7 @@ import {
   useDateTimeSettings,
 } from '../lib/systemSettingsStore';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
 const deviceRows = [
@@ -90,7 +90,7 @@ type AttendanceSummary = {
   present: number;
   total_records: number;
 };
-//change
+//changes
 type UserRecord = {
   created_at: string;
   department: string | null;
@@ -321,11 +321,11 @@ function EnrollmentFilterRow({
         value={endDateFilter}
       />
       <select
-        aria-label="Filter by department"
+        aria-label="Filter by role"
         onChange={(event) => onDepartmentChange(event.target.value)}
         value={departmentFilter}
       >
-        <option value="All">All Departments</option>
+        <option value="All">All Roles</option>
         {departments.map((department) => (
           <option key={department} value={department}>
             {department}
@@ -1329,20 +1329,11 @@ export function UserManagementPage() {
   );
 
   function exportUsersCsv() {
-    const header = [
-      'Employee ID',
-      'Name',
-      'Role',
-      'Department',
-      'Biometric Status',
-      'Access Status',
-      'RFID UID',
-    ];
+    const header = ['Employee ID', 'Name', 'Role', 'Biometric Status', 'Access Status', 'RFID UID'];
     const rows = filteredUsers.map((user) => [
       user.employee_id,
       user.full_name,
       user.role || 'Employee',
-      user.department || '-',
       user.fingerprint_id ? 'Registered' : 'Missing',
       user.is_active ? 'Active' : 'Disabled',
       user.rfid_uid || '-',
@@ -1838,8 +1829,8 @@ export function UserManagementPage() {
                 <div>
                   <strong>B</strong>
                   <span>
-                    Department
-                    <small>{editingUser.department || '-'}</small>
+                    Role
+                    <small>{editingUser.role || '-'}</small>
                   </span>
                 </div>
                 <div>
@@ -1998,19 +1989,6 @@ export function UserManagementPage() {
                     ))}
                   </select>
                 </label>
-
-                <label className="user-edit-field">
-                  <span>Department</span>
-                  <input
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        department: event.target.value,
-                      }))
-                    }
-                    value={createForm.department}
-                  />
-                </label>
               </div>
             </section>
 
@@ -2078,8 +2056,8 @@ export function UserManagementPage() {
                 <div>
                   <strong>B</strong>
                   <span>
-                    Department
-                    <small>{createForm.department || '-'}</small>
+                    Role
+                    <small>{createForm.role || '-'}</small>
                   </span>
                 </div>
                 <div>
@@ -2753,7 +2731,7 @@ export function EnrollmentRequestsPage() {
                     <dd>{selectedRequest.email || 'Not provided'}</dd>
                   </div>
                   <div>
-                    <dt>Department</dt>
+                    <dt>Role</dt>
                     <dd>{selectedRequest.department}</dd>
                   </div>
                   <div>
@@ -2912,8 +2890,8 @@ type ReportData = {
 
 const REPORTS_PAGE_SIZE = 10;
 
-type DepartmentSummaryRow = {
-  department: string | null;
+type RoleSummaryRow = {
+  role: string | null;
   total: number;
 };
 
@@ -3097,7 +3075,7 @@ export function ReportsPage() {
     totalPages: 1,
     totalRecords: 0,
   });
-  const [departmentSummary, setDepartmentSummary] = useState<DepartmentSummaryRow[]>([]);
+  const [departmentSummary, setDepartmentSummary] = useState<RoleSummaryRow[]>([]);
   const [attendanceTrend, setAttendanceTrend] = useState<AttendanceTrendPoint[]>([]);
 
   useEffect(() => {
@@ -3120,11 +3098,11 @@ export function ReportsPage() {
   }, [session?.accessToken]);
 
   const departmentOptions = useMemo(() => {
-    const departments = new Set<string>();
+    const roles = new Set<string>();
     users.forEach((user) => {
-      if (user.department) departments.add(user.department);
+      if (user.role) roles.add(user.role);
     });
-    return Array.from(departments).sort();
+    return Array.from(roles).sort();
   }, [users]);
 
   const fetchGeneratedReports = async (
@@ -3291,12 +3269,17 @@ export function ReportsPage() {
     })
       .then(async (response) => {
         const data = (await response.json().catch(() => null)) as {
-          departments: DepartmentSummaryRow[];
+          roles?: RoleSummaryRow[];
+          departments?: { department: string | null; total: number }[];
           trend: AttendanceTrendPoint[];
         } | null;
 
         if (response.ok && data) {
-          setDepartmentSummary(data.departments);
+          setDepartmentSummary(
+            data.roles ??
+              data.departments?.map((row) => ({ role: row.department, total: row.total })) ??
+              [],
+          );
           setAttendanceTrend(data.trend);
         }
       })
@@ -3366,11 +3349,11 @@ export function ReportsPage() {
               value={dateFilter}
             />
             <select
-              aria-label="Department"
+              aria-label="Role"
               onChange={(event) => setDepartmentFilter(event.target.value)}
               value={departmentFilter}
             >
-              <option value="">All Departments</option>
+              <option value="">All Roles</option>
               {departmentOptions.map((department) => (
                 <option key={department} value={department}>
                   {department}
@@ -3422,13 +3405,13 @@ export function ReportsPage() {
               )}
             </section>
             <section className="module-panel role-summary">
-              <h2>Department Summary</h2>
+              <h2>Role Summary</h2>
               <div className="donut-summary">Total {departmentTotal}</div>
               <ul>
                 {departmentSummary.length > 0 ? (
                   departmentSummary.map((row) => (
-                    <li key={row.department || 'Unassigned'}>
-                      <span>{row.department || 'Unassigned'}</span>
+                    <li key={row.role || 'Unassigned'}>
+                      <span>{row.role || 'Unassigned'}</span>
                       <strong>
                         {departmentTotal
                           ? `${Math.round((row.total / departmentTotal) * 100)}%`
@@ -3438,7 +3421,7 @@ export function ReportsPage() {
                   ))
                 ) : (
                   <li>
-                    <span>No department data available</span>
+                    <span>No role data available</span>
                     <strong>—</strong>
                   </li>
                 )}
