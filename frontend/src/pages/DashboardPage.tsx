@@ -303,13 +303,14 @@ export function DashboardPage() {
     };
   });
   const todayLabel = formatDate(new Date(), dateTimeSettings);
+  const firstName = session?.adminName?.trim().split(/\s+/)[0] || 'Admin';
 
   return (
     <section className="dashboard-page" aria-labelledby="dashboard-title">
       <header className="dashboard-header">
         <div>
           <h1 id="dashboard-title">Admin Dashboard</h1>
-          <p>Welcome back, Juan! Here's what's happening with your system today.</p>
+          <p>Welcome back, {firstName}! Here's what's happening with your system today.</p>
         </div>
 
         <button className="date-button" type="button">
