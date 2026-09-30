@@ -4417,7 +4417,11 @@ export function SettingsPage() {
               <label className="toggle-setting">
                 <input
                   checked={settings.auto_logout_enabled}
-                  onChange={(event) => updateSetting('auto_logout_enabled', event.target.checked)}
+                  onChange={(event) => {
+                    // Mutually exclusive with "Keep me logged in": exactly one is on.
+                    updateSetting('auto_logout_enabled', event.target.checked);
+                    updateSetting('keep_me_logged_in', !event.target.checked);
+                  }}
                   type="checkbox"
                 />
                 <span />
@@ -4426,7 +4430,10 @@ export function SettingsPage() {
               <label className="toggle-setting">
                 <input
                   checked={settings.keep_me_logged_in}
-                  onChange={(event) => updateSetting('keep_me_logged_in', event.target.checked)}
+                  onChange={(event) => {
+                    updateSetting('keep_me_logged_in', event.target.checked);
+                    updateSetting('auto_logout_enabled', !event.target.checked);
+                  }}
                   type="checkbox"
                 />
                 <span />
