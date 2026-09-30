@@ -36,6 +36,8 @@ function validateRegistrationForm(
 
   if (!fullName.trim()) {
     errors.fullName = 'Full name is required.';
+  } else if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(fullName.trim())) {
+    errors.fullName = 'Enter a valid full name.';
   }
 
   if (!email.trim()) {
