@@ -49,28 +49,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const lastRefreshAt = useRef(0);
   const hasSession = Boolean(session?.accessToken);
 
-  const handleLogout = useCallback(() => {
+  const clearSession = useCallback(() => {
     clearStoredSession();
     setSession(null);
-    window.localStorage.setItem(FORCE_LOGOUT_STORAGE_KEY, `${Date.now()}`);
-    window.dispatchEvent(new Event('auth:force-logout'));
   }, []);
+
+  // Local logout: clear this tab, then notify other tabs. Their handler only
+  // clears and never re-broadcasts, so tabs cannot log each other out in a loop.
+  const handleLogout = useCallback(() => {
+    clearSession();
+    window.localStorage.setItem(FORCE_LOGOUT_STORAGE_KEY, `${Date.now()}`);
+  }, [clearSession]);
 
   useEffect(() => {
     const handleStorageLogout = (event: StorageEvent) => {
       if (event.key === FORCE_LOGOUT_STORAGE_KEY) {
-        handleLogout();
+        clearSession();
       }
     };
 
     window.addEventListener('storage', handleStorageLogout);
-    window.addEventListener('auth:force-logout', handleLogout);
 
     return () => {
       window.removeEventListener('storage', handleStorageLogout);
-      window.removeEventListener('auth:force-logout', handleLogout);
     };
-  }, [handleLogout]);
+  }, [clearSession]);
 
   useEffect(() => {
     if (!hasSession) {
