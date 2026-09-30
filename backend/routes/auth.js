@@ -201,6 +201,30 @@ authRouter.post('/login', async (req, res) => {
     const passwordMatch = await bcrypt.compare(password, admin.password_hash);
     const rfidMatch = !adminRfidEnabled || admin.rfid_uid === rfidCode;
 
+    if (!admin.is_active || !passwordMatch || !rfidMatch){
+      await query(
+        `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+        VALUES ($1, $2, $3, $4, $5)`,
+        [
+          admin.id, 
+          'Failed Login Attempt', 
+          'Authentication', 
+          'Admin login failed', 
+          req.ip
+        ],
+      );
+      
+      const notificationResult = await query(
+        `INSERT INTO notifications (title, message, severity)
+        VALUES ($1, $2, $3)
+        RETURNING id, title, message, severity, is_read, created_at`,
+        ['Invalid login attempt', `Failed login attempt from admin username: ${admin.username}`, 'error'],
+      );
+      broadcastMessage({ type: 'notification:created', payload: notificationResult.rows[0] });
+
+        return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
     if (!admin.is_active || !passwordMatch || !rfidMatch) {
       if (lockoutEnabled && admin.is_active) {
         const resetWindowElapsed =
