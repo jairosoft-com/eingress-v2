@@ -184,8 +184,36 @@ authRouter.post('/login', async (req, res) => {
     );
 
     if (adminResult.rowCount === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+  await query(
+    `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
+      null,
+      'Failed Login Attempt',
+      'Authentication',
+      `Invalid login attempt from non-registered user.`,
+      req.ip,
+    ],
+  );
+
+  const notificationResult = await query(
+    `INSERT INTO notifications (title, message, severity)
+     VALUES ($1, $2, $3)
+     RETURNING id, title, message, severity, is_read, created_at`,
+    [
+      'Invalid login attempt',
+      `Invalid login attempt from non-registered user.`,
+      'error',
+    ],
+  );
+
+  broadcastMessage({
+    type: 'notification:created',
+    payload: notificationResult.rows[0],
+  });
+
+  return res.status(401).json({ error: 'Invalid credentials' });
+}
 
     const admin = adminResult.rows[0];
     const now = Date.now();
