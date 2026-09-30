@@ -40,7 +40,9 @@ function validateRegistrationForm(
 
   if (!email.trim()) {
     errors.email = 'Email address is required.';
-  } else if (!/^\S+@\S+\.\S+$/.test(email)) {
+  } else if (
+    !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(email)
+  ) {
     errors.email = 'Enter a valid email address.';
   }
 
