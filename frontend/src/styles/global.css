@@ -778,6 +778,12 @@ button {
   cursor: pointer;
 }
 
+.phone-prefix {
+  flex: 0 0 auto;
+  color: #071435;
+  font-weight: 600;
+}
+
 .registration-actions {
   display: flex;
   align-items: center;
