@@ -29,6 +29,39 @@ async function getNextEmployeeId(client) {
   return `EMP${String(nextNumber).padStart(3, '0')}`;
 }
 
+// Collapses common Philippine phone formats to +63XXXXXXXXXX so "0917 123 4567", "9171234567"
+// and "+63 917 123 4567" are recognised as the same number for duplicate-checking, and so the
+// value saved is consistent regardless of how it was typed. A number that's already
+// international under a different country code (e.g. +1 555 123 4567) is left exactly as
+// submitted, as is anything that doesn't match a recognised PH shape (e.g. a landline).
+function normalizePhPhoneNumber(rawPhone) {
+  const trimmed = String(rawPhone || '').trim();
+  const hasPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/\D/g, '');
+
+  if (hasPlus && !trimmed.startsWith('+63')) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith('+63') && digits.length === 12) {
+    return `+${digits}`;
+  }
+
+  if (!hasPlus && digits.startsWith('63') && digits.length === 12) {
+    return `+${digits}`;
+  }
+
+  if (!hasPlus && digits.startsWith('0') && digits.length === 11) {
+    return `+63${digits.slice(1)}`;
+  }
+
+  if (!hasPlus && digits.length === 10 && digits.startsWith('9')) {
+    return `+63${digits}`;
+  }
+
+  return trimmed;
+}
+
 async function resetEnrollmentSequencesIfEmpty(client) {
   const result = await client.query(
     `SELECT NOT EXISTS (SELECT 1 FROM enrollment_requests) AS is_empty`,
@@ -55,6 +88,8 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       return res.status(400).json({ error: 'fullName, department, email, and phone are required' });
     }
 
+    const normalizedPhone = normalizePhPhoneNumber(phone);
+
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock($1)', [20260617]);
 
@@ -73,6 +108,46 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
     if (existingUser.rowCount > 0) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Existing user. This name is already registered or pending enrollment.' });
+    }
+
+    const existingEmail = await client.query(
+      `SELECT email
+       FROM (
+         SELECT email FROM users WHERE email IS NOT NULL
+         UNION ALL
+         SELECT email FROM enrollment_requests WHERE email IS NOT NULL AND status = 'Pending'
+       ) existing_emails
+       WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))
+       LIMIT 1`,
+      [email],
+    );
+
+    if (existingEmail.rowCount > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Existing email. This email address is already registered or pending enrollment.',
+        field: 'email',
+      });
+    }
+
+    const existingPhone = await client.query(
+      `SELECT phone
+       FROM (
+         SELECT phone FROM users WHERE phone IS NOT NULL
+         UNION ALL
+         SELECT phone FROM enrollment_requests WHERE phone IS NOT NULL AND status = 'Pending'
+       ) existing_phones
+       WHERE LOWER(TRIM(phone)) = LOWER(TRIM($1))
+       LIMIT 1`,
+      [normalizedPhone],
+    );
+
+    if (existingPhone.rowCount > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Existing phone number. This phone number is already registered or pending enrollment.',
+        field: 'phone',
+      });
     }
 
     const rfidUid = getPendingEnrollmentRfidUid();
@@ -116,7 +191,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
         department.trim(),
         'New Enrollment',
         email.trim(),
-        phone.trim(),
+        normalizedPhone,
         rfidUid,
       ],
     );
