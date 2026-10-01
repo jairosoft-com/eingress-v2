@@ -112,6 +112,21 @@ export function RegistrationPage() {
             return;
           }
 
+          if (data?.field === 'email') {
+            setErrors({
+              email: data.error || 'Existing email. This email address is already registered.',
+            });
+            return;
+          }
+
+          if (data?.field === 'phone') {
+            setErrors({
+              phoneNumber:
+                data.error || 'Existing phone number. This phone number is already registered.',
+            });
+            return;
+          }
+
           setErrors({
             fullName: data?.error || 'Existing user. This name is already registered.',
           });
