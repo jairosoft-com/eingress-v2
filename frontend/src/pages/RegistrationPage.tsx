@@ -36,18 +36,22 @@ function validateRegistrationForm(
 
   if (!fullName.trim()) {
     errors.fullName = 'Full name is required.';
+  } else if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(fullName.trim())) {
+    errors.fullName = 'Enter a valid full name.';
   }
 
   if (!email.trim()) {
     errors.email = 'Email address is required.';
-  } else if (!/^\S+@\S+\.\S+$/.test(email)) {
+  } else if (
+    !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(email)
+  ) {
     errors.email = 'Enter a valid email address.';
   }
 
   if (!phoneNumber.trim()) {
     errors.phoneNumber = 'Phone number is required.';
-  } else if (!/^[+\d][\d\s().-]{7,}$/.test(phoneNumber.trim())) {
-    errors.phoneNumber = 'Enter a valid phone number.';
+  } else if (!/^9\d{9}$/.test(phoneNumber.trim())) {
+    errors.phoneNumber = 'Enter a valid 10-digit mobile number starting with 9.';
   }
 
   if (!department) {
@@ -60,6 +64,7 @@ function validateRegistrationForm(
 export function RegistrationPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  // Holds only the 10-digit local part (9XXXXXXXXX); +63 is a fixed prefix, prepended on submit.
   const [phoneNumber, setPhoneNumber] = useState('');
   const [department, setDepartment] = useState('');
   const [errors, setErrors] = useState<RegistrationErrors>({});
@@ -89,7 +94,7 @@ export function RegistrationPage() {
           fullName,
           department,
           email,
-          phone: phoneNumber,
+          phone: `+63${phoneNumber}`,
         }),
       });
 
@@ -104,6 +109,21 @@ export function RegistrationPage() {
           if (data?.field === 'rfidUid') {
             setErrors({
               form: data.error || 'Existing RFID. This ID is already registered.',
+            });
+            return;
+          }
+
+          if (data?.field === 'email') {
+            setErrors({
+              email: data.error || 'Existing email. This email address is already registered.',
+            });
+            return;
+          }
+
+          if (data?.field === 'phone') {
+            setErrors({
+              phoneNumber:
+                data.error || 'Existing phone number. This phone number is already registered.',
             });
             return;
           }
@@ -222,14 +242,21 @@ export function RegistrationPage() {
             </label>
             <div className="google-input-shell">
               <Phone size={20} aria-hidden="true" />
+              <span className="phone-prefix" id="phone-prefix-label">
+                +63
+              </span>
               <input
-                aria-describedby={errors.phoneNumber ? 'phone-number-error' : undefined}
+                aria-describedby={`phone-prefix-label${errors.phoneNumber ? ' phone-number-error' : ''}`}
                 aria-invalid={Boolean(errors.phoneNumber)}
-                autoComplete="tel"
+                autoComplete="tel-national"
                 id="phoneNumber"
+                inputMode="numeric"
+                maxLength={10}
                 name="phoneNumber"
-                onChange={(event) => setPhoneNumber(event.target.value)}
-                placeholder="+63 912 345 6789"
+                onChange={(event) =>
+                  setPhoneNumber(event.target.value.replace(/\D/g, '').slice(0, 10))
+                }
+                placeholder="9171234567"
                 type="tel"
                 value={phoneNumber}
               />

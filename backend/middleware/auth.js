@@ -21,7 +21,9 @@ export async function authMiddleware(req, res, next) {
     );
     const passwordChangedAt = adminResult.rows[0]?.password_changed_at;
 
-    if (passwordChangedAt && payload.iat * 1000 < new Date(passwordChangedAt).getTime()) {
+    // iat is whole seconds but password_changed_at has milliseconds; compare per second so a
+    // token issued in the same second as the change is not rejected.
+    if (passwordChangedAt && payload.iat < Math.floor(new Date(passwordChangedAt).getTime() / 1000)) {
       return res.status(401).json({ error: 'Your password was changed. Please sign in again.' });
     }
 

@@ -41,7 +41,7 @@ dashboardRouter.get('/', async (req, res, next) => {
              COALESCE(a.username, 'System') AS user_name,
              NULL AS employee_id,
              l.action AS event,
-             'Info' AS result,
+             CASE WHEN l.action = 'Failed Login Attempt' THEN 'Failed' ELSE 'Info' END AS event,
              l.module AS area,
              'Admin Portal' AS device_name,
              l.created_at AS event_time
