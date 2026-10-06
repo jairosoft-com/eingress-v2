@@ -250,10 +250,6 @@ authRouter.post('/login', async (req, res) => {
       );
       broadcastMessage({ type: 'notification:created', payload: notificationResult.rows[0] });
 
-        return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    if (!admin.is_active || !passwordMatch || !rfidMatch) {
       if (lockoutEnabled && admin.is_active) {
         const resetWindowElapsed =
           admin.last_failed_login_at &&
