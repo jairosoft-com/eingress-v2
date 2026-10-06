@@ -26,6 +26,35 @@ type RegistrationErrors = {
 
 const departments = ['Employee', 'Student', 'Staff', 'Intern'];
 
+function validateSingleField(
+  fieldName: keyof RegistrationErrors,
+  value: string,
+): string | undefined {
+  if (fieldName === 'fullName') {
+    if (!value.trim()) return 'Full name is required.';
+    if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(value.trim()))
+      return 'Enter a valid full name.';
+  }
+
+  if (fieldName === 'email') {
+    if (!value.trim()) return 'Email address is required.';
+    if (!/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(value))
+      return 'Enter a valid email address.';
+  }
+
+  if (fieldName === 'phoneNumber') {
+    if (!value.trim()) return 'Phone number is required.';
+    if (!/^9\d{9}$/.test(value.trim()))
+      return 'Enter a valid 10-digit mobile number starting with 9.';
+  }
+
+  if (fieldName === 'department') {
+    if (!value) return 'Department is required.';
+  }
+
+  return undefined;
+}
+
 function validateRegistrationForm(
   fullName: string,
   email: string,
@@ -198,7 +227,16 @@ export function RegistrationPage() {
                 autoComplete="name"
                 id="fullName"
                 name="fullName"
-                onChange={(event) => setFullName(event.target.value)}
+                onBlur={() => {
+                  const error = validateSingleField('fullName', fullName);
+                  setErrors((prev) => ({ ...prev, fullName: error }));
+                }}
+                onChange={(event) => {
+                  setFullName(event.target.value);
+                  if (errors.fullName && !validateSingleField('fullName', event.target.value)) {
+                    setErrors((prev) => ({ ...prev, fullName: undefined }));
+                  }
+                }}
                 placeholder="Your answer"
                 type="text"
                 value={fullName}
@@ -223,7 +261,16 @@ export function RegistrationPage() {
                 autoComplete="email"
                 id="registrationEmail"
                 name="email"
-                onChange={(event) => setEmail(event.target.value)}
+                onBlur={() => {
+                  const error = validateSingleField('email', email);
+                  setErrors((prev) => ({ ...prev, email: error }));
+                }}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  if (errors.email && !validateSingleField('email', event.target.value)) {
+                    setErrors((prev) => ({ ...prev, email: undefined }));
+                  }
+                }}
                 placeholder="name@example.com"
                 type="email"
                 value={email}
@@ -253,9 +300,17 @@ export function RegistrationPage() {
                 inputMode="numeric"
                 maxLength={10}
                 name="phoneNumber"
-                onChange={(event) =>
-                  setPhoneNumber(event.target.value.replace(/\D/g, '').slice(0, 10))
-                }
+                onBlur={() => {
+                  const error = validateSingleField('phoneNumber', phoneNumber);
+                  setErrors((prev) => ({ ...prev, phoneNumber: error }));
+                }}
+                onChange={(event) => {
+                  const sanitized = event.target.value.replace(/\D/g, '').slice(0, 10);
+                  setPhoneNumber(sanitized);
+                  if (errors.phoneNumber && !validateSingleField('phoneNumber', sanitized)) {
+                    setErrors((prev) => ({ ...prev, phoneNumber: undefined }));
+                  }
+                }}
                 placeholder="9171234567"
                 type="tel"
                 value={phoneNumber}
@@ -279,7 +334,11 @@ export function RegistrationPage() {
                 aria-invalid={Boolean(errors.department)}
                 id="department"
                 name="department"
-                onChange={(event) => setDepartment(event.target.value)}
+                onChange={(event) => {
+                  setDepartment(event.target.value);
+                  const error = validateSingleField('department', event.target.value);
+                  setErrors((prev) => ({ ...prev, department: error }));
+                }}
                 value={department}
               >
                 <option value="">Choose department</option>
