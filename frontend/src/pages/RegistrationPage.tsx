@@ -32,7 +32,7 @@ function validateSingleField(
 ): string | undefined {
   if (fieldName === 'fullName') {
     if (!value.trim()) return 'Full name is required.';
-    if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(value.trim()))
+    if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?: [A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(value.trim()))
       return 'Enter a valid full name.';
   }
 
@@ -65,7 +65,7 @@ function validateRegistrationForm(
 
   if (!fullName.trim()) {
     errors.fullName = 'Full name is required.';
-  } else if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(fullName.trim())) {
+  } else if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?: [A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(fullName.trim())) {
     errors.fullName = 'Enter a valid full name.';
   }
 
@@ -232,8 +232,9 @@ export function RegistrationPage() {
                   setErrors((prev) => ({ ...prev, fullName: error }));
                 }}
                 onChange={(event) => {
-                  setFullName(event.target.value);
-                  if (errors.fullName && !validateSingleField('fullName', event.target.value)) {
+                  const sanitized = event.target.value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ ]/g, '');
+                  setFullName(sanitized);
+                  if (errors.fullName && !validateSingleField('fullName', sanitized)) {
                     setErrors((prev) => ({ ...prev, fullName: undefined }));
                   }
                 }}
