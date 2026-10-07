@@ -672,7 +672,7 @@ function getAvatarTone(index: number) {
 }
 
 const USER_ROLE_OPTIONS = ['Employee', 'Student', 'Staff', 'Intern'];
-const USER_DEPARTMENT_OPTIONS = ['IT', 'HR', 'Maintenance', 'CPE'];
+const USER_DEPARTMENT_OPTIONS = ['IT Department', 'Student', 'Staff', 'Intern'];
 
 function maskRfid(value: string) {
   if (!value || value === '-') {
@@ -2012,9 +2012,11 @@ export function UserManagementPage() {
                     }
                     value={createForm.department}
                   >
-                    <option value="">Select Department</option>
-                    {departmentOptions.map((dept) => (
-                      <option key={dept}>{dept}</option>
+                    <option value="">Choose department</option>
+                    {departmentOptions.map((department) => (
+                      <option key={department} value={department}>
+                        {department}
+                      </option>
                     ))}
                   </select>
                 </label>
