@@ -29,7 +29,9 @@ function validateEmail(email: string) {
     return 'Email address is required.';
   }
 
-  if (!/^\S+@\S+\.\S+$/.test(email)) {
+  if (
+    !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(email.trim())
+  ) {
     return 'Enter a valid email address.';
   }
 
@@ -158,7 +160,14 @@ export function ForgotPasswordPage() {
                     autoComplete="email"
                     id="resetEmail"
                     name="resetEmail"
-                    onChange={(event) => setEmail(event.target.value)}
+                    onBlur={() => setEmailError(validateEmail(email))}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setEmail(value);
+                      setEmailError(validateEmail(value));
+                      setSubmitError('');
+                      setSuccessMessage('');
+                    }}
                     placeholder="Enter your email address"
                     type="email"
                     value={email}
