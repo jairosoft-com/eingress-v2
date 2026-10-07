@@ -672,7 +672,13 @@ function getAvatarTone(index: number) {
 }
 
 const USER_ROLE_OPTIONS = ['Employee', 'Student', 'Staff', 'Intern'];
-const USER_DEPARTMENT_OPTIONS = ['IT Department', 'Student', 'Staff', 'Intern'];
+const USER_DEPARTMENT_OPTIONS = [
+  'IT Department',
+  'HR Department',
+  'Operations',
+  'Admin',
+  'Engineering',
+];
 
 function maskRfid(value: string) {
   if (!value || value === '-') {
