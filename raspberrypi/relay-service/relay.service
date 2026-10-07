@@ -1,0 +1,16 @@
+[Unit]
+Description=EINGRESS Relay Service
+After=network-online.target maglock.service
+Wants=network-online.target
+Requires=maglock.service
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/eingress-v2/raspberrypi/relay-service
+ExecStart=/usr/bin/node /home/admin/eingress-v2/raspberrypi/relay-service/relay.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
