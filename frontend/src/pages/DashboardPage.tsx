@@ -11,7 +11,6 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
 import { formatDate, formatTime, formatWeekdayShort } from '../lib/dateTimeFormat';
@@ -430,7 +429,7 @@ export function DashboardPage() {
       >
         <div className="panel-heading">
           <h2 id="dashboard-attendance-title">Today's Attendance</h2>
-          <button className="text-button" type="button">
+          <button className="text-button" type="button" onClick={() => navigate('/attendance')}>
             View all
           </button>
         </div>
