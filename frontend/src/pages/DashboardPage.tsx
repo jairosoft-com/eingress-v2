@@ -10,6 +10,7 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
@@ -185,6 +186,7 @@ const initialAccessEvents: ReturnType<typeof toAccessEvent>[] = [];
 
 export function DashboardPage() {
   const { session } = useAuth();
+  const navigate = useNavigate();
   const dateTimeSettings = useDateTimeSettings();
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [accessEvents, setAccessEvents] = useState(initialAccessEvents);
@@ -373,7 +375,7 @@ export function DashboardPage() {
         <section className="panel events-panel" aria-labelledby="recent-events-title">
           <div className="panel-heading">
             <h2 id="recent-events-title">Recent Access Events</h2>
-            <button className="text-button" type="button">
+            <button className="text-button" type="button" onClick={() => navigate('/access-logs')}>
               View all
             </button>
           </div>
