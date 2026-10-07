@@ -374,7 +374,7 @@ export function DashboardPage() {
         <section className="panel events-panel" aria-labelledby="recent-events-title">
           <div className="panel-heading">
             <h2 id="recent-events-title">Recent Access Events</h2>
-            <button className="text-button" type="button">
+            <button className="text-button" type="button" onClick={() => navigate('/access-logs')}>
               View all
             </button>
           </div>
