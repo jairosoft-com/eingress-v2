@@ -672,6 +672,13 @@ function getAvatarTone(index: number) {
 }
 
 const USER_ROLE_OPTIONS = ['Employee', 'Student', 'Staff', 'Intern'];
+const USER_DEPARTMENT_OPTIONS = [
+  'IT Department',
+  'HR Department',
+  'Operations',
+  'Admin',
+  'Engineering',
+];
 
 function maskRfid(value: string) {
   if (!value || value === '-') {
@@ -1270,6 +1277,7 @@ export function UserManagementPage() {
   }
 
   const roleOptions = USER_ROLE_OPTIONS;
+  const departmentOptions = USER_DEPARTMENT_OPTIONS;
 
   const filteredUsers = useMemo(() => {
     const normalizedSearch = userSearch.trim().toLowerCase();
@@ -2001,7 +2009,7 @@ export function UserManagementPage() {
 
                 <label className="user-edit-field">
                   <span>Department</span>
-                  <input
+                  <select
                     onChange={(event) =>
                       setCreateForm((currentForm) => ({
                         ...currentForm,
@@ -2009,7 +2017,14 @@ export function UserManagementPage() {
                       }))
                     }
                     value={createForm.department}
-                  />
+                  >
+                    <option value="">Choose department</option>
+                    {departmentOptions.map((department) => (
+                      <option key={department} value={department}>
+                        {department}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
             </section>
