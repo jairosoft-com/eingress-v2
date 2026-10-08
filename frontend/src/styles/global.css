@@ -2508,12 +2508,12 @@ td small {
   box-shadow: -22px 0 48px rgb(7 20 53 / 18%);
 }
 
-.user-create-dialog .user-edit-field {
+.user-create-dialog .user-edit-grid.two-columns .user-edit-field {
   position: relative;
   padding-bottom: 18px;
 }
 
-.user-create-dialog .user-edit-field .field-error {
+.user-create-dialog .user-edit-grid.two-columns .user-edit-field .field-error {
   position: absolute;
   left: 0;
   bottom: 0;

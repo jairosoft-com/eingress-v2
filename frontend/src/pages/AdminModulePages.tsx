@@ -1214,6 +1214,7 @@ export function UserManagementPage() {
 
     setCreateErrors(validationErrors);
     setCreateEmailError(emailValidationMessage);
+    //setCreateFormError(validationErrors.employeeId ? 'Employee ID is required.' : '');
 
     if (Object.keys(validationErrors).length > 0 || emailValidationMessage) {
       return;
@@ -2016,15 +2017,32 @@ export function UserManagementPage() {
                 <label className="user-edit-field">
                   <span>Employee / User ID *</span>
                   <input
+                    aria-describedby={
+                      createErrors.employeeId ? 'create-employee-id-error' : undefined
+                    }
+                    aria-invalid={Boolean(createErrors.employeeId)}
                     autoFocus
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        employeeId: event.target.value,
+                    onBlur={() =>
+                      setCreateErrors((prev) => ({
+                        ...prev,
+                        employeeId: validateCreateUserField('employeeId', createForm.employeeId),
                       }))
                     }
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setCreateForm((currentForm) => ({ ...currentForm, employeeId: value }));
+                      setCreateErrors((prev) => ({
+                        ...prev,
+                        employeeId: validateCreateUserField('employeeId', value),
+                      }));
+                    }}
                     value={createForm.employeeId}
                   />
+                  {createErrors.employeeId ? (
+                    <span className="field-error" id="create-employee-id-error">
+                      {createErrors.employeeId}
+                    </span>
+                  ) : null}
                 </label>
                 <label className="user-edit-field">
                   <span>Full Name *</span>
