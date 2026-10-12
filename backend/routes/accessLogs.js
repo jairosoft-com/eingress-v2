@@ -32,7 +32,10 @@ accessLogsRouter.get('/', async (req, res) => {
            NULL AS employee_id,
            l.action AS event,
            'System' AS authentication_method,
-           CASE WHEN l.action = 'Failed Login Attempt' THEN 'Failed' ELSE 'Info' END AS status,
+           CASE 
+            WHEN l.action = 'Failed Login Attempt' THEN 'Failed' 
+            WHEN l.action = 'Login' THEN 'Success' 
+            ELSE 'Info' END AS status,
            l.module AS area,
            'Admin Portal' AS device_name,
            l.created_at AS event_time
