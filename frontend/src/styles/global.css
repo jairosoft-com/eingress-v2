@@ -2742,6 +2742,7 @@ td small {
 }
 
 .user-edit-summary span {
+  grid-column: 2;
   display: grid;
   gap: 5px;
   color: #071435;

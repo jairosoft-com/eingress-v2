@@ -1908,42 +1908,36 @@ export function UserManagementPage() {
               </h3>
               <div className="user-edit-summary">
                 <div>
-                  <strong>D</strong>
                   <span>
                     Device
                     <small>-</small>
                   </span>
                 </div>
                 <div>
-                  <strong>U</strong>
                   <span>
                     Assigned User
                     <small>{editForm.fullName || '-'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>B</strong>
                   <span>
                     Department
                     <small>{editingUser.department || '-'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>R</strong>
                   <span>
                     RFID Status
                     <small>{editForm.rfidUid ? 'Registered' : 'Pending'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>F</strong>
                   <span>
                     Biometric Status
                     <small>{editingUser.fingerprint_id ? 'Registered' : 'Missing'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>S</strong>
                   <span>
                     Device Status
                     <small>Pending Setup</small>
@@ -2213,42 +2207,36 @@ export function UserManagementPage() {
               </h3>
               <div className="user-edit-summary">
                 <div>
-                  <strong>D</strong>
                   <span>
                     Device
                     <small>-</small>
                   </span>
                 </div>
                 <div>
-                  <strong>U</strong>
                   <span>
                     Assigned User
                     <small>{createForm.fullName || '-'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>B</strong>
                   <span>
                     Department
                     <small>{createForm.department || '-'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>R</strong>
                   <span>
                     RFID Status
                     <small>{createForm.rfidUid ? 'Registered' : 'Pending'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>F</strong>
                   <span>
                     Biometric Status
                     <small>{createForm.fingerprintId ? 'Registered' : 'Missing'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>S</strong>
                   <span>
                     Device Status
                     <small>Pending Setup</small>
