@@ -4,12 +4,12 @@ import { authMiddleware } from '../middleware/auth.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
-import { composeFullName, validateNameParts } from '../lib/personName.js';
+import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
 
 export const usersRouter = express.Router();
 
-// name_needs_review: the name could not be split into first/last yet (see ticket 211793).
-const USER_FIELDS = `id, employee_id, full_name, first_name, last_name,
+// name_needs_review: legacy flag from the ticket 211793 migration; always false once first/last are NOT NULL.
+const USER_FIELDS = `id, employee_id, ${fullNameSql()} AS full_name, first_name, last_name,
   (first_name IS NULL OR last_name IS NULL) AS name_needs_review,
   email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`;
 usersRouter.use(authMiddleware);
@@ -93,15 +93,13 @@ usersRouter.post('/', async (req, res) => {
     return res.status(400).json({ error: Object.values(errors).join(' '), errors });
   }
 
-  const fullName = composeFullName(firstName, lastName);
-
   try {
     const expirationDate = getDefaultExpirationForRole(role);
     const result = await query(
-      `INSERT INTO users (employee_id, full_name, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, FALSE, $12)
+      `INSERT INTO users (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
        RETURNING ${USER_FIELDS}`,
-      [employeeId, fullName, firstName, lastName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive, expirationDate],
+      [employeeId, firstName, lastName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive, expirationDate],
     );
     const user = result.rows[0];
     await query(
@@ -154,7 +152,7 @@ usersRouter.patch('/:id', async (req, res) => {
   try {
     if (fullName) {
       const existingName = await query(
-        `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1`,
+        `SELECT id FROM users WHERE LOWER(${fullNameSql()}) = LOWER($1) AND id <> $2 LIMIT 1`,
         [fullName, id],
       );
 
@@ -182,21 +180,20 @@ usersRouter.patch('/:id', async (req, res) => {
 
     const result = await query(
       `UPDATE users
-       SET full_name = COALESCE($1, full_name),
-         first_name = COALESCE($2, first_name),
-         last_name = COALESCE($3, last_name),
-         email = COALESCE($4, email),
-         phone = COALESCE($5, phone),
-         department = COALESCE($6, department),
-         role = COALESCE($7, role),
-         fingerprint_id = COALESCE($8, fingerprint_id),
-         rfid_uid = COALESCE($9, rfid_uid),
-         is_active = COALESCE($10, is_active),
-         is_archived = COALESCE($11, is_archived),
+       SET first_name = COALESCE($1, first_name),
+         last_name = COALESCE($2, last_name),
+         email = COALESCE($3, email),
+         phone = COALESCE($4, phone),
+         department = COALESCE($5, department),
+         role = COALESCE($6, role),
+         fingerprint_id = COALESCE($7, fingerprint_id),
+         rfid_uid = COALESCE($8, rfid_uid),
+         is_active = COALESCE($9, is_active),
+         is_archived = COALESCE($10, is_archived),
          updated_at = NOW()
-       WHERE id = $12
+       WHERE id = $11
        RETURNING ${USER_FIELDS}`,
-      [fullName, namesProvided ? firstName : null, namesProvided ? lastName : null, email ?? null, phone ?? null, department ?? null, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, isArchived ?? null, id],
+      [namesProvided ? firstName : null, namesProvided ? lastName : null, email ?? null, phone ?? null, department ?? null, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, isArchived ?? null, id],
     );
 
     if (result.rowCount === 0) {

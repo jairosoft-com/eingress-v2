@@ -30,3 +30,10 @@ export function validateNameParts(body) {
 
   return { firstName, lastName, errors };
 }
+
+// SQL expression for a person's name, built from the stored parts: fullNameSql('u') -> (u.first_name || ' ' || u.last_name).
+// Readers alias it AS full_name so API responses keep their shape.
+export function fullNameSql(tableAlias = '') {
+  const prefix = tableAlias ? `${tableAlias}.` : '';
+  return `(${prefix}first_name || ' ' || ${prefix}last_name)`;
+}

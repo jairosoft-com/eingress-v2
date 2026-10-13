@@ -11,7 +11,7 @@ import { broadcastActivityEvent } from '../activityEvents.js';
 import { getDuplicateUserMessage } from './users.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
-import { composeFullName, validateNameParts } from '../lib/personName.js';
+import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
 
 export const enrollmentRequestsRouter = express.Router();
 
@@ -103,9 +103,9 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
     const existingUser = await client.query(
       `SELECT full_name
        FROM (
-         SELECT full_name FROM users
+         SELECT ${fullNameSql()} AS full_name FROM users
          UNION ALL
-         SELECT full_name FROM enrollment_requests
+         SELECT ${fullNameSql()} AS full_name FROM enrollment_requests
        ) existing_names
        WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1))
        LIMIT 1`,
@@ -189,12 +189,11 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
 
     const result = await client.query(
       `INSERT INTO enrollment_requests
-        (employee_id, full_name, first_name, last_name, department, request_type, email, phone, rfid_uid)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, request_code, employee_id, full_name, first_name, last_name, department, request_type, email, phone, rfid_uid, status, submitted_at`,
+        (employee_id, first_name, last_name, department, request_type, email, phone, rfid_uid)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, request_code, employee_id, ${fullNameSql()} AS full_name, first_name, last_name, department, request_type, email, phone, rfid_uid, status, submitted_at`,
       [
         employeeId,
-        fullName,
         firstName,
         lastName,
         department.trim(),
@@ -246,7 +245,7 @@ enrollmentRequestsRouter.use(authMiddleware);
 enrollmentRequestsRouter.get('/', async (req, res, next) => {
   try {
     const result = await query(
-      `SELECT id, request_code, employee_id, full_name, first_name, last_name, department, request_type, email, phone,
+      `SELECT id, request_code, employee_id, ${fullNameSql()} AS full_name, first_name, last_name, department, request_type, email, phone,
         status, rfid_uid, fingerprint_template, submitted_at, reviewed_at, reviewed_by,
         rejection_reason
        FROM enrollment_requests
@@ -274,18 +273,16 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
       return res.status(400).json({ error: Object.values(errors).join(' '), errors });
     }
 
-    const fullName = composeFullName(firstName, lastName);
-
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock($1)', [20260617]);
     await resetEnrollmentSequencesIfEmpty(client);
 
     const result = await client.query(
       `INSERT INTO enrollment_requests
-        (employee_id, full_name, first_name, last_name, department, request_type, email, phone, rfid_uid, fingerprint_template)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [employeeId, fullName, firstName, lastName, department, requestType, email || null, phone || null, rfidUid || null, fingerprintTemplate || null],
+        (employee_id, first_name, last_name, department, request_type, email, phone, rfid_uid, fingerprint_template)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *, ${fullNameSql()} AS full_name`,
+      [employeeId, firstName, lastName, department, requestType, email || null, phone || null, rfidUid || null, fingerprintTemplate || null],
     );
 
     await client.query('COMMIT');
@@ -327,7 +324,7 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
     await client.query('BEGIN');
 
     const requestResult = await client.query(
-      `SELECT *
+      `SELECT *, ${fullNameSql()} AS full_name
        FROM enrollment_requests
        WHERE id = $1
        FOR UPDATE`,
@@ -353,11 +350,10 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
 
       await client.query(
         `INSERT INTO users
-          (employee_id, full_name, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, expiration_date)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, expiration_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (employee_id) DO UPDATE
-         SET full_name = EXCLUDED.full_name,
-           first_name = EXCLUDED.first_name,
+         SET first_name = EXCLUDED.first_name,
            last_name = EXCLUDED.last_name,
            email = EXCLUDED.email,
            phone = EXCLUDED.phone,
@@ -369,7 +365,6 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
            updated_at = NOW()`,
         [
           request.employee_id,
-          request.full_name,
           request.first_name,
           request.last_name,
           request.email,
@@ -389,7 +384,7 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
          reviewed_at = CASE WHEN $1::enrollment_status = 'Pending' THEN NULL ELSE NOW() END,
          updated_at = NOW()
        WHERE id = $4
-       RETURNING *`,
+       RETURNING *, ${fullNameSql()} AS full_name`,
       [status, rejectionReason || null, req.user.adminId || null, id],
     );
 
