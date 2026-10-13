@@ -98,10 +98,13 @@ type UserRecord = {
   employee_id: string;
   expiration_date?: string | null;
   fingerprint_id: string | null;
+  first_name?: string | null;
   full_name: string;
   id: number;
   is_active: boolean;
   is_archived?: boolean;
+  last_name?: string | null;
+  name_needs_review?: boolean;
   phone: string | null;
   rfid_uid: string | null;
   role: string | null;
@@ -120,6 +123,7 @@ type UserDisplayRow = {
   expirationDate: string | null;
   id: number;
   name: string;
+  needsReview: boolean;
   online: boolean;
   rfidUid: string;
   role: string;
@@ -235,15 +239,34 @@ function withCurrentOption(options: string[], current: string): string[] {
 }
 
 type UserEditForm = {
-  fullName: string;
+  firstName: string;
+  lastName: string;
   rfidUid: string;
   role: string;
   fingerprintId: string;
 };
 
+type UserFormFieldErrors = {
+  employeeId?: string;
+  firstName?: string;
+  lastName?: string;
+};
+
+function stripNonLetters(value: string) {
+  return value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ '’-]/g, '');
+}
+
+function validateNamePart(label: string, value: string): string | undefined {
+  if (!value.trim()) return `${label} is required.`;
+  if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '’-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$/.test(value.trim()))
+    return `Enter a valid ${label.toLowerCase()}.`;
+  return undefined;
+}
+
 type CreateUserForm = {
   employeeId: string;
-  fullName: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   department: string;
@@ -698,6 +721,7 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     expirationDate,
     id: user.id,
     name: user.full_name,
+    needsReview: Boolean(user.name_needs_review),
     online: user.is_active,
     rfidUid: user.rfid_uid || '-',
     role: user.role || 'Employee',
@@ -760,16 +784,19 @@ export function UserManagementPage() {
   const [updatingUserId, setUpdatingUserId] = useState<number | null>(null);
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
   const [editForm, setEditForm] = useState<UserEditForm>({
-    fullName: '',
+    firstName: '',
+    lastName: '',
     rfidUid: '',
     role: 'Employee',
     fingerprintId: '',
   });
   const [editFormError, setEditFormError] = useState('');
+  const [editFieldErrors, setEditFieldErrors] = useState<UserFormFieldErrors>({});
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateUserForm>({
     employeeId: '',
-    fullName: '',
+    firstName: '',
+    lastName: '',
     email: '',
     phone: '',
     department: '',
@@ -778,6 +805,7 @@ export function UserManagementPage() {
     fingerprintId: '',
   });
   const [createFormError, setCreateFormError] = useState('');
+  const [createFieldErrors, setCreateFieldErrors] = useState<UserFormFieldErrors>({});
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [isRfidScannerOpen, setIsRfidScannerOpen] = useState(false);
   const [isFingerprintScannerOpen, setIsFingerprintScannerOpen] = useState(false);
@@ -1039,12 +1067,14 @@ export function UserManagementPage() {
 
     setEditingUser(user);
     setEditForm({
-      fullName: user.full_name,
+      firstName: user.first_name || '',
+      lastName: user.last_name || '',
       rfidUid: user.rfid_uid || '',
       role: user.role || 'Employee',
       fingerprintId: user.fingerprint_id || '',
     });
     setEditFormError('');
+    setEditFieldErrors({});
     setIsRfidScannerOpen(false);
     setIsFingerprintScannerOpen(false);
     setUsersErrorMessage('');
@@ -1127,19 +1157,27 @@ export function UserManagementPage() {
       return;
     }
 
-    const fullName = editForm.fullName.trim();
+    const firstName = editForm.firstName.trim();
+    const lastName = editForm.lastName.trim();
     const rfidUid = editForm.rfidUid.trim();
     const role = editForm.role.trim();
     const fingerprintId = editForm.fingerprintId.trim();
 
-    if (!fullName) {
-      setEditFormError('User name is required.');
+    const nameErrors: UserFormFieldErrors = {
+      firstName: validateNamePart('First name', firstName),
+      lastName: validateNamePart('Last name', lastName),
+    };
+
+    if (nameErrors.firstName || nameErrors.lastName) {
+      setEditFieldErrors(nameErrors);
+      setEditFormError('');
       return;
     }
 
     try {
       setUpdatingUserId(editingUser.id);
       setEditFormError('');
+      setEditFieldErrors({});
       setUsersErrorMessage('');
 
       const response = await fetch(`${API_BASE_URL}/users/${editingUser.id}`, {
@@ -1149,7 +1187,8 @@ export function UserManagementPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          fullName,
+          firstName,
+          lastName,
           role,
           rfidUid: rfidUid || null,
           fingerprintId: fingerprintId || null,
@@ -1158,8 +1197,18 @@ export function UserManagementPage() {
 
       const data = (await response.json().catch(() => null)) as
         | UserRecord
-        | { error?: string }
+        | { error?: string; errors?: UserFormFieldErrors }
         | null;
+
+      if (
+        !response.ok &&
+        data &&
+        'errors' in data &&
+        (data.errors?.firstName || data.errors?.lastName)
+      ) {
+        setEditFieldErrors(data.errors);
+        return;
+      }
 
       if (!response.ok || !('id' in (data ?? {}))) {
         throw new Error(
@@ -1188,7 +1237,8 @@ export function UserManagementPage() {
     }
 
     const employeeId = createForm.employeeId.trim();
-    const fullName = createForm.fullName.trim();
+    const firstName = createForm.firstName.trim();
+    const lastName = createForm.lastName.trim();
     const email = createForm.email.trim();
     const phone = createForm.phone.trim();
     const department = createForm.department.trim();
@@ -1196,14 +1246,22 @@ export function UserManagementPage() {
     const rfidUid = createForm.rfidUid.trim();
     const fingerprintId = createForm.fingerprintId.trim();
 
-    if (!employeeId || !fullName) {
-      setCreateFormError('Employee ID and user name are required.');
+    const fieldErrors: UserFormFieldErrors = {
+      employeeId: employeeId ? undefined : 'Employee ID is required.',
+      firstName: validateNamePart('First name', firstName),
+      lastName: validateNamePart('Last name', lastName),
+    };
+
+    if (fieldErrors.employeeId || fieldErrors.firstName || fieldErrors.lastName) {
+      setCreateFieldErrors(fieldErrors);
+      setCreateFormError('');
       return;
     }
 
     try {
       setIsCreatingUser(true);
       setCreateFormError('');
+      setCreateFieldErrors({});
       setUsersErrorMessage('');
 
       const response = await fetch(`${API_BASE_URL}/users`, {
@@ -1214,7 +1272,8 @@ export function UserManagementPage() {
         },
         body: JSON.stringify({
           employeeId,
-          fullName,
+          firstName,
+          lastName,
           email: email || null,
           phone: phone || null,
           department: department || null,
@@ -1227,8 +1286,18 @@ export function UserManagementPage() {
 
       const data = (await response.json().catch(() => null)) as
         | UserRecord
-        | { error?: string }
+        | { error?: string; errors?: UserFormFieldErrors }
         | null;
+
+      if (
+        !response.ok &&
+        data &&
+        'errors' in data &&
+        (data.errors?.employeeId || data.errors?.firstName || data.errors?.lastName)
+      ) {
+        setCreateFieldErrors(data.errors);
+        return;
+      }
 
       if (!response.ok || !('id' in (data ?? {}))) {
         throw new Error(
@@ -1242,7 +1311,8 @@ export function UserManagementPage() {
       setIsCreateUserOpen(false);
       setCreateForm({
         employeeId: '',
-        fullName: '',
+        firstName: '',
+        lastName: '',
         email: '',
         phone: '',
         department: '',
@@ -1426,9 +1496,11 @@ export function UserManagementPage() {
               onClick={() => {
                 setIsCreateUserOpen(true);
                 setCreateFormError('');
+                setCreateFieldErrors({});
                 setCreateForm({
                   employeeId: '',
-                  fullName: '',
+                  firstName: '',
+                  lastName: '',
                   email: '',
                   phone: '',
                   department: '',
@@ -1559,6 +1631,9 @@ export function UserManagementPage() {
                             <strong>{user.name}</strong>
                             <small>
                               {user.employeeId}
+                              {user.needsReview ? (
+                                <span className="name-review-badge">{' · '}Needs review</span>
+                              ) : null}
                               {countdown ? (
                                 <span
                                   className={`expiry-badge${countdown.isExpired ? ' expired' : ''}`}
@@ -1735,18 +1810,49 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Full Name *</span>
+                  <span>First Name *</span>
                   <input
+                    aria-invalid={Boolean(editFieldErrors.firstName)}
                     autoFocus
-                    onChange={(event) =>
-                      setEditForm((currentForm) => ({
-                        ...currentForm,
-                        fullName: event.target.value,
-                      }))
-                    }
-                    value={editForm.fullName}
+                    onChange={(event) => {
+                      const firstName = stripNonLetters(event.target.value);
+                      setEditForm((currentForm) => ({ ...currentForm, firstName }));
+                      setEditFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        firstName: undefined,
+                      }));
+                    }}
+                    value={editForm.firstName}
                   />
+                  {editFieldErrors.firstName ? (
+                    <small className="field-error">{editFieldErrors.firstName}</small>
+                  ) : null}
                 </label>
+
+                <label className="user-edit-field">
+                  <span>Last Name *</span>
+                  <input
+                    aria-invalid={Boolean(editFieldErrors.lastName)}
+                    onChange={(event) => {
+                      const lastName = stripNonLetters(event.target.value);
+                      setEditForm((currentForm) => ({ ...currentForm, lastName }));
+                      setEditFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        lastName: undefined,
+                      }));
+                    }}
+                    value={editForm.lastName}
+                  />
+                  {editFieldErrors.lastName ? (
+                    <small className="field-error">{editFieldErrors.lastName}</small>
+                  ) : null}
+                </label>
+
+                {editingUser.name_needs_review ? (
+                  <p className="field-error">
+                    Name needs review — original: {editingUser.full_name}
+                  </p>
+                ) : null}
 
                 <label className="user-edit-field">
                   <span>Role *</span>
@@ -1832,7 +1938,9 @@ export function UserManagementPage() {
                   <strong>U</strong>
                   <span>
                     Assigned User
-                    <small>{editForm.fullName || '-'}</small>
+                    <small>
+                      {[editForm.firstName, editForm.lastName].filter(Boolean).join(' ') || '-'}
+                    </small>
                   </span>
                 </div>
                 <div>
@@ -1930,28 +2038,59 @@ export function UserManagementPage() {
                 <label className="user-edit-field">
                   <span>Employee / User ID *</span>
                   <input
+                    aria-invalid={Boolean(createFieldErrors.employeeId)}
                     autoFocus
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        employeeId: event.target.value,
-                      }))
-                    }
+                    onChange={(event) => {
+                      const employeeId = event.target.value;
+                      setCreateForm((currentForm) => ({ ...currentForm, employeeId }));
+                      setCreateFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        employeeId: undefined,
+                      }));
+                    }}
                     value={createForm.employeeId}
                   />
+                  {createFieldErrors.employeeId ? (
+                    <small className="field-error">{createFieldErrors.employeeId}</small>
+                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Full Name *</span>
+                  <span>First Name *</span>
                   <input
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        fullName: event.target.value,
-                      }))
-                    }
-                    value={createForm.fullName}
+                    aria-invalid={Boolean(createFieldErrors.firstName)}
+                    onChange={(event) => {
+                      const firstName = stripNonLetters(event.target.value);
+                      setCreateForm((currentForm) => ({ ...currentForm, firstName }));
+                      setCreateFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        firstName: undefined,
+                      }));
+                    }}
+                    value={createForm.firstName}
                   />
+                  {createFieldErrors.firstName ? (
+                    <small className="field-error">{createFieldErrors.firstName}</small>
+                  ) : null}
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Last Name *</span>
+                  <input
+                    aria-invalid={Boolean(createFieldErrors.lastName)}
+                    onChange={(event) => {
+                      const lastName = stripNonLetters(event.target.value);
+                      setCreateForm((currentForm) => ({ ...currentForm, lastName }));
+                      setCreateFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        lastName: undefined,
+                      }));
+                    }}
+                    value={createForm.lastName}
+                  />
+                  {createFieldErrors.lastName ? (
+                    <small className="field-error">{createFieldErrors.lastName}</small>
+                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
@@ -2072,7 +2211,9 @@ export function UserManagementPage() {
                   <strong>U</strong>
                   <span>
                     Assigned User
-                    <small>{createForm.fullName || '-'}</small>
+                    <small>
+                      {[createForm.firstName, createForm.lastName].filter(Boolean).join(' ') || '-'}
+                    </small>
                   </span>
                 </div>
                 <div>

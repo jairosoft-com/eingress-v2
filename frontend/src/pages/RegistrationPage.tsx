@@ -19,22 +19,31 @@ import { API_BASE_URL } from '../lib/api';
 type RegistrationErrors = {
   department?: string;
   email?: string;
-  fullName?: string;
+  firstName?: string;
+  lastName?: string;
   phoneNumber?: string;
   form?: string;
 };
 
 const departments = ['Employee', 'Student', 'Staff', 'Intern'];
 
+function stripNonLetters(value: string) {
+  return value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ '’-]/g, '');
+}
+
+function validateNamePart(label: string, value: string): string | undefined {
+  if (!value.trim()) return `${label} is required.`;
+  if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '’-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$/.test(value.trim()))
+    return `Enter a valid ${label.toLowerCase()}.`;
+  return undefined;
+}
+
 function validateSingleField(
   fieldName: keyof RegistrationErrors,
   value: string,
 ): string | undefined {
-  if (fieldName === 'fullName') {
-    if (!value.trim()) return 'Full name is required.';
-    if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(value.trim()))
-      return 'Enter a valid full name.';
-  }
+  if (fieldName === 'firstName') return validateNamePart('First name', value);
+  if (fieldName === 'lastName') return validateNamePart('Last name', value);
 
   if (fieldName === 'email') {
     if (!value.trim()) return 'Email address is required.';
@@ -56,17 +65,22 @@ function validateSingleField(
 }
 
 function validateRegistrationForm(
-  fullName: string,
+  firstName: string,
+  lastName: string,
   email: string,
   phoneNumber: string,
   department: string,
 ): RegistrationErrors {
   const errors: RegistrationErrors = {};
 
-  if (!fullName.trim()) {
-    errors.fullName = 'Full name is required.';
-  } else if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '-][A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(fullName.trim())) {
-    errors.fullName = 'Enter a valid full name.';
+  const firstNameError = validateNamePart('First name', firstName);
+  if (firstNameError) {
+    errors.firstName = firstNameError;
+  }
+
+  const lastNameError = validateNamePart('Last name', lastName);
+  if (lastNameError) {
+    errors.lastName = lastNameError;
   }
 
   if (!email.trim()) {
@@ -91,7 +105,8 @@ function validateRegistrationForm(
 }
 
 export function RegistrationPage() {
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   // Holds only the 10-digit local part (9XXXXXXXXX); +63 is a fixed prefix, prepended on submit.
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -103,7 +118,13 @@ export function RegistrationPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const validationErrors = validateRegistrationForm(fullName, email, phoneNumber, department);
+    const validationErrors = validateRegistrationForm(
+      firstName,
+      lastName,
+      email,
+      phoneNumber,
+      department,
+    );
     setErrors(validationErrors);
     setSuccessMessage('');
 
@@ -120,7 +141,8 @@ export function RegistrationPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          fullName,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
           department,
           email,
           phone: `+63${phoneNumber}`,
@@ -129,11 +151,33 @@ export function RegistrationPage() {
 
       const data = (await response.json().catch(() => null)) as {
         error?: string;
+        errors?: {
+          department?: string;
+          email?: string;
+          firstName?: string;
+          lastName?: string;
+          phone?: string;
+        };
         field?: string;
         request_code?: string;
       } | null;
 
       if (!response.ok) {
+        if (response.status === 400 && data?.errors) {
+          const fieldErrors: RegistrationErrors = {
+            department: data.errors.department,
+            email: data.errors.email,
+            firstName: data.errors.firstName,
+            lastName: data.errors.lastName,
+            phoneNumber: data.errors.phone,
+          };
+
+          if (Object.values(fieldErrors).some(Boolean)) {
+            setErrors(fieldErrors);
+            return;
+          }
+        }
+
         if (response.status === 409) {
           if (data?.field === 'rfidUid') {
             setErrors({
@@ -158,7 +202,7 @@ export function RegistrationPage() {
           }
 
           setErrors({
-            fullName: data?.error || 'Existing user. This name is already registered.',
+            lastName: data?.error || 'Existing user. This name is already registered.',
           });
           return;
         }
@@ -171,7 +215,8 @@ export function RegistrationPage() {
           ? `Registration submitted successfully. Reference: ${data.request_code}`
           : 'Registration submitted successfully.',
       );
-      setFullName('');
+      setFirstName('');
+      setLastName('');
       setEmail('');
       setPhoneNumber('');
       setDepartment('');
@@ -216,35 +261,71 @@ export function RegistrationPage() {
 
         <form className="google-form" noValidate onSubmit={handleSubmit}>
           <section className="question-card">
-            <label htmlFor="fullName">
-              Full name <span aria-hidden="true">*</span>
+            <label htmlFor="firstName">
+              First name <span aria-hidden="true">*</span>
             </label>
             <div className="google-input-shell">
               <UserRound size={20} aria-hidden="true" />
               <input
-                aria-describedby={errors.fullName ? 'full-name-error' : undefined}
-                aria-invalid={Boolean(errors.fullName)}
-                autoComplete="name"
-                id="fullName"
-                name="fullName"
+                aria-describedby={errors.firstName ? 'first-name-error' : undefined}
+                aria-invalid={Boolean(errors.firstName)}
+                autoComplete="given-name"
+                id="firstName"
+                name="firstName"
                 onBlur={() => {
-                  const error = validateSingleField('fullName', fullName);
-                  setErrors((prev) => ({ ...prev, fullName: error }));
+                  const error = validateSingleField('firstName', firstName);
+                  setErrors((prev) => ({ ...prev, firstName: error }));
                 }}
                 onChange={(event) => {
-                  setFullName(event.target.value);
-                  if (errors.fullName && !validateSingleField('fullName', event.target.value)) {
-                    setErrors((prev) => ({ ...prev, fullName: undefined }));
+                  const sanitized = stripNonLetters(event.target.value);
+                  setFirstName(sanitized);
+                  if (errors.firstName && !validateSingleField('firstName', sanitized)) {
+                    setErrors((prev) => ({ ...prev, firstName: undefined }));
                   }
                 }}
                 placeholder="Your answer"
                 type="text"
-                value={fullName}
+                value={firstName}
               />
             </div>
-            {errors.fullName ? (
-              <span className="field-error" id="full-name-error">
-                {errors.fullName}
+            {errors.firstName ? (
+              <span className="field-error" id="first-name-error">
+                {errors.firstName}
+              </span>
+            ) : null}
+          </section>
+
+          <section className="question-card">
+            <label htmlFor="lastName">
+              Last name <span aria-hidden="true">*</span>
+            </label>
+            <div className="google-input-shell">
+              <UserRound size={20} aria-hidden="true" />
+              <input
+                aria-describedby={errors.lastName ? 'last-name-error' : undefined}
+                aria-invalid={Boolean(errors.lastName)}
+                autoComplete="family-name"
+                id="lastName"
+                name="lastName"
+                onBlur={() => {
+                  const error = validateSingleField('lastName', lastName);
+                  setErrors((prev) => ({ ...prev, lastName: error }));
+                }}
+                onChange={(event) => {
+                  const sanitized = stripNonLetters(event.target.value);
+                  setLastName(sanitized);
+                  if (errors.lastName && !validateSingleField('lastName', sanitized)) {
+                    setErrors((prev) => ({ ...prev, lastName: undefined }));
+                  }
+                }}
+                placeholder="Your answer"
+                type="text"
+                value={lastName}
+              />
+            </div>
+            {errors.lastName ? (
+              <span className="field-error" id="last-name-error">
+                {errors.lastName}
               </span>
             ) : null}
           </section>
@@ -378,7 +459,8 @@ export function RegistrationPage() {
             <button
               className="clear-form-button"
               onClick={() => {
-                setFullName('');
+                setFirstName('');
+                setLastName('');
                 setEmail('');
                 setPhoneNumber('');
                 setDepartment('');
