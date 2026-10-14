@@ -2605,7 +2605,7 @@ td small {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.user-edit-grid.two-columns .user-edit-field:last-child {
+.user-edit-grid.two-columns .user-edit-field:last-child:nth-child(odd) {
   grid-column: 1 / 2;
 }
 

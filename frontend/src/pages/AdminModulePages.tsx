@@ -238,6 +238,7 @@ type UserEditForm = {
   fullName: string;
   rfidUid: string;
   role: string;
+  email: string;
   fingerprintId: string;
 };
 
@@ -770,6 +771,7 @@ export function UserManagementPage() {
     fullName: '',
     rfidUid: '',
     role: 'Employee',
+    email: '',
     fingerprintId: '',
   });
   const [editFormError, setEditFormError] = useState('');
@@ -1051,6 +1053,7 @@ export function UserManagementPage() {
       fullName: user.full_name,
       rfidUid: user.rfid_uid || '',
       role: user.role || 'Employee',
+      email: user.email || '',
       fingerprintId: user.fingerprint_id || '',
     });
     setEditFormError('');
@@ -1139,10 +1142,16 @@ export function UserManagementPage() {
     const fullName = editForm.fullName.trim();
     const rfidUid = editForm.rfidUid.trim();
     const role = editForm.role.trim();
+    const email = editForm.email.trim();
     const fingerprintId = editForm.fingerprintId.trim();
 
     if (!fullName) {
       setEditFormError('User name is required.');
+      return;
+    }
+
+    if (!email) {
+      setEditFormError('Email is required.');
       return;
     }
 
@@ -1160,6 +1169,7 @@ export function UserManagementPage() {
         body: JSON.stringify({
           fullName,
           role,
+          email,
           rfidUid: rfidUid || null,
           fingerprintId: fingerprintId || null,
         }),
@@ -1846,6 +1856,20 @@ export function UserManagementPage() {
                       <option key={role}>{role}</option>
                     ))}
                   </select>
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Email *</span>
+                  <input
+                    autoFocus
+                    onChange={(event) =>
+                      setEditForm((currentForm) => ({
+                        ...currentForm,
+                        email: event.target.value,
+                      }))
+                    }
+                    value={editForm.email}
+                  />
                 </label>
               </div>
 
