@@ -238,6 +238,7 @@ type UserEditForm = {
   fullName: string;
   rfidUid: string;
   role: string;
+  email: string;
   fingerprintId: string;
 };
 
@@ -777,6 +778,7 @@ export function UserManagementPage() {
     fullName: '',
     rfidUid: '',
     role: 'Employee',
+    email: '',
     fingerprintId: '',
   });
   const [editFormError, setEditFormError] = useState('');
@@ -1058,6 +1060,7 @@ export function UserManagementPage() {
       fullName: user.full_name,
       rfidUid: user.rfid_uid || '',
       role: user.role || 'Employee',
+      email: user.email || '',
       fingerprintId: user.fingerprint_id || '',
     });
     setEditFormError('');
@@ -1148,11 +1151,17 @@ export function UserManagementPage() {
     const fullName = editForm.fullName.trim();
     const rfidUid = editForm.rfidUid.trim();
     const role = editForm.role.trim();
+    const email = editForm.email.trim();
     const fingerprintId = editForm.fingerprintId.trim();
 
     const fullNameError = validateCreateUserField('fullName', editForm.fullName);
     setEditErrors({ fullName: fullNameError });
     if (fullNameError) {
+      return;
+    }
+
+    if (!email) {
+      setEditFormError('Email is required.');
       return;
     }
 
@@ -1171,6 +1180,7 @@ export function UserManagementPage() {
         body: JSON.stringify({
           fullName,
           role,
+          email,
           rfidUid: rfidUid || null,
           fingerprintId: fingerprintId || null,
         }),
@@ -1320,7 +1330,8 @@ export function UserManagementPage() {
     if (fieldName === 'email') {
       if (!value.trim()) return 'Email address is required.';
       if (
-        !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(
+        value.trim().length > 254 ||
+        !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/.test(
           value.trim(),
         )
       )
@@ -1830,12 +1841,10 @@ export function UserManagementPage() {
                     aria-invalid={Boolean(editErrors.fullName)}
                     autoComplete="name"
                     autoFocus
-                    onBlur={() =>
-                      setEditErrors((prev) => ({
-                        ...prev,
-                        fullName: validateCreateUserField('fullName', editForm.fullName),
-                      }))
-                    }
+                    onBlur={() => {
+                      const error = validateCreateUserField('fullName', editForm.fullName);
+                      setCreateErrors((prev) => ({ ...prev, fullName: error }));
+                    }}
                     onChange={(event) => {
                       const sanitized = event.target.value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ ]/g, '');
                       setEditForm((currentForm) => ({ ...currentForm, fullName: sanitized }));
@@ -1864,6 +1873,36 @@ export function UserManagementPage() {
                       <option key={role}>{role}</option>
                     ))}
                   </select>
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Email *</span>
+                  <input
+                    aria-describedby={editErrors.email ? 'edit-email-error' : undefined}
+                    aria-invalid={Boolean(editErrors.email)}
+                    autoComplete="email"
+                    autoFocus
+                    onBlur={() => {
+                      const error = validateCreateUserField('email', editForm.email);
+                      setEditErrors((prev) => ({ ...prev, email: error }));
+                    }}
+                    onChange={(event) => {
+                      const sanitized = event.target.value.replace(/[^A-Za-z0-9._%+@-]/g, '');
+                      setEditForm((currentForm) => ({ ...currentForm, email: sanitized }));
+                      setEditErrors((prev) => ({
+                        ...prev,
+                        email: validateCreateUserField('email', sanitized),
+                      }));
+                      setEditFormError('');
+                    }}
+                    type="email"
+                    value={editForm.email}
+                  />
+                  {editErrors.email ? (
+                    <span className="field-error" id="edit-email-error">
+                      {editErrors.email}
+                    </span>
+                  ) : null}
                 </label>
               </div>
 
@@ -1926,42 +1965,36 @@ export function UserManagementPage() {
               </h3>
               <div className="user-edit-summary">
                 <div>
-                  <strong>D</strong>
                   <span>
                     Device
                     <small>-</small>
                   </span>
                 </div>
                 <div>
-                  <strong>U</strong>
                   <span>
                     Assigned User
                     <small>{editForm.fullName || '-'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>B</strong>
                   <span>
                     Department
                     <small>{editingUser.department || '-'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>R</strong>
                   <span>
                     RFID Status
                     <small>{editForm.rfidUid ? 'Registered' : 'Pending'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>F</strong>
                   <span>
                     Biometric Status
                     <small>{editingUser.fingerprint_id ? 'Registered' : 'Missing'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>S</strong>
                   <span>
                     Device Status
                     <small>Pending Setup</small>
@@ -2237,42 +2270,36 @@ export function UserManagementPage() {
               </h3>
               <div className="user-edit-summary">
                 <div>
-                  <strong>D</strong>
                   <span>
                     Device
                     <small>-</small>
                   </span>
                 </div>
                 <div>
-                  <strong>U</strong>
                   <span>
                     Assigned User
                     <small>{createForm.fullName || '-'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>B</strong>
                   <span>
                     Department
                     <small>{createForm.department || '-'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>R</strong>
                   <span>
                     RFID Status
                     <small>{createForm.rfidUid ? 'Registered' : 'Pending'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>F</strong>
                   <span>
                     Biometric Status
                     <small>{createForm.fingerprintId ? 'Registered' : 'Missing'}</small>
                   </span>
                 </div>
                 <div>
-                  <strong>S</strong>
                   <span>
                     Device Status
                     <small>Pending Setup</small>
