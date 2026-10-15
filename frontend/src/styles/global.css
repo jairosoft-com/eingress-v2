@@ -2513,6 +2513,20 @@ td small {
   box-shadow: -22px 0 48px rgb(7 20 53 / 18%);
 }
 
+.user-create-dialog .user-edit-grid.two-columns .user-edit-field {
+  position: relative;
+  padding-bottom: 18px;
+}
+
+.user-create-dialog .user-edit-grid.two-columns .user-edit-field .field-error {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+
 .user-edit-dialog header {
   display: flex;
   align-items: flex-start;
@@ -2596,7 +2610,7 @@ td small {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.user-edit-grid.two-columns .user-edit-field:last-child {
+.user-edit-grid.two-columns .user-edit-field:last-child:nth-child(odd) {
   grid-column: 1 / 2;
 }
 
@@ -2733,6 +2747,7 @@ td small {
 }
 
 .user-edit-summary span {
+  grid-column: 2;
   display: grid;
   gap: 5px;
   color: #071435;

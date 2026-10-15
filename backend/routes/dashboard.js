@@ -16,7 +16,11 @@ dashboardRouter.get('/', async (req, res, next) => {
           (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE) AS total_access,
           (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Granted') AS successful_attempts,
           (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Denied') AS failed_attempts,
-          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online') AS active_devices`,
+          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online') AS active_devices,
+          (SELECT COUNT(*)::int FROM users WHERE created_at < CURRENT_DATE AND (is_active = TRUE OR deactivated_at >= CURRENT_DATE)) AS total_users_yesterday,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE - 1) AS total_access_yesterday,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE - 1 AND result = 'Denied') AS failed_attempts_yesterday,
+          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online' AND created_at < CURRENT_DATE) AS active_devices_yesterday`,
       ),
       query(
         `SELECT *

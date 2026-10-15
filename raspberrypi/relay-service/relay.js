@@ -2,13 +2,12 @@ import { io } from "socket.io-client";
 import EvdevReader from "evdev";
 import net from "net";
 
-<<<<<<< HEAD
-const BACKEND_URL = "http://192.168.53.49:4000";
-=======
-const BACKEND_URL = "http://192.168.53.90:4000";
->>>>>>> origin/main
-const RFID_DEVICE = "/dev/input/event5";
-const MAGLOCK_SOCKET = "/tmp/maglock.sock";
+const BACKEND_URL = process.env.EINGRESS_API_URL || "http://192.168.42.21:4000";
+const RFID_DEVICE =
+  process.env.EINGRESS_RFID_DEVICE ||
+  "/dev/input/by-id/usb-RFID_Reader_RFID_Reader_HF12402E73-event-kbd";
+const MAGLOCK_SOCKET = process.env.EINGRESS_MAGLOCK_SOCKET || "/tmp/maglock.sock";
+const DEVICE_ID = process.env.EINGRESS_DEVICE_ID;
 
 // ------------------------------------
 // Socket.IO Connection
@@ -116,6 +115,7 @@ device.on("EV_KEY", async (event) => {
           },
           body: JSON.stringify({
             rfidUid: uid,
+            ...(DEVICE_ID ? { deviceId: Number(DEVICE_ID) } : {}),
           }),
         }
       );
