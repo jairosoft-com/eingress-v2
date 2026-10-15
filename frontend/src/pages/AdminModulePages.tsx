@@ -375,7 +375,9 @@ function EnrollmentFilterRow({
       </select>
       <input
         aria-label="Search by name or ID"
-        onChange={(event) => onNameChange(event.target.value)}
+        onChange={(event) =>
+          onNameChange(event.target.value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ0-9 ]/g, ''))
+        }
         placeholder="Search by name or ID..."
         type="search"
         value={nameFilter}
