@@ -2,6 +2,7 @@ import express from 'express';
 
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { fullNameSql } from '../lib/personName.js';
 
 export const attendanceRouter = express.Router();
 attendanceRouter.use(authMiddleware);
@@ -28,16 +29,16 @@ attendanceRouter.get('/', async (req, res, next) => {
 
     if (search) {
       params.push(`%${search}%`);
-      where.push(`(u.full_name ILIKE $${params.length} OR u.employee_id ILIKE $${params.length})`);
+      where.push(`(${fullNameSql('u')} ILIKE $${params.length} OR u.employee_id ILIKE $${params.length})`);
     }
 
     const result = await query(
       `SELECT ar.id, ar.attendance_date, ar.check_in_at, ar.check_out_at, ar.status, ar.location,
-        u.employee_id, u.full_name, u.department, u.role
+        u.employee_id, ${fullNameSql('u')} AS full_name, u.department, u.role
        FROM attendance_records ar
        JOIN users u ON u.id = ar.user_id
        WHERE ${where.join(' AND ')}
-       ORDER BY ar.attendance_date DESC, ar.check_in_at DESC NULLS LAST, u.full_name`,
+       ORDER BY ar.attendance_date DESC, ar.check_in_at DESC NULLS LAST, ${fullNameSql('u')}`,
       params,
     );
 

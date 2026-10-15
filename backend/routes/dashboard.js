@@ -2,6 +2,7 @@ import express from 'express';
 
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { fullNameSql } from '../lib/personName.js';
 
 export const dashboardRouter = express.Router();
 dashboardRouter.use(authMiddleware);
@@ -27,7 +28,7 @@ dashboardRouter.get('/', async (req, res, next) => {
          FROM (
            SELECT
              'access-' || al.id AS id,
-             u.full_name AS user_name,
+             ${fullNameSql('u')} AS user_name,
              u.employee_id,
              CASE WHEN al.result = 'Granted' THEN 'Access Granted' ELSE 'Access Denied' END AS event,
              al.result::text AS result,
@@ -73,7 +74,7 @@ dashboardRouter.get('/', async (req, res, next) => {
       ),
       query(
         `SELECT u.employee_id,
-          u.full_name AS name,
+          ${fullNameSql('u')} AS name,
           u.department,
           u.role,
           ar.check_in_at,
@@ -83,7 +84,7 @@ dashboardRouter.get('/', async (req, res, next) => {
          FROM attendance_records ar
          JOIN users u ON u.id = ar.user_id
          WHERE ar.attendance_date = CURRENT_DATE
-         ORDER BY ar.check_in_at DESC NULLS LAST, u.full_name
+         ORDER BY ar.check_in_at DESC NULLS LAST, ${fullNameSql('u')}
          LIMIT 10`,
       ),
     ]);
