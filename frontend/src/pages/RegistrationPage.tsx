@@ -406,7 +406,7 @@ export function RegistrationPage() {
 
           <section className="question-card">
             <label htmlFor="department">
-              Department <span aria-hidden="true">*</span>
+              Role <span aria-hidden="true">*</span>
             </label>
             <div className="google-input-shell select-shell">
               <Building2 size={20} aria-hidden="true" />
@@ -422,7 +422,7 @@ export function RegistrationPage() {
                 }}
                 value={department}
               >
-                <option value="">Choose department</option>
+                <option value="">Choose role</option>
                 {departments.map((departmentName) => (
                   <option key={departmentName} value={departmentName}>
                     {departmentName}
