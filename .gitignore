@@ -7,3 +7,5 @@ dev-err.log
 __pycache__/
 .venv/
 .env.example
+eIngress_Technical_Manual_v2.pdf
+eIngress_User_Manual_v2.pdf
