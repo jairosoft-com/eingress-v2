@@ -1193,6 +1193,8 @@ export function UserManagementPage() {
     if (nameErrors.firstName || nameErrors.lastName) {
       setEditFieldErrors(nameErrors);
       setEditFormError('');
+      return;
+    }
 
     if (!email) {
       setEditFormError('Email is required.');
@@ -1404,29 +1406,6 @@ export function UserManagementPage() {
     }
 
     return undefined;
-  }
-
-  function validateCreateUserForm(
-    employeeId: string,
-    fullName: string,
-    email: string,
-    phone: string,
-  ): CreateUserErrors {
-    const errors: CreateUserErrors = {};
-
-    const employeeIdError = validateCreateUserField('employeeId', employeeId);
-    if (employeeIdError) errors.employeeId = employeeIdError;
-
-    const fullNameError = validateCreateUserField('fullName', fullName);
-    if (fullNameError) errors.fullName = fullNameError;
-
-    const emailError = validateCreateUserField('email', email);
-    if (emailError) errors.email = emailError;
-
-    const phoneError = validateCreateUserField('phone', phone);
-    if (phoneError) errors.phone = phoneError;
-
-    return errors;
   }
 
   const filteredUsers = useMemo(() => {
