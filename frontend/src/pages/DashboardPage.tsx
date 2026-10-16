@@ -10,7 +10,7 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
 import { formatDate, formatTime, formatWeekdayShort } from '../lib/dateTimeFormat';
@@ -25,6 +25,10 @@ type DashboardMetrics = {
   todays_attendance?: number;
   total_access?: number;
   total_users?: number;
+  active_devices_yesterday?: number;
+  failed_attempts_yesterday?: number;
+  total_access_yesterday?: number;
+  total_users_yesterday?: number;
 };
 
 type RecentActivityEvent = {
@@ -132,12 +136,34 @@ function hasCheckedOut(checkInAt?: string | null, checkOutAt?: string | null) {
   return !Number.isNaN(checkInTime) && !Number.isNaN(checkOutTime) && checkOutTime !== checkInTime;
 }
 
+function getChangeBadge(
+  today: number | null | undefined,
+  yesterday: number | null | undefined,
+): { delta?: string; trend?: 'up' | 'down' } {
+  if (today == null || yesterday == null) {
+    return {};
+  }
+
+  if (yesterday === 0) {
+    return { delta: today === 0 ? '0%' : '—' };
+  }
+
+  const percentChange = Math.round(((today - yesterday) / yesterday) * 1000) / 10;
+
+  if (percentChange === 0) {
+    return { delta: '0%' };
+  }
+
+  return {
+    delta: `${Math.abs(percentChange).toFixed(1)}%`,
+    trend: percentChange > 0 ? 'up' : 'down',
+  };
+}
+
 const metricDefinitions = [
   {
     label: 'Total Users',
     value: '1,248',
-    delta: '12.5%',
-    trend: 'up',
     Icon: UsersRound,
     tone: 'red',
   },
@@ -151,8 +177,6 @@ const metricDefinitions = [
   {
     label: 'Total Access',
     value: '1,102',
-    delta: '10.2%',
-    trend: 'up',
     Icon: MonitorSmartphone,
     tone: 'purple',
   },
@@ -166,16 +190,12 @@ const metricDefinitions = [
   {
     label: 'Failed Attempts',
     value: '23',
-    delta: '15.4%',
-    trend: 'down',
     Icon: ShieldAlert,
     tone: 'amber',
   },
   {
     label: 'Active Devices',
     value: '12',
-    delta: '9.1%',
-    trend: 'up',
     Icon: Smartphone,
     tone: 'blue',
   },
@@ -185,6 +205,7 @@ const initialAccessEvents: ReturnType<typeof toAccessEvent>[] = [];
 
 export function DashboardPage() {
   const { session } = useAuth();
+  const navigate = useNavigate();
   const dateTimeSettings = useDateTimeSettings();
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [accessEvents, setAccessEvents] = useState(initialAccessEvents);
@@ -280,11 +301,18 @@ export function DashboardPage() {
     'Total Access': dashboardMetrics?.total_access ?? null,
     'Total Users': dashboardMetrics?.total_users ?? null,
   };
+  const yesterdayValues: Record<string, number | undefined> = {
+    'Active Devices': dashboardMetrics?.active_devices_yesterday,
+    'Failed Attempts': dashboardMetrics?.failed_attempts_yesterday,
+    'Total Access': dashboardMetrics?.total_access_yesterday,
+    'Total Users': dashboardMetrics?.total_users_yesterday,
+  };
   const metrics = metricDefinitions.map((metric) => {
     const liveValue = metricValues[metric.label];
 
     return {
       ...metric,
+      ...getChangeBadge(liveValue, yesterdayValues[metric.label]),
       value: liveValue === null ? '-' : liveValue.toLocaleString(),
     };
   });
@@ -333,9 +361,9 @@ export function DashboardPage() {
                 <strong>{value}</strong>
                 <small>{description ?? 'vs yesterday'}</small>
               </div>
-              {delta && trend ? (
-                <span className={`stat-delta ${trend}`}>
-                  <TrendIcon size={16} />
+              {delta ? (
+                <span className={trend ? `stat-delta ${trend}` : 'stat-delta'}>
+                  {trend ? <TrendIcon size={16} /> : null}
                   {delta}
                 </span>
               ) : null}
@@ -373,7 +401,7 @@ export function DashboardPage() {
         <section className="panel events-panel" aria-labelledby="recent-events-title">
           <div className="panel-heading">
             <h2 id="recent-events-title">Recent Access Events</h2>
-            <button className="text-button" type="button">
+            <button className="text-button" type="button" onClick={() => navigate('/access-logs')}>
               View all
             </button>
           </div>
@@ -428,7 +456,7 @@ export function DashboardPage() {
       >
         <div className="panel-heading">
           <h2 id="dashboard-attendance-title">Today's Attendance</h2>
-          <button className="text-button" type="button">
+          <button className="text-button" type="button" onClick={() => navigate('/attendance')}>
             View all
           </button>
         </div>

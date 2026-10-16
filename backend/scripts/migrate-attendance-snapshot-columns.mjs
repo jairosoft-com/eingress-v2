@@ -11,7 +11,7 @@ await query(`
 const backfillResult = await query(`
   UPDATE attendance_records ar
   SET employee_id = u.employee_id,
-      full_name = u.full_name,
+      full_name = u.first_name || ' ' || u.last_name,
       department = u.department,
       role = u.role
   FROM users u

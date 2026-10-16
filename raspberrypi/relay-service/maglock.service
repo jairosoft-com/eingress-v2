@@ -1,0 +1,14 @@
+[Unit]
+Description=EINGRESS Maglock Service
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/home/admin/eingress-v2/raspberrypi/relay-service
+ExecStart=/usr/bin/python3 /home/admin/eingress-v2/raspberrypi/relay-service/maglock.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

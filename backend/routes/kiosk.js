@@ -5,6 +5,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { broadcastMessage } from '../ws.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { createNotification } from '../lib/notifications.js';
+import { fullNameSql } from '../lib/personName.js';
 import { emitDoorUnlock } from '../socketio.js';
 
 export const kioskRouter = express.Router();
@@ -70,10 +71,10 @@ async function processKioskScanUnsafe(req, res) {
   }
 
   const method = authenticationMethod || 'RFID';
-  const deviceLabel = method === 'Fingerprint' ? 'Fingerprint Scanner' : 'RFID Reader';
+  const deviceLabel = 'RFID Reader';
 
   const userResult = await query(
-    `SELECT id, employee_id, full_name, department, role, is_active, expiration_date FROM users WHERE (${predicates.join(' OR ')}) AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
+    `SELECT id, employee_id, ${fullNameSql()} AS full_name, department, role, is_active, expiration_date FROM users WHERE (${predicates.join(' OR ')}) AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
     params,
   );
 

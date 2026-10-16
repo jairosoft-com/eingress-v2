@@ -4,8 +4,14 @@ import { authMiddleware } from '../middleware/auth.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
+import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
 
 export const usersRouter = express.Router();
+
+// name_needs_review: legacy flag from the ticket 211793 migration; always false once first/last are NOT NULL.
+const USER_FIELDS = `id, employee_id, ${fullNameSql()} AS full_name, first_name, last_name,
+  (first_name IS NULL OR last_name IS NULL) AS name_needs_review,
+  email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`;
 usersRouter.use(authMiddleware);
 
 async function ensureUserStatusColumns() {
@@ -64,8 +70,7 @@ export function getDuplicateUserMessage(error) {
 usersRouter.get('/', async (req, res) => {
   try {
     const result = await query(
-      `SELECT id, employee_id, full_name, email, phone, department, role,
-        fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at
+      `SELECT ${USER_FIELDS}
        FROM users
        WHERE COALESCE(is_archived, FALSE) = FALSE
        ORDER BY full_name`,
@@ -77,19 +82,24 @@ usersRouter.get('/', async (req, res) => {
 });
 
 usersRouter.post('/', async (req, res) => {
-  const { employeeId, fullName, email, phone, department, role, fingerprintId, rfidUid, isActive = true } = req.body;
+  const { employeeId, email, phone, department, role, fingerprintId, rfidUid, isActive = true } = req.body;
+  const { firstName, lastName, errors } = validateNameParts(req.body);
 
-  if (!employeeId || !fullName) {
-    return res.status(400).json({ error: 'employeeId and fullName are required' });
+  if (!employeeId) {
+    errors.employeeId = 'Employee ID is required.';
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({ error: Object.values(errors).join(' '), errors });
   }
 
   try {
     const expirationDate = getDefaultExpirationForRole(role);
     const result = await query(
-      `INSERT INTO users (employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10)
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`,
-      [employeeId, fullName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive, expirationDate],
+      `INSERT INTO users (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
+       RETURNING ${USER_FIELDS}`,
+      [employeeId, firstName, lastName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive, expirationDate],
     );
     const user = result.rows[0];
     await query(
@@ -125,16 +135,24 @@ usersRouter.post('/', async (req, res) => {
 
 usersRouter.patch('/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const { fullName, email, phone, department, role, fingerprintId, rfidUid, isActive, isArchived } = req.body;
+  const { email, phone, department, role, fingerprintId, rfidUid, isActive, isArchived } = req.body;
+  const namesProvided = req.body.firstName !== undefined || req.body.lastName !== undefined;
+  const { firstName, lastName, errors: nameErrors } = validateNameParts(req.body);
 
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: 'Valid user id is required' });
   }
 
+  if (namesProvided && Object.keys(nameErrors).length > 0) {
+    return res.status(400).json({ error: Object.values(nameErrors).join(' '), errors: nameErrors });
+  }
+
+  const fullName = namesProvided ? composeFullName(firstName, lastName) : null;
+
   try {
     if (fullName) {
       const existingName = await query(
-        `SELECT id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1`,
+        `SELECT id FROM users WHERE LOWER(${fullNameSql()}) = LOWER($1) AND id <> $2 LIMIT 1`,
         [fullName, id],
       );
 
@@ -162,19 +180,20 @@ usersRouter.patch('/:id', async (req, res) => {
 
     const result = await query(
       `UPDATE users
-       SET full_name = COALESCE($1, full_name),
-         email = COALESCE($2, email),
-         phone = COALESCE($3, phone),
-         department = COALESCE($4, department),
-         role = COALESCE($5, role),
-         fingerprint_id = COALESCE($6, fingerprint_id),
-         rfid_uid = COALESCE($7, rfid_uid),
-         is_active = COALESCE($8, is_active),
-         is_archived = COALESCE($9, is_archived),
+       SET first_name = COALESCE($1, first_name),
+         last_name = COALESCE($2, last_name),
+         email = COALESCE($3, email),
+         phone = COALESCE($4, phone),
+         department = COALESCE($5, department),
+         role = COALESCE($6, role),
+         fingerprint_id = COALESCE($7, fingerprint_id),
+         rfid_uid = COALESCE($8, rfid_uid),
+         is_active = COALESCE($9, is_active),
+         is_archived = COALESCE($10, is_archived),
          updated_at = NOW()
-       WHERE id = $10
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`,
-      [fullName ?? null, email ?? null, phone ?? null, department ?? null, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, isArchived ?? null, id],
+       WHERE id = $11
+       RETURNING ${USER_FIELDS}`,
+      [namesProvided ? firstName : null, namesProvided ? lastName : null, email ?? null, phone ?? null, department ?? null, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, isArchived ?? null, id],
     );
 
     if (result.rowCount === 0) {
@@ -230,7 +249,7 @@ usersRouter.patch('/:id/status', async (req, res) => {
          deactivation_reason = CASE WHEN $1 THEN NULL ELSE COALESCE($3, 'Manually deactivated by admin') END,
          updated_at = NOW()
        WHERE id = $2
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`,
+       RETURNING ${USER_FIELDS}`,
       [isActive, id, reason || null],
     );
 
@@ -275,7 +294,7 @@ usersRouter.patch('/:id/archive', async (req, res) => {
          is_archived = $2,
          updated_at = NOW()
        WHERE id = $3
-       RETURNING id, employee_id, full_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`,
+       RETURNING ${USER_FIELDS}`,
       [isArchived ? false : true, isArchived, id],
     );
 

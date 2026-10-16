@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 CREATE TABLE IF NOT EXISTS users (
   id BIGSERIAL PRIMARY KEY,
   employee_id VARCHAR(50) NOT NULL UNIQUE,
-  full_name VARCHAR(160) NOT NULL,
+  first_name VARCHAR(79) NOT NULL,
+  last_name VARCHAR(79) NOT NULL,
   email VARCHAR(255) UNIQUE,
   phone VARCHAR(40),
   department VARCHAR(120),
@@ -121,7 +122,8 @@ CREATE TABLE IF NOT EXISTS enrollment_requests (
   id BIGSERIAL PRIMARY KEY,
   request_code VARCHAR(50) NOT NULL UNIQUE DEFAULT ('REQ-' || LPAD(nextval('enrollment_request_code_seq')::TEXT, 4, '0')),
   employee_id VARCHAR(50) NOT NULL,
-  full_name VARCHAR(160) NOT NULL,
+  first_name VARCHAR(79) NOT NULL,
+  last_name VARCHAR(79) NOT NULL,
   department VARCHAR(120) NOT NULL,
   request_type VARCHAR(80) NOT NULL,
   email VARCHAR(255),
@@ -215,12 +217,12 @@ VALUES (
 )
 ON CONFLICT (username) DO NOTHING;
 
-INSERT INTO users (employee_id, full_name, email, department, fingerprint_id, rfid_uid)
+INSERT INTO users (employee_id, first_name, last_name, email, department, fingerprint_id, rfid_uid)
 VALUES
-  ('EMP001', 'Juan Dela Cruz', 'juan@example.com', 'IT Department', 'FP-EMP001', 'RFID-EMP001'),
-  ('EMP002', 'Maria Santos', 'maria@example.com', 'HR Department', 'FP-EMP002', 'RFID-EMP002'),
-  ('EMP003', 'Pedro Reyes', 'pedro@example.com', 'Operations', 'FP-EMP003', 'RFID-EMP003'),
-  ('EMP004', 'Ana Garcia', 'ana@example.com', 'Finance', 'FP-EMP004', 'RFID-EMP004')
+  ('EMP001', 'Juan', 'Dela Cruz', 'juan@example.com', 'IT Department', 'FP-EMP001', 'RFID-EMP001'),
+  ('EMP002', 'Maria', 'Santos', 'maria@example.com', 'HR Department', 'FP-EMP002', 'RFID-EMP002'),
+  ('EMP003', 'Pedro', 'Reyes', 'pedro@example.com', 'Operations', 'FP-EMP003', 'RFID-EMP003'),
+  ('EMP004', 'Ana', 'Garcia', 'ana@example.com', 'Finance', 'FP-EMP004', 'RFID-EMP004')
 ON CONFLICT (employee_id) DO NOTHING;
 
 INSERT INTO devices (device_code, device_name, device_type, location, ip_address, status, last_seen)

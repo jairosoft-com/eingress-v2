@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { createNotification } from './notifications.js';
+import { fullNameSql } from './personName.js';
 
 export async function getEligibleUsersForDeactivation({ durationDays, applicableRoles }) {
   const roles = (applicableRoles || [])
@@ -30,7 +31,7 @@ export async function getEligibleUsersForDeactivation({ durationDays, applicable
          GROUP BY user_id
        ) ar ON ar.user_id = u.id
      )
-     SELECT u.id, u.employee_id, u.full_name, u.email, u.role, activity.last_activity_at
+     SELECT u.id, u.employee_id, ${fullNameSql('u')} AS full_name, u.email, u.role, activity.last_activity_at
      FROM users u
      JOIN activity ON activity.id = u.id
      WHERE u.is_active = TRUE
@@ -73,7 +74,7 @@ export async function runAutoDeactivation({ actorAdminId, ip }) {
          deactivation_reason = $2,
          updated_at = NOW()
        WHERE id = $1 AND is_active = TRUE
-       RETURNING id, employee_id, full_name, email, role, is_active, deactivated_at, deactivation_reason`,
+       RETURNING id, employee_id, ${fullNameSql()} AS full_name, email, role, is_active, deactivated_at, deactivation_reason`,
       [eligibleUser.id, reason],
     );
 

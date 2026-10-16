@@ -2,6 +2,7 @@ import express from 'express';
 
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { fullNameSql } from '../lib/personName.js';
 
 export const dashboardRouter = express.Router();
 dashboardRouter.use(authMiddleware);
@@ -16,14 +17,18 @@ dashboardRouter.get('/', async (req, res, next) => {
           (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE) AS total_access,
           (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Granted') AS successful_attempts,
           (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Denied') AS failed_attempts,
-          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online') AS active_devices`,
+          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online') AS active_devices,
+          (SELECT COUNT(*)::int FROM users WHERE created_at < CURRENT_DATE AND (is_active = TRUE OR deactivated_at >= CURRENT_DATE)) AS total_users_yesterday,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE - 1) AS total_access_yesterday,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE - 1 AND result = 'Denied') AS failed_attempts_yesterday,
+          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online' AND created_at < CURRENT_DATE) AS active_devices_yesterday`,
       ),
       query(
         `SELECT *
          FROM (
            SELECT
              'access-' || al.id AS id,
-             u.full_name AS user_name,
+             ${fullNameSql('u')} AS user_name,
              u.employee_id,
              CASE WHEN al.result = 'Granted' THEN 'Access Granted' ELSE 'Access Denied' END AS event,
              al.result::text AS result,
@@ -69,7 +74,7 @@ dashboardRouter.get('/', async (req, res, next) => {
       ),
       query(
         `SELECT u.employee_id,
-          u.full_name AS name,
+          ${fullNameSql('u')} AS name,
           u.department,
           u.role,
           ar.check_in_at,
@@ -79,7 +84,7 @@ dashboardRouter.get('/', async (req, res, next) => {
          FROM attendance_records ar
          JOIN users u ON u.id = ar.user_id
          WHERE ar.attendance_date = CURRENT_DATE
-         ORDER BY ar.check_in_at DESC NULLS LAST, u.full_name
+         ORDER BY ar.check_in_at DESC NULLS LAST, ${fullNameSql('u')}
          LIMIT 10`,
       ),
     ]);

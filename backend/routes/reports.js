@@ -3,6 +3,7 @@ import express from 'express';
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { createNotification } from '../lib/notifications.js';
+import { fullNameSql } from '../lib/personName.js';
 
 export const reportsRouter = express.Router();
 reportsRouter.use(authMiddleware);
@@ -60,16 +61,16 @@ async function buildReportData(reportType, filters) {
 
     if (search) {
       params.push(`%${search}%`);
-      where.push(`(u.full_name ILIKE $${params.length} OR u.employee_id ILIKE $${params.length})`);
+      where.push(`(${fullNameSql('u')} ILIKE $${params.length} OR u.employee_id ILIKE $${params.length})`);
     }
 
     const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
     const result = await query(
-      `SELECT u.full_name, u.role, ar.attendance_date, ar.check_in_at, ar.check_out_at
+      `SELECT ${fullNameSql('u')} AS full_name, u.role, ar.attendance_date, ar.check_in_at, ar.check_out_at
        FROM attendance_records ar
        JOIN users u ON u.id = ar.user_id
        ${whereClause}
-       ORDER BY ar.attendance_date DESC, u.full_name`,
+       ORDER BY ar.attendance_date DESC, ${fullNameSql('u')}`,
       params,
     );
 
@@ -116,13 +117,13 @@ async function buildReportData(reportType, filters) {
     if (search) {
       params.push(`%${search}%`);
       where.push(
-        `(er.full_name ILIKE $${params.length} OR er.employee_id ILIKE $${params.length} OR er.request_code ILIKE $${params.length})`,
+        `(${fullNameSql('er')} ILIKE $${params.length} OR er.employee_id ILIKE $${params.length} OR er.request_code ILIKE $${params.length})`,
       );
     }
 
     const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
     const result = await query(
-      `SELECT er.request_code, er.full_name, u.role, er.request_type, er.submitted_at, er.status
+      `SELECT er.request_code, ${fullNameSql('er')} AS full_name, u.role, er.request_type, er.submitted_at, er.status
        FROM enrollment_requests er
        LEFT JOIN users u ON u.employee_id = er.employee_id
        ${whereClause}
@@ -159,12 +160,12 @@ async function buildReportData(reportType, filters) {
 
     if (search) {
       params.push(`%${search}%`);
-      where.push(`(full_name ILIKE $${params.length} OR employee_id ILIKE $${params.length})`);
+      where.push(`(${fullNameSql()} ILIKE $${params.length} OR employee_id ILIKE $${params.length})`);
     }
 
     const whereClause = `WHERE ${where.join(' AND ')}`;
     const result = await query(
-      `SELECT full_name, employee_id, role, rfid_uid, fingerprint_id, is_active
+      `SELECT ${fullNameSql()} AS full_name, employee_id, role, rfid_uid, fingerprint_id, is_active
        FROM users
        ${whereClause}
        ORDER BY full_name`,
@@ -195,12 +196,12 @@ async function buildReportData(reportType, filters) {
 
     if (search) {
       params.push(`%${search}%`);
-      where.push(`(full_name ILIKE $${params.length} OR employee_id ILIKE $${params.length})`);
+      where.push(`(${fullNameSql()} ILIKE $${params.length} OR employee_id ILIKE $${params.length})`);
     }
 
     const whereClause = `WHERE ${where.join(' AND ')}`;
     const result = await query(
-      `SELECT full_name, employee_id, role, rfid_uid, deactivated_at, deactivation_reason, updated_at
+      `SELECT ${fullNameSql()} AS full_name, employee_id, role, rfid_uid, deactivated_at, deactivation_reason, updated_at
        FROM users
        ${whereClause}
        ORDER BY COALESCE(deactivated_at, updated_at) DESC`,

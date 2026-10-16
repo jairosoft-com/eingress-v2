@@ -1,10 +1,11 @@
 import { query } from '../db.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { createNotification } from './notifications.js';
+import { fullNameSql } from './personName.js';
 
 export async function runAccessExpirationCheck({ actorAdminId, ip } = {}) {
   const eligibleResult = await query(
-    `SELECT id, employee_id, full_name, email, role, expiration_date
+    `SELECT id, employee_id, ${fullNameSql()} AS full_name, email, role, expiration_date
      FROM users
      WHERE is_active = TRUE
        AND COALESCE(is_archived, FALSE) = FALSE
@@ -24,7 +25,7 @@ export async function runAccessExpirationCheck({ actorAdminId, ip } = {}) {
          deactivation_reason = $2,
          updated_at = NOW()
        WHERE id = $1 AND is_active = TRUE
-       RETURNING id, employee_id, full_name, email, role, is_active, deactivated_at, deactivation_reason`,
+       RETURNING id, employee_id, ${fullNameSql()} AS full_name, email, role, is_active, deactivated_at, deactivation_reason`,
       [eligibleUser.id, reason],
     );
 

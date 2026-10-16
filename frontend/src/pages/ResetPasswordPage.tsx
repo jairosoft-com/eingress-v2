@@ -38,6 +38,24 @@ type ResetErrors = {
   password?: string;
 };
 
+function validateSingleField(
+  fieldName: keyof ResetErrors,
+  value: string,
+  otherPassword: string,
+): string | undefined {
+  if (fieldName === 'password') {
+    if (!value) return 'New password is required.';
+    if (!meetsPasswordPolicy(value)) return 'Password does not meet all requirements.';
+  }
+
+  if (fieldName === 'confirmPassword') {
+    if (!value) return 'Please confirm your new password.';
+    if (otherPassword !== value) return 'Passwords do not match.';
+  }
+
+  return undefined;
+}
+
 function validateResetForm(password: string, confirmPassword: string): ResetErrors {
   const errors: ResetErrors = {};
 
@@ -249,7 +267,19 @@ export function ResetPasswordPage() {
                       autoComplete="new-password"
                       id="newPassword"
                       name="newPassword"
-                      onChange={(event) => setPassword(event.target.value)}
+                      onBlur={() => {
+                        const error = validateSingleField('password', password, confirmPassword);
+                        setErrors((prev) => ({ ...prev, password: error }));
+                      }}
+                      onChange={(event) => {
+                        setPassword(event.target.value);
+                        if (
+                          errors.password &&
+                          !validateSingleField('password', event.target.value, confirmPassword)
+                        ) {
+                          setErrors((prev) => ({ ...prev, password: undefined }));
+                        }
+                      }}
                       placeholder="Enter new password"
                       type={showPassword ? 'text' : 'password'}
                       value={password}
@@ -302,7 +332,23 @@ export function ResetPasswordPage() {
                       autoComplete="new-password"
                       id="confirmPassword"
                       name="confirmPassword"
-                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      onBlur={() => {
+                        const error = validateSingleField(
+                          'confirmPassword',
+                          confirmPassword,
+                          password,
+                        );
+                        setErrors((prev) => ({ ...prev, confirmPassword: error }));
+                      }}
+                      onChange={(event) => {
+                        setConfirmPassword(event.target.value);
+                        if (
+                          errors.confirmPassword &&
+                          !validateSingleField('confirmPassword', event.target.value, password)
+                        ) {
+                          setErrors((prev) => ({ ...prev, confirmPassword: undefined }));
+                        }
+                      }}
                       placeholder="Confirm new password"
                       type={showConfirmPassword ? 'text' : 'password'}
                       value={confirmPassword}

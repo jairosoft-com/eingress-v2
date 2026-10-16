@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { fullNameSql } from '../lib/personName.js';
 
 export const accessLogsRouter = express.Router();
 accessLogsRouter.use(authMiddleware);
@@ -12,7 +13,7 @@ accessLogsRouter.get('/', async (req, res) => {
        FROM (
          SELECT
            'access-' || al.id AS id,
-           u.full_name AS user_name,
+           ${fullNameSql('u')} AS user_name,
            u.employee_id,
            CASE WHEN al.result = 'Granted' THEN 'Access Granted' ELSE 'Access Denied' END AS event,
            al.authentication_method,
