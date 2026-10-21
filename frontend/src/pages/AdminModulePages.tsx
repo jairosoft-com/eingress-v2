@@ -721,6 +721,23 @@ function maskRfid(value: string) {
   return '••••••••';
 }
 
+function compareUsersBySurname(userA: UserRecord, userB: UserRecord) {
+  const hasNameA = Boolean(userA.last_name && userA.first_name);
+  const hasNameB = Boolean(userB.last_name && userB.first_name);
+
+  if (hasNameA !== hasNameB) {
+    return hasNameA ? -1 : 1;
+  }
+
+  const options = { sensitivity: 'base' } as const;
+
+  return (
+    (userA.last_name ?? '').localeCompare(userB.last_name ?? '', undefined, options) ||
+    (userA.first_name ?? '').localeCompare(userB.first_name ?? '', undefined, options) ||
+    userA.employee_id.localeCompare(userB.employee_id, undefined, options)
+  );
+}
+
 function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
   const hasBiometric = Boolean(user.fingerprint_id);
   const isStudent = (user.role || '').trim().toLowerCase() === 'student';
@@ -737,7 +754,8 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     employeeId: user.employee_id,
     expirationDate,
     id: user.id,
-    name: user.full_name,
+    name:
+      user.last_name && user.first_name ? `${user.last_name}, ${user.first_name}` : user.full_name,
     needsReview: Boolean(user.name_needs_review),
     online: user.is_active,
     rfidUid: user.rfid_uid || '-',
@@ -1413,23 +1431,26 @@ export function UserManagementPage() {
   const filteredUsers = useMemo(() => {
     const normalizedSearch = userSearch.trim().toLowerCase();
 
-    return users.filter((user) => {
-      if (user.is_archived) {
-        return false;
-      }
+    return users
+      .filter((user) => {
+        if (user.is_archived) {
+          return false;
+        }
 
-      const matchesSearch =
-        !normalizedSearch ||
-        user.full_name.toLowerCase().includes(normalizedSearch) ||
-        user.employee_id.toLowerCase().includes(normalizedSearch) ||
-        (user.role || '').toLowerCase().includes(normalizedSearch);
-      const matchesDepartment = departmentFilter === 'All Roles' || user.role === departmentFilter;
-      const matchesStatus =
-        statusFilter === 'All Status' ||
-        (statusFilter === 'Active' ? user.is_active : !user.is_active);
+        const matchesSearch =
+          !normalizedSearch ||
+          user.full_name.toLowerCase().includes(normalizedSearch) ||
+          user.employee_id.toLowerCase().includes(normalizedSearch) ||
+          (user.role || '').toLowerCase().includes(normalizedSearch);
+        const matchesDepartment =
+          departmentFilter === 'All Roles' || user.role === departmentFilter;
+        const matchesStatus =
+          statusFilter === 'All Status' ||
+          (statusFilter === 'Active' ? user.is_active : !user.is_active);
 
-      return matchesSearch && matchesDepartment && matchesStatus;
-    });
+        return matchesSearch && matchesDepartment && matchesStatus;
+      })
+      .sort(compareUsersBySurname);
   }, [departmentFilter, statusFilter, userSearch, users]);
 
   const userFilterKey = `${departmentFilter}|${statusFilter}|${userSearch}`;
