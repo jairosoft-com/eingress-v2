@@ -19,6 +19,7 @@ import {
   TrendingUp,
   UsersRound,
   X,
+  Trash2,
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
@@ -176,6 +177,9 @@ type AdminSettingsProfile = {
   rfidUid: string;
   role: string;
 };
+
+type Department = { id: string; name: string; status: 'Active' | 'Inactive' };
+type Role = { id: string; name: string; status: 'Active' | 'Inactive' };
 
 function isAdminSettingsProfile(value: unknown): value is AdminSettingsProfile {
   if (!value || typeof value !== 'object') {
@@ -4112,7 +4116,7 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
 
 export function SettingsPage() {
   const { session } = useAuth();
-  const [activeTab, setActiveTab] = useState<'general' | 'security'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'security' | 'organization'>('general');
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
   const [lastSavedSettings, setLastSavedSettings] =
     useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
@@ -4136,6 +4140,16 @@ export function SettingsPage() {
   const [changeRfidInput, setChangeRfidInput] = useState('');
   const [changeRfidError, setChangeRfidError] = useState('');
   const [isChangingRfid, setIsChangingRfid] = useState(false);
+  const [isEditingOrganization, setIsEditingOrganization] = useState(false);
+  const [organizationError, setOrganizationError] = useState('');
+  const [organizationMessage, setOrganizationMessage] = useState('');
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [draftDepartments, setDraftDepartments] = useState<Department[]>([]);
+  const [newDepartment, setNewDepartment] = useState('');
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [draftRoles, setDraftRoles] = useState<Role[]>([]);
+  const [newRole, setNewRole] = useState('');
+  const [verifyTarget, setVerifyTarget] = useState<'profile' | 'organization'>('profile');
 
   useEffect(() => {
     if (verifyRfidStep !== 'success') return;
@@ -4284,12 +4298,12 @@ export function SettingsPage() {
     setIsEditingProfile(true);
   }
 
-  function openVerifyRfidModal() {
-    if (!editedName.trim()) {
+  function openVerifyRfidModal(target: 'profile' | 'organization' = 'profile') {
+    if (target === 'profile' && !editedName.trim()) {
       setProfileError('Admin name is required.');
       return;
     }
-    setProfileError('');
+    setVerifyTarget(target);
     setVerifyRfidInput('');
     setVerifyRfidError('');
     setVerifyRfidStep('idle');
@@ -4353,6 +4367,77 @@ export function SettingsPage() {
     }
   }
 
+  async function submitOrganizationChange() {
+    if (!session?.accessToken) return;
+
+    if (!verifyRfidInput.trim()) {
+      setVerifyRfidError('Please scan or enter your RFID card.');
+      return;
+    }
+    setVerifyRfidStep('saving');
+    setVerifyRfidError('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/me/verify-rfid`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rfidCode: verifyRfidInput.trim() }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        verified?: boolean;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !data?.verified) {
+        throw new Error(data?.error ?? 'RFID verification failed.');
+      }
+
+      setDepartments(draftDepartments);
+      setRoles(draftRoles);
+      setIsEditingOrganization(false);
+      setOrganizationMessage('Organization settings updated successfully.');
+      setVerifySuccessCountdown(5);
+      setVerifyRfidStep('success');
+    } catch (error) {
+      setVerifyRfidError(error instanceof Error ? error.message : 'RFID verification failed.');
+      setVerifyRfidStep('error');
+    }
+  }
+
+  function addRole() {
+    const name = newRole.trim();
+    if (!name) {
+      setOrganizationError('Role name is required.');
+      return;
+    }
+    if (draftRoles.some((r) => r.name.toLowerCase() === name.toLowerCase())) {
+      setOrganizationError('That role already exists.');
+      return;
+    }
+    setDraftRoles((prev) => [...prev, { id: crypto.randomUUID(), name, status: 'Active' }]);
+    setNewRole('');
+    setOrganizationError('');
+  }
+
+  function removeRole(id: string) {
+    setDraftRoles((prev) => prev.filter((r) => r.id !== id));
+  }
+
+  function toggleRoleStatus(id: string) {
+    setDraftRoles((prev) =>
+      prev.map((r) =>
+        r.id === id ? { ...r, status: r.status === 'Active' ? 'Inactive' : 'Active' } : r,
+      ),
+    );
+  }
+
+  function submitVerifiedChange() {
+    return verifyTarget === 'organization' ? submitOrganizationChange() : submitProfileNameChange();
+  }
+
   function openChangeRfidModal() {
     setChangeRfidInput('');
     setChangeRfidError('');
@@ -4401,6 +4486,43 @@ export function SettingsPage() {
     }
   }
 
+  function startEditingOrganization() {
+    setDraftDepartments(departments);
+    setDraftRoles(roles);
+    setNewDepartment('');
+    setNewRole('');
+    setOrganizationError('');
+    setOrganizationMessage('');
+    setIsEditingOrganization(true);
+  }
+
+  function addDepartment() {
+    const name = newDepartment.trim();
+    if (!name) {
+      setOrganizationError('Department name is required.');
+      return;
+    }
+    if (draftDepartments.some((d) => d.name.toLowerCase() === name.toLowerCase())) {
+      setOrganizationError('That department already exists.');
+      return;
+    }
+    setDraftDepartments((prev) => [...prev, { id: crypto.randomUUID(), name, status: 'Active' }]);
+    setNewDepartment('');
+    setOrganizationError('');
+  }
+
+  function removeDepartment(id: string) {
+    setDraftDepartments((prev) => prev.filter((d) => d.id !== id));
+  }
+
+  function toggleDepartmentStatus(id: string) {
+    setDraftDepartments((prev) =>
+      prev.map((d) =>
+        d.id === id ? { ...d, status: d.status === 'Active' ? 'Inactive' : 'Active' } : d,
+      ),
+    );
+  }
+
   return (
     <section className="module-page">
       <PageHeader title="Settings" description="Configure system preferences and parameters." />
@@ -4421,9 +4543,17 @@ export function SettingsPage() {
         >
           System &amp; Security
         </button>
+        <button
+          className={activeTab === 'organization' ? 'active' : ''}
+          onClick={() => setActiveTab('organization')}
+          role="tab"
+          type="button"
+        >
+          Organization Settings
+        </button>
       </div>
 
-      {activeTab === 'general' ? (
+      {activeTab === 'general' && (
         <div className="general-settings-grid">
           <section className="module-panel settings-card admin-profile-card">
             <h2>Admin Profile</h2>
@@ -4473,7 +4603,9 @@ export function SettingsPage() {
               <button
                 className="admin-profile-edit-button"
                 disabled={isSavingProfile}
-                onClick={() => (isEditingProfile ? openVerifyRfidModal() : startEditingProfile())}
+                onClick={() =>
+                  isEditingProfile ? openVerifyRfidModal('profile') : startEditingProfile()
+                }
                 type="button"
               >
                 {isEditingProfile ? 'Save Changes' : 'Edit'}
@@ -4508,7 +4640,9 @@ export function SettingsPage() {
             </dl>
           </section>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'security' && (
         <div className="security-settings-stack">
           <section className="module-panel settings-card">
             <h2>Date &amp; Time Settings</h2>
@@ -4739,6 +4873,198 @@ export function SettingsPage() {
           </section>
         </div>
       )}
+
+      {activeTab === 'organization' && (
+        <div className="organization-stack">
+          <section className="module-panel settings-card">
+            <h2>Department Management</h2>
+            <p>Manage Departments Management Department</p>
+            <div className="organization-input-row">
+              <label> Add Department </label>
+              <input
+                disabled={!isEditingOrganization}
+                onChange={(e) => setNewDepartment(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addDepartment();
+                  }
+                }}
+                placeholder="e.g. Human Resources"
+                value={newDepartment}
+              />
+
+              <button
+                className="organization-edit-button"
+                disabled={!isEditingOrganization}
+                onClick={addDepartment}
+                type="button"
+              >
+                Add
+              </button>
+            </div>
+
+            <div className="user-table-wrap">
+              <table className="managed-table user-management-table">
+                <thead>
+                  <tr>
+                    <th>Department</th>
+                    <th>Access Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {(isEditingOrganization ? draftDepartments : departments).length === 0 ? (
+                    <tr>
+                      <td colSpan={3}>No departments yet.</td>
+                    </tr>
+                  ) : (
+                    (isEditingOrganization ? draftDepartments : departments).map((dept) => (
+                      <tr key={dept.id}>
+                        <td>{dept.name}</td>
+                        <td>{dept.status}</td>
+                        <td>
+                          <div className="user-row-actions">
+                            <button
+                              aria-label={
+                                dept.status === 'Active'
+                                  ? 'Deactivate department'
+                                  : 'Activate department'
+                              }
+                              className={dept.status === 'Active' ? 'deactivate' : 'activate'}
+                              disabled={!isEditingOrganization}
+                              onClick={() => toggleDepartmentStatus(dept.id)}
+                              title={dept.status === 'Active' ? 'Deactivate' : 'Activate'}
+                              type="button"
+                            >
+                              <Power size={16} />
+                            </button>
+                            <button
+                              aria-label="Remove department"
+                              className="archive"
+                              disabled={!isEditingOrganization}
+                              onClick={() => removeDepartment(dept.id)}
+                              title="Remove"
+                              type="button"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="module-panel settings-card">
+            <h2>Role Management</h2>
+            <p>Manage user roles across the system.</p>
+            <div className="organization-input-row">
+              <label> Add Role </label>
+              <input
+                disabled={!isEditingOrganization}
+                onChange={(e) => setNewRole(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addRole();
+                  }
+                }}
+                placeholder="e.g. Employee"
+                value={newRole}
+              />
+
+              <button
+                className="organization-edit-button"
+                disabled={!isEditingOrganization}
+                onClick={addRole}
+                type="button"
+              >
+                Add
+              </button>
+            </div>
+
+            <div className="user-table-wrap">
+              <table className="managed-table user-management-table">
+                <thead>
+                  <tr>
+                    <th>Roles</th>
+                    <th>Access Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {(isEditingOrganization ? draftRoles : roles).length === 0 ? (
+                    <tr>
+                      <td colSpan={3}>No roles yet.</td>
+                    </tr>
+                  ) : (
+                    (isEditingOrganization ? draftRoles : roles).map((role) => (
+                      <tr key={role.id}>
+                        <td>{role.name}</td>
+                        <td>{role.status}</td>
+                        <td>
+                          <div className="user-row-actions">
+                            <button
+                              aria-label={
+                                role.status === 'Active' ? 'Deactivate role' : 'Activate role'
+                              }
+                              className={role.status === 'Active' ? 'deactivate' : 'activate'}
+                              disabled={!isEditingOrganization}
+                              onClick={() => toggleRoleStatus(role.id)}
+                              title={role.status === 'Active' ? 'Deactivate' : 'Activate'}
+                              type="button"
+                            >
+                              <Power size={16} />
+                            </button>
+                            <button
+                              aria-label="Remove role"
+                              className="archive"
+                              disabled={!isEditingOrganization}
+                              onClick={() => removeRole(role.id)}
+                              title="Remove"
+                              type="button"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          {organizationError ? (
+            <p className="module-table-message error" role="alert">
+              {organizationError}
+            </p>
+          ) : null}
+          {organizationMessage ? (
+            <p className="module-table-message">{organizationMessage}</p>
+          ) : null}
+          <div className="admin-profile-footer">
+            <button
+              className="admin-profile-edit-button"
+              onClick={() =>
+                isEditingOrganization
+                  ? openVerifyRfidModal('organization')
+                  : startEditingOrganization()
+              }
+              type="button"
+            >
+              {isEditingOrganization ? 'Save Changes' : 'Edit'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'security' ? (
         <div className="settings-save-row">
           <span>{message || (isDirty && !isSaving ? 'You have unsaved changes.' : '')}</span>
@@ -4786,7 +5112,7 @@ export function SettingsPage() {
                   </span>
                 </div>
                 <h2 id="verify-rfid-title">Saving changes...</h2>
-                <p>Please wait while we save your profile changes.</p>
+                <p>Please wait while we save your changes.</p>
               </>
             ) : verifyRfidStep === 'success' ? (
               <>
@@ -4846,7 +5172,7 @@ export function SettingsPage() {
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         event.preventDefault();
-                        void submitProfileNameChange();
+                        void submitVerifiedChange();
                       }
                     }}
                     placeholder="Tap card or enter RFID"
@@ -4855,7 +5181,7 @@ export function SettingsPage() {
                 </label>
                 <button
                   className="rfid-scan-capture-button"
-                  onClick={() => void submitProfileNameChange()}
+                  onClick={() => void submitVerifiedChange()}
                   type="button"
                 >
                   Confirm Changes

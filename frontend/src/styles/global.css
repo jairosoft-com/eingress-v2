@@ -4054,7 +4054,7 @@ td small {
 
 .settings-tabs {
   display: flex;
-  width: min(100%, 414px);
+  width: min(100%, 600px);
   margin-bottom: 10px;
   border: 1px solid #aebed3;
   border-radius: 7px;
@@ -4101,7 +4101,8 @@ td small {
 }
 
 .settings-fields,
-.security-fields {
+.security-fields,
+.organization-fields {
   display: grid;
   gap: 14px 22px;
 }
@@ -4138,6 +4139,23 @@ td small {
 .settings-fields select:disabled {
   color: #7b879c;
   background: #f2f5f9;
+}
+
+.organization-input-row input {
+  max-width: 25%;
+  min-height: 32px;
+  padding: 0 10px;
+  color: #17223f;
+  border: 1px solid #aebed3;
+  border-radius: 4px;
+  background: #f8fbff;
+}
+
+.organization-input-row {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px 0px;
 }
 
 .admin-profile-rfid-row {
@@ -4185,6 +4203,35 @@ td small {
 .admin-profile-edit-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.organization-stack {
+  display: grid;
+  gap: 8px;
+  max-width: 998px;
+  margin: 8px auto 0;
+}
+.organization-edit-button {
+  min-height: 40px;
+  width: 25%;
+  padding: 0 26px;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 850;
+  border: 0;
+  border-radius: 8px;
+  background: #e01835;
+  cursor: pointer;
+}
+
+.add-department-input {
+  width: 50%;
+  min-height: 32px;
+  padding: 0 10px;
+  color: #17223f;
+  border: 1px solid #aebed3;
+  border-radius: 4px;
+  background: #f8fbff;
 }
 
 .system-info-card dl {
