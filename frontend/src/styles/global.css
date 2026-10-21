@@ -4224,8 +4224,8 @@ td small {
 .security-settings-stack .settings-card {
   padding: 20px 88px;
 }
-.four-columns {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+.date-time-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .lockout-fields {
   grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;
@@ -4615,7 +4615,7 @@ td small {
   .general-settings-grid {
     grid-template-columns: 1fr;
   }
-  .four-columns,
+  .date-time-fields,
   .lockout-fields,
   .session-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4630,7 +4630,7 @@ td small {
     width: 100%;
   }
   .settings-fields,
-  .four-columns,
+  .date-time-fields,
   .lockout-fields,
   .session-fields {
     grid-template-columns: 1fr;

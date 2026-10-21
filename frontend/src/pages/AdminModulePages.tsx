@@ -4513,7 +4513,7 @@ export function SettingsPage() {
           <section className="module-panel settings-card">
             <h2>Date &amp; Time Settings</h2>
             <p>Configure how dates and times are displayed across the system.</p>
-            <div className="security-fields four-columns">
+            <div className="security-fields date-time-fields">
               <label>
                 Date Format
                 <select
