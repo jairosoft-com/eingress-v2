@@ -460,6 +460,12 @@ authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
       [admin.id, 'RFID Changed', 'Settings', `Admin RFID card was changed`, req.ip],
     );
 
+    await createNotification(
+      'RFID Card Updated',
+      `Admin RFID card for ${admin.username} was updated successfully.`,
+      'success',
+    );
+
     return res.json({
       name: updatedAdmin.username,
       email: updatedAdmin.email,
