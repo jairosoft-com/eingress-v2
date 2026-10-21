@@ -4178,6 +4178,14 @@ export function SettingsPage() {
 
         if (settingsResponse.ok && settingsData) {
           const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settingsData };
+          merged.max_failed_attempts = Number(merged.max_failed_attempts) || 5;
+          merged.lockout_duration_minutes = Number(merged.lockout_duration_minutes) || 30;
+          merged.reset_failed_attempts_after_minutes =
+            Number(merged.reset_failed_attempts_after_minutes) || 15;
+          merged.auto_deactivation_duration_days =
+            Number(merged.auto_deactivation_duration_days) || 7;
+          merged.session_timeout_minutes = Number(merged.session_timeout_minutes) || 30;
+          merged.idle_timeout_warning_minutes = Number(merged.idle_timeout_warning_minutes) || 5;
           setSettings(merged);
           setLastSavedSettings(merged);
         }
@@ -4199,6 +4207,49 @@ export function SettingsPage() {
 
   const updateSetting = <K extends keyof SystemSettings>(key: K, value: SystemSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }));
+  };
+
+  const handleNumericSettingChange = (
+    key: keyof SystemSettings,
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const raw = event.target.value;
+    const cleaned = raw.replace(/^0+/, '');
+    event.target.value = cleaned;
+    if (cleaned === '') {
+      updateSetting(key, '' as unknown as SystemSettings[typeof key]);
+      return;
+    }
+    updateSetting(key, Number(cleaned) as unknown as SystemSettings[typeof key]);
+  };
+
+  const handleNumericSettingKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === '0') {
+      const input = event.currentTarget;
+      if (
+        input.value === '' ||
+        (input.selectionStart === 0 && input.selectionEnd === input.value.length)
+      ) {
+        event.preventDefault();
+      }
+    }
+  };
+
+  const handleNumericSettingBlur = (key: keyof SystemSettings, min = 1) => {
+    const current = Number(settings[key]);
+    if (!current || current < min) {
+      updateSetting(key, min as unknown as SystemSettings[typeof key]);
+    } else {
+      updateSetting(key, Math.floor(current) as unknown as SystemSettings[typeof key]);
+    }
+  };
+
+  const getNumericDisplayValue = (val: number | string | undefined): string | number => {
+    if (val === undefined || val === null || val === '') return '';
+    const str = String(val).replace(/^0+/, '');
+    if (str === '') return '';
+    const num = Number(str);
+    return Number.isNaN(num) ? '' : num;
   };
 
   const toggleApplicableRole = (role: string, checked: boolean) => {
@@ -4261,6 +4312,13 @@ export function SettingsPage() {
         lifecycleRun?: { ran: boolean; deactivatedCount: number } | null;
       };
       const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settingsData };
+      merged.max_failed_attempts = Number(merged.max_failed_attempts) || 5;
+      merged.lockout_duration_minutes = Number(merged.lockout_duration_minutes) || 30;
+      merged.reset_failed_attempts_after_minutes =
+        Number(merged.reset_failed_attempts_after_minutes) || 15;
+      merged.auto_deactivation_duration_days = Number(merged.auto_deactivation_duration_days) || 7;
+      merged.session_timeout_minutes = Number(merged.session_timeout_minutes) || 30;
+      merged.idle_timeout_warning_minutes = Number(merged.idle_timeout_warning_minutes) || 5;
       setSettings(merged);
       setLastSavedSettings(merged);
       setDateTimeSettings(merged);
@@ -4571,10 +4629,10 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.max_failed_attempts}
-                  onChange={(event) =>
-                    updateSetting('max_failed_attempts', Number(event.target.value))
-                  }
+                  value={getNumericDisplayValue(settings.max_failed_attempts)}
+                  onChange={(event) => handleNumericSettingChange('max_failed_attempts', event)}
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('max_failed_attempts', 1)}
                 />
               </label>
               <label>
@@ -4582,10 +4640,12 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.lockout_duration_minutes}
+                  value={getNumericDisplayValue(settings.lockout_duration_minutes)}
                   onChange={(event) =>
-                    updateSetting('lockout_duration_minutes', Number(event.target.value))
+                    handleNumericSettingChange('lockout_duration_minutes', event)
                   }
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('lockout_duration_minutes', 1)}
                 />
               </label>
               <label>
@@ -4593,10 +4653,12 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.reset_failed_attempts_after_minutes}
+                  value={getNumericDisplayValue(settings.reset_failed_attempts_after_minutes)}
                   onChange={(event) =>
-                    updateSetting('reset_failed_attempts_after_minutes', Number(event.target.value))
+                    handleNumericSettingChange('reset_failed_attempts_after_minutes', event)
                   }
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('reset_failed_attempts_after_minutes', 1)}
                 />
               </label>
               <label className="toggle-setting">
@@ -4638,10 +4700,12 @@ export function SettingsPage() {
                     disabled={!settings.auto_deactivation_enabled}
                     min="1"
                     type="number"
-                    value={settings.auto_deactivation_duration_days}
+                    value={getNumericDisplayValue(settings.auto_deactivation_duration_days)}
                     onChange={(event) =>
-                      updateSetting('auto_deactivation_duration_days', Number(event.target.value))
+                      handleNumericSettingChange('auto_deactivation_duration_days', event)
                     }
+                    onKeyDown={handleNumericSettingKeyDown}
+                    onBlur={() => handleNumericSettingBlur('auto_deactivation_duration_days', 1)}
                   />
                   <span>Days</span>
                 </div>
@@ -4673,10 +4737,10 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.session_timeout_minutes}
-                  onChange={(event) =>
-                    updateSetting('session_timeout_minutes', Number(event.target.value))
-                  }
+                  value={getNumericDisplayValue(settings.session_timeout_minutes)}
+                  onChange={(event) => handleNumericSettingChange('session_timeout_minutes', event)}
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('session_timeout_minutes', 1)}
                 />
               </label>
               <label>
@@ -4684,10 +4748,12 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.idle_timeout_warning_minutes}
+                  value={getNumericDisplayValue(settings.idle_timeout_warning_minutes)}
                   onChange={(event) =>
-                    updateSetting('idle_timeout_warning_minutes', Number(event.target.value))
+                    handleNumericSettingChange('idle_timeout_warning_minutes', event)
                   }
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('idle_timeout_warning_minutes', 1)}
                 />
               </label>
               <label className="toggle-setting">
