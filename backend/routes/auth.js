@@ -460,6 +460,12 @@ authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
       [admin.id, 'RFID Changed', 'Settings', `Admin RFID card was changed`, req.ip],
     );
 
+    await createNotification(
+      'RFID Card Updated',
+      `Admin RFID card for ${admin.username} was updated successfully.`,
+      'success',
+    );
+
     return res.json({
       name: updatedAdmin.username,
       email: updatedAdmin.email,
@@ -471,6 +477,43 @@ authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
       return res.status(409).json({ error: 'This RFID card is already assigned to another admin.' });
     }
 
+    next(error);
+  }
+});
+
+authRouter.post('/me/verify-rfid', authMiddleware, async (req, res, next) => {
+  const rfidCode = String(req.body.rfidCode || '').trim();
+
+  if (!rfidCode) {
+    return res.status(400).json({ error: 'RFID verification is required' });
+  }
+
+  try {
+    const result = await query(
+      `SELECT id, username, rfid_uid
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = result.rows[0];
+
+    if (admin.rfid_uid !== rfidCode) {
+      await createNotification(
+        'RFID Verification Failed',
+        `RFID verification failed for ${admin.username}. The scanned card did not match the assigned admin RFID.`,
+        'error',
+      );
+      return res.status(403).json({ error: 'RFID verification failed. Please tap your admin card.' });
+    }
+
+    return res.json({ verified: true });
+  } catch (error) {
     next(error);
   }
 });
