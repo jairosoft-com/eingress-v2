@@ -2285,11 +2285,6 @@ td small {
   color: #ef4444;
 }
 
-.name-review-badge {
-  color: #f97316;
-  font-weight: 700;
-}
-
 .managed-avatar {
   position: relative;
   display: grid;

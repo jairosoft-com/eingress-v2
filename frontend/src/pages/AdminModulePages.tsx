@@ -105,7 +105,6 @@ type UserRecord = {
   is_active: boolean;
   is_archived?: boolean;
   last_name?: string | null;
-  name_needs_review?: boolean;
   phone: string | null;
   rfid_uid: string | null;
   role: string | null;
@@ -124,7 +123,6 @@ type UserDisplayRow = {
   expirationDate: string | null;
   id: number;
   name: string;
-  needsReview: boolean;
   online: boolean;
   rfidUid: string;
   role: string;
@@ -178,7 +176,11 @@ type AdminSettingsProfile = {
   role: string;
 };
 
-type Department = { id: string; name: string; status: 'Active' | 'Inactive' };
+type Department = { id: string; name: string; is_active: boolean; user_count: number };
+type DepartmentAction =
+  | { kind: 'add'; name: string }
+  | { kind: 'rename'; id: string; name: string }
+  | { kind: 'status'; id: string; isActive: boolean; confirm: boolean };
 type Role = { id: string; name: string; status: 'Active' | 'Inactive' };
 
 function isAdminSettingsProfile(value: unknown): value is AdminSettingsProfile {
@@ -252,6 +254,7 @@ type UserEditForm = {
 };
 
 type UserFormFieldErrors = {
+  department?: string;
   employeeId?: string;
   firstName?: string;
   lastName?: string;
@@ -282,7 +285,6 @@ type CreateUserForm = {
 
 type CreateUserErrors = {
   employeeId?: string;
-  fullName?: string;
   email?: string;
   phone?: string;
 };
@@ -709,13 +711,6 @@ function getAvatarTone(index: number) {
 }
 
 const USER_ROLE_OPTIONS = ['Employee', 'Student', 'Staff', 'Intern'];
-const USER_DEPARTMENT_OPTIONS = [
-  'IT Department',
-  'HR Department',
-  'Operations',
-  'Admin',
-  'Engineering',
-];
 
 function maskRfid(value: string) {
   if (!value || value === '-') {
@@ -742,7 +737,6 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     expirationDate,
     id: user.id,
     name: user.full_name,
-    needsReview: Boolean(user.name_needs_review),
     online: user.is_active,
     rfidUid: user.rfid_uid || '-',
     role: user.role || 'Employee',
@@ -796,6 +790,7 @@ export function UserManagementPage() {
   const dateTimeSettings = useDateTimeSettings();
   const [now, setNow] = useState(() => Date.now());
   const [users, setUsers] = useState<UserRecord[]>([]);
+  const [activeDepartments, setActiveDepartments] = useState<string[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [usersErrorMessage, setUsersErrorMessage] = useState('');
   const [userSearch, setUserSearch] = useState('');
@@ -895,6 +890,24 @@ export function UserManagementPage() {
       controller.abort();
     };
   }, [session?.accessToken]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE_URL}/departments/active`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as { name: string }[] | null;
+
+        if (response.ok && Array.isArray(data)) {
+          setActiveDepartments(data.map((department) => department.name));
+        }
+      })
+      .catch(() => {
+        // Leave the department list empty if it cannot be loaded.
+      });
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!isRfidScannerOpen) {
@@ -1330,7 +1343,10 @@ export function UserManagementPage() {
         !response.ok &&
         data &&
         'errors' in data &&
-        (data.errors?.employeeId || data.errors?.firstName || data.errors?.lastName)
+        (data.errors?.department ||
+          data.errors?.employeeId ||
+          data.errors?.firstName ||
+          data.errors?.lastName)
       ) {
         setCreateFieldErrors(data.errors);
         return;
@@ -1378,7 +1394,7 @@ export function UserManagementPage() {
   }
 
   const roleOptions = USER_ROLE_OPTIONS;
-  const departmentOptions = USER_DEPARTMENT_OPTIONS;
+  const departmentOptions = activeDepartments;
 
   function validateCreateUserField(
     fieldName: keyof CreateUserErrors,
@@ -1386,12 +1402,6 @@ export function UserManagementPage() {
   ): string | undefined {
     if (fieldName === 'employeeId') {
       if (!value.trim()) return 'Employee / User ID is required.';
-    }
-
-    if (fieldName === 'fullName') {
-      if (!value.trim()) return 'Full name is required.';
-      if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?: [A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(value.trim()))
-        return 'Enter a valid full name.';
     }
 
     if (fieldName === 'email') {
@@ -1705,9 +1715,6 @@ export function UserManagementPage() {
                             <strong>{user.name}</strong>
                             <small>
                               {user.employeeId}
-                              {user.needsReview ? (
-                                <span className="name-review-badge">{' · '}Needs review</span>
-                              ) : null}
                               {countdown ? (
                                 <span
                                   className={`expiry-badge${countdown.isExpired ? ' expired' : ''}`}
@@ -1921,12 +1928,6 @@ export function UserManagementPage() {
                     <small className="field-error">{editFieldErrors.lastName}</small>
                   ) : null}
                 </label>
-
-                {editingUser.name_needs_review ? (
-                  <p className="field-error">
-                    Name needs review — original: {editingUser.full_name}
-                  </p>
-                ) : null}
 
                 <label className="user-edit-field">
                   <span>Role *</span>
@@ -2279,12 +2280,15 @@ export function UserManagementPage() {
                 <label className="user-edit-field">
                   <span>Department</span>
                   <select
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        department: event.target.value,
-                      }))
-                    }
+                    aria-invalid={Boolean(createFieldErrors.department)}
+                    onChange={(event) => {
+                      const department = event.target.value;
+                      setCreateForm((currentForm) => ({ ...currentForm, department }));
+                      setCreateFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        department: undefined,
+                      }));
+                    }}
                     value={createForm.department}
                   >
                     <option value="">Choose department</option>
@@ -2294,6 +2298,9 @@ export function UserManagementPage() {
                       </option>
                     ))}
                   </select>
+                  {createFieldErrors.department ? (
+                    <small className="field-error">{createFieldErrors.department}</small>
+                  ) : null}
                 </label>
               </div>
             </section>
@@ -4114,6 +4121,37 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   );
 }
 
+const MAX_DEPARTMENT_NAME_LENGTH = 120;
+
+function validateDepartmentName(
+  rawName: string,
+  departments: Department[],
+  ignoreId?: string,
+): string | undefined {
+  const name = rawName.trim().replace(/\s+/g, ' ');
+
+  if (!name) return 'Department name is required.';
+  if (name.length > MAX_DEPARTMENT_NAME_LENGTH) {
+    return `Department name must be ${MAX_DEPARTMENT_NAME_LENGTH} characters or fewer.`;
+  }
+  if (
+    departments.some(
+      (department) =>
+        department.id !== ignoreId && department.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return 'That department already exists.';
+  }
+
+  return undefined;
+}
+
+function sortDepartments(departments: Department[]) {
+  return [...departments].sort((departmentA, departmentB) =>
+    departmentA.name.localeCompare(departmentB.name, undefined, { sensitivity: 'base' }),
+  );
+}
+
 export function SettingsPage() {
   const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<'general' | 'security' | 'organization'>('general');
@@ -4144,12 +4182,24 @@ export function SettingsPage() {
   const [organizationError, setOrganizationError] = useState('');
   const [organizationMessage, setOrganizationMessage] = useState('');
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [draftDepartments, setDraftDepartments] = useState<Department[]>([]);
   const [newDepartment, setNewDepartment] = useState('');
+  const [departmentSearch, setDepartmentSearch] = useState('');
+  const [departmentStatusFilter, setDepartmentStatusFilter] = useState<
+    'All' | 'Active' | 'Inactive'
+  >('All');
+  const [editingDepartmentId, setEditingDepartmentId] = useState<string | null>(null);
+  const [editingDepartmentName, setEditingDepartmentName] = useState('');
+  const [departmentError, setDepartmentError] = useState('');
+  const [departmentMessage, setDepartmentMessage] = useState('');
+  const [pendingDepartmentAction, setPendingDepartmentAction] = useState<DepartmentAction | null>(
+    null,
+  );
   const [roles, setRoles] = useState<Role[]>([]);
   const [draftRoles, setDraftRoles] = useState<Role[]>([]);
   const [newRole, setNewRole] = useState('');
-  const [verifyTarget, setVerifyTarget] = useState<'profile' | 'organization'>('profile');
+  const [verifyTarget, setVerifyTarget] = useState<'profile' | 'organization' | 'department'>(
+    'profile',
+  );
 
   useEffect(() => {
     if (verifyRfidStep !== 'success') return;
@@ -4218,6 +4268,33 @@ export function SettingsPage() {
 
     return () => controller.abort();
   }, [session?.accessToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'organization' || !session?.accessToken) return;
+
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE_URL}/departments`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as Department[] | null;
+
+        if (response.ok && Array.isArray(data)) {
+          setDepartments(data);
+        } else {
+          setDepartmentError('Unable to load departments.');
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+
+        setDepartmentError('Unable to load departments.');
+      });
+
+    return () => controller.abort();
+  }, [activeTab, session?.accessToken]);
 
   const updateSetting = <K extends keyof SystemSettings>(key: K, value: SystemSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -4356,7 +4433,7 @@ export function SettingsPage() {
     setIsEditingProfile(true);
   }
 
-  function openVerifyRfidModal(target: 'profile' | 'organization' = 'profile') {
+  function openVerifyRfidModal(target: 'profile' | 'organization' | 'department' = 'profile') {
     if (target === 'profile' && !editedName.trim()) {
       setProfileError('Admin name is required.');
       return;
@@ -4453,7 +4530,6 @@ export function SettingsPage() {
         throw new Error(data?.error ?? 'RFID verification failed.');
       }
 
-      setDepartments(draftDepartments);
       setRoles(draftRoles);
       setIsEditingOrganization(false);
       setOrganizationMessage('Organization settings updated successfully.');
@@ -4492,7 +4568,107 @@ export function SettingsPage() {
     );
   }
 
+  async function submitDepartmentChange() {
+    if (!session?.accessToken || !pendingDepartmentAction) return;
+
+    if (!verifyRfidInput.trim()) {
+      setVerifyRfidError('Please scan or enter your RFID card.');
+      return;
+    }
+    setVerifyRfidStep('saving');
+    setVerifyRfidError('');
+
+    const action = pendingDepartmentAction;
+    const headers = {
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      const verifyResponse = await fetch(`${API_BASE_URL}/auth/me/verify-rfid`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ rfidCode: verifyRfidInput.trim() }),
+      });
+      const verifyData = (await verifyResponse.json().catch(() => null)) as {
+        verified?: boolean;
+        error?: string;
+      } | null;
+
+      if (!verifyResponse.ok || !verifyData?.verified) {
+        throw new Error(verifyData?.error ?? 'RFID verification failed.');
+      }
+
+      const response =
+        action.kind === 'add'
+          ? await fetch(`${API_BASE_URL}/departments`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ name: action.name }),
+            })
+          : await fetch(`${API_BASE_URL}/departments/${action.id}`, {
+              method: 'PATCH',
+              headers,
+              body: JSON.stringify(
+                action.kind === 'rename'
+                  ? { name: action.name }
+                  : { isActive: action.isActive, confirm: action.confirm },
+              ),
+            });
+      const data = (await response.json().catch(() => null)) as
+        | (Department & { error?: string })
+        | { error?: string; requiresConfirmation?: boolean }
+        | null;
+
+      if (!response.ok || !data || !('id' in data)) {
+        if (
+          action.kind === 'status' &&
+          data &&
+          'requiresConfirmation' in data &&
+          data.requiresConfirmation
+        ) {
+          setPendingDepartmentAction({ ...action, confirm: true });
+        }
+
+        throw new Error(
+          data && 'error' in data && data.error ? data.error : 'Unable to save department.',
+        );
+      }
+
+      const saved = data as Department;
+
+      setDepartments((current) =>
+        sortDepartments(
+          action.kind === 'add'
+            ? [...current, saved]
+            : current.map((department) => (department.id === saved.id ? saved : department)),
+        ),
+      );
+      setNewDepartment('');
+      setEditingDepartmentId(null);
+      setEditingDepartmentName('');
+      setDepartmentError('');
+      setDepartmentMessage(
+        action.kind === 'add'
+          ? 'Department added.'
+          : action.kind === 'rename'
+            ? 'Department renamed.'
+            : saved.is_active
+              ? 'Department activated.'
+              : 'Department deactivated.',
+      );
+      setPendingDepartmentAction(null);
+      setVerifySuccessCountdown(5);
+      setVerifyRfidStep('success');
+    } catch (error) {
+      setVerifyRfidError(error instanceof Error ? error.message : 'Unable to save department.');
+      setVerifyRfidStep('error');
+    }
+  }
+
   function submitVerifiedChange() {
+    if (verifyTarget === 'department') return submitDepartmentChange();
+
     return verifyTarget === 'organization' ? submitOrganizationChange() : submitProfileNameChange();
   }
 
@@ -4545,41 +4721,91 @@ export function SettingsPage() {
   }
 
   function startEditingOrganization() {
-    setDraftDepartments(departments);
     setDraftRoles(roles);
-    setNewDepartment('');
     setNewRole('');
     setOrganizationError('');
     setOrganizationMessage('');
     setIsEditingOrganization(true);
   }
 
+  function startDepartmentAction(action: DepartmentAction) {
+    setDepartmentError('');
+    setDepartmentMessage('');
+    setPendingDepartmentAction(action);
+    openVerifyRfidModal('department');
+  }
+
   function addDepartment() {
-    const name = newDepartment.trim();
-    if (!name) {
-      setOrganizationError('Department name is required.');
+    const error = validateDepartmentName(newDepartment, departments);
+
+    if (error) {
+      setDepartmentError(error);
       return;
     }
-    if (draftDepartments.some((d) => d.name.toLowerCase() === name.toLowerCase())) {
-      setOrganizationError('That department already exists.');
+
+    startDepartmentAction({ kind: 'add', name: newDepartment.trim().replace(/\s+/g, ' ') });
+  }
+
+  function startRenamingDepartment(department: Department) {
+    setEditingDepartmentId(department.id);
+    setEditingDepartmentName(department.name);
+    setDepartmentError('');
+    setDepartmentMessage('');
+  }
+
+  function cancelRenamingDepartment() {
+    setEditingDepartmentId(null);
+    setEditingDepartmentName('');
+    setDepartmentError('');
+  }
+
+  function saveDepartmentRename(department: Department) {
+    const name = editingDepartmentName.trim().replace(/\s+/g, ' ');
+
+    if (name === department.name) {
+      cancelRenamingDepartment();
       return;
     }
-    setDraftDepartments((prev) => [...prev, { id: crypto.randomUUID(), name, status: 'Active' }]);
-    setNewDepartment('');
-    setOrganizationError('');
+
+    const error = validateDepartmentName(name, departments, department.id);
+
+    if (error) {
+      setDepartmentError(error);
+      return;
+    }
+
+    startDepartmentAction({ kind: 'rename', id: department.id, name });
   }
 
-  function removeDepartment(id: string) {
-    setDraftDepartments((prev) => prev.filter((d) => d.id !== id));
+  function toggleDepartmentStatus(department: Department) {
+    if (
+      department.is_active &&
+      department.user_count > 0 &&
+      !window.confirm(
+        `${department.user_count} user(s) are assigned to ${department.name}. They will keep this department, but no new users can be assigned to it once it is inactive. Deactivate it?`,
+      )
+    ) {
+      return;
+    }
+
+    startDepartmentAction({
+      kind: 'status',
+      id: department.id,
+      isActive: !department.is_active,
+      confirm: department.is_active,
+    });
   }
 
-  function toggleDepartmentStatus(id: string) {
-    setDraftDepartments((prev) =>
-      prev.map((d) =>
-        d.id === id ? { ...d, status: d.status === 'Active' ? 'Inactive' : 'Active' } : d,
-      ),
-    );
-  }
+  const visibleDepartments = departments.filter((department) => {
+    const matchesSearch =
+      !departmentSearch.trim() ||
+      department.name.toLowerCase().includes(departmentSearch.trim().toLowerCase());
+    const matchesStatus =
+      departmentStatusFilter === 'All' ||
+      (departmentStatusFilter === 'Active' ? department.is_active : !department.is_active);
+
+    return matchesSearch && matchesStatus;
+  });
 
   return (
     <section className="module-page">
@@ -4948,7 +5174,6 @@ export function SettingsPage() {
             <div className="organization-input-row">
               <label> Add Department </label>
               <input
-                disabled={!isEditingOrganization}
                 onChange={(e) => setNewDepartment(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -4960,62 +5185,131 @@ export function SettingsPage() {
                 value={newDepartment}
               />
 
-              <button
-                className="organization-edit-button"
-                disabled={!isEditingOrganization}
-                onClick={addDepartment}
-                type="button"
-              >
+              <button className="organization-edit-button" onClick={addDepartment} type="button">
                 Add
               </button>
             </div>
+
+            <div className="enrollment-search-row">
+              <input
+                aria-label="Search departments"
+                onChange={(e) => setDepartmentSearch(e.target.value)}
+                placeholder="Search departments..."
+                type="search"
+                value={departmentSearch}
+              />
+              <select
+                aria-label="Filter departments by status"
+                onChange={(e) =>
+                  setDepartmentStatusFilter(e.target.value as 'All' | 'Active' | 'Inactive')
+                }
+                value={departmentStatusFilter}
+              >
+                <option value="All">All Status</option>
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+
+            {departmentError ? (
+              <p className="module-table-message error" role="alert">
+                {departmentError}
+              </p>
+            ) : null}
+            {departmentMessage ? <p className="module-table-message">{departmentMessage}</p> : null}
 
             <div className="user-table-wrap">
               <table className="managed-table user-management-table">
                 <thead>
                   <tr>
                     <th>Department</th>
+                    <th>Users</th>
                     <th>Access Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {(isEditingOrganization ? draftDepartments : departments).length === 0 ? (
+                  {visibleDepartments.length === 0 ? (
                     <tr>
-                      <td colSpan={3}>No departments yet.</td>
+                      <td colSpan={4}>
+                        {departments.length === 0
+                          ? 'No departments yet.'
+                          : 'No departments match your search.'}
+                      </td>
                     </tr>
                   ) : (
-                    (isEditingOrganization ? draftDepartments : departments).map((dept) => (
+                    visibleDepartments.map((dept) => (
                       <tr key={dept.id}>
-                        <td>{dept.name}</td>
-                        <td>{dept.status}</td>
+                        <td>
+                          {editingDepartmentId === dept.id ? (
+                            <input
+                              aria-label={`Rename ${dept.name}`}
+                              autoFocus
+                              onChange={(e) => setEditingDepartmentName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  saveDepartmentRename(dept);
+                                } else if (e.key === 'Escape') {
+                                  cancelRenamingDepartment();
+                                }
+                              }}
+                              value={editingDepartmentName}
+                            />
+                          ) : (
+                            dept.name
+                          )}
+                        </td>
+                        <td>{dept.user_count}</td>
+                        <td>{dept.is_active ? 'Active' : 'Inactive'}</td>
                         <td>
                           <div className="user-row-actions">
-                            <button
-                              aria-label={
-                                dept.status === 'Active'
-                                  ? 'Deactivate department'
-                                  : 'Activate department'
-                              }
-                              className={dept.status === 'Active' ? 'deactivate' : 'activate'}
-                              disabled={!isEditingOrganization}
-                              onClick={() => toggleDepartmentStatus(dept.id)}
-                              title={dept.status === 'Active' ? 'Deactivate' : 'Activate'}
-                              type="button"
-                            >
-                              <Power size={16} />
-                            </button>
-                            <button
-                              aria-label="Remove department"
-                              className="archive"
-                              disabled={!isEditingOrganization}
-                              onClick={() => removeDepartment(dept.id)}
-                              title="Remove"
-                              type="button"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            {editingDepartmentId === dept.id ? (
+                              <>
+                                <button
+                                  aria-label="Save department name"
+                                  className="activate"
+                                  onClick={() => saveDepartmentRename(dept)}
+                                  title="Save"
+                                  type="button"
+                                >
+                                  <Check size={16} />
+                                </button>
+                                <button
+                                  aria-label="Cancel renaming"
+                                  className="archive"
+                                  onClick={cancelRenamingDepartment}
+                                  title="Cancel"
+                                  type="button"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  aria-label={`Rename ${dept.name}`}
+                                  className="edit"
+                                  onClick={() => startRenamingDepartment(dept)}
+                                  title="Rename"
+                                  type="button"
+                                >
+                                  <Pencil size={16} />
+                                </button>
+                                <button
+                                  aria-label={
+                                    dept.is_active ? 'Deactivate department' : 'Activate department'
+                                  }
+                                  className={dept.is_active ? 'deactivate' : 'activate'}
+                                  onClick={() => toggleDepartmentStatus(dept)}
+                                  title={dept.is_active ? 'Deactivate' : 'Activate'}
+                                  type="button"
+                                >
+                                  <Power size={16} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
