@@ -72,7 +72,7 @@ usersRouter.get('/', async (req, res) => {
       `SELECT ${USER_FIELDS}
        FROM users
        WHERE COALESCE(is_archived, FALSE) = FALSE
-       ORDER BY full_name`,
+       ORDER BY LOWER(last_name), LOWER(first_name), employee_id`,
     );
     res.json(result.rows);
   } catch (error) {
