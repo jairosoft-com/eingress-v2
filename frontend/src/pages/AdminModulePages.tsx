@@ -2458,10 +2458,9 @@ export function UserManagementPage() {
                   <span>User ID</span>
                   <input
                     readOnly
+                    placeholder={createForm.role ? '' : 'Assigned automatically'}
                     value={
-                      nextUserIdPreview?.role === createForm.role
-                        ? nextUserIdPreview.userId
-                        : 'Assigned automatically'
+                      nextUserIdPreview?.role === createForm.role ? nextUserIdPreview.userId : ''
                     }
                   />
                 </label>
