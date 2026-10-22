@@ -6,6 +6,8 @@ import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
 import { checkDepartmentAssignable } from '../lib/departments.js';
+import { checkRoleAssignable } from '../lib/roles.js';
+
 
 export const usersRouter = express.Router();
 
@@ -72,7 +74,7 @@ usersRouter.get('/', async (req, res) => {
       `SELECT ${USER_FIELDS}
        FROM users
        WHERE COALESCE(is_archived, FALSE) = FALSE
-       ORDER BY full_name`,
+       ORDER BY LOWER(last_name), LOWER(first_name), employee_id`,
     );
     res.json(result.rows);
   } catch (error) {
@@ -88,23 +90,32 @@ usersRouter.post('/', async (req, res) => {
     errors.employeeId = 'Employee ID is required.';
   }
 
+  if (!role || !String(role).trim()) {
+    errors.role = 'Role is required.';
+  }
+
   if (Object.keys(errors).length > 0) {
     return res.status(400).json({ error: Object.values(errors).join(' '), errors });
   }
 
   try {
     const departmentCheck = await checkDepartmentAssignable(department);
+    const roleCheck = await checkRoleAssignable(role);
 
     if (departmentCheck.error) {
       return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
     }
 
-    const expirationDate = getDefaultExpirationForRole(role);
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+    }
+
+    const expirationDate = getDefaultExpirationForRole(roleCheck.name);
     const result = await query(
       `INSERT INTO users (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
        RETURNING ${USER_FIELDS}`,
-      [employeeId, firstName, lastName, email || null, phone || null, departmentCheck.name || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive, expirationDate],
+      [employeeId, firstName, lastName, email || null, phone || null, departmentCheck.name || null, roleCheck.name, fingerprintId || null, rfidUid || null, isActive, expirationDate],
     );
     const user = result.rows[0];
     await query(
@@ -183,14 +194,14 @@ usersRouter.patch('/:id', async (req, res) => {
       }
     }
 
-    // Only a changed department is checked, so users already in a now-inactive department can still be edited.
-    let departmentValue = department ?? null;
+    const departmentProvided = req.body.department !== undefined;
+    let departmentValue = departmentProvided ? (department ? String(department).trim() : null) : undefined;
 
-    if (departmentValue !== null && String(departmentValue).trim() !== '') {
+    if (departmentProvided && departmentValue !== null && departmentValue !== '') {
       const currentUser = await query(`SELECT department FROM users WHERE id = $1`, [id]);
       const currentDepartment = String(currentUser.rows[0]?.department ?? '').trim().toLowerCase();
 
-      if (currentUser.rowCount > 0 && currentDepartment !== String(departmentValue).trim().replace(/\s+/g, ' ').toLowerCase()) {
+      if (currentUser.rowCount > 0 && currentDepartment !== departmentValue.replace(/\s+/g, ' ').toLowerCase()) {
         const departmentCheck = await checkDepartmentAssignable(departmentValue);
 
         if (departmentCheck.error) {
@@ -198,6 +209,32 @@ usersRouter.patch('/:id', async (req, res) => {
         }
 
         departmentValue = departmentCheck.name;
+      } else if (currentUser.rowCount > 0) {
+        departmentValue = currentUser.rows[0]?.department ?? departmentValue;
+      }
+    }
+
+    const roleProvided = req.body.role !== undefined;
+    let roleValue = roleProvided ? (role ? String(role).trim() : '') : undefined;
+
+    if (roleProvided) {
+      if (!roleValue) {
+        return res.status(400).json({ error: 'Role is required.', errors: { role: 'Role is required.' } });
+      }
+
+      const currentUser = await query(`SELECT role FROM users WHERE id = $1`, [id]);
+      const currentRole = String(currentUser.rows[0]?.role ?? '').trim().toLowerCase();
+
+      if (currentUser.rowCount > 0 && currentRole !== roleValue.replace(/\s+/g, ' ').toLowerCase()) {
+        const roleCheck = await checkRoleAssignable(roleValue);
+
+        if (roleCheck.error) {
+          return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+        }
+
+        roleValue = roleCheck.name;
+      } else if (currentUser.rowCount > 0) {
+        roleValue = currentUser.rows[0]?.role ?? roleValue;
       }
     }
 
@@ -207,16 +244,30 @@ usersRouter.patch('/:id', async (req, res) => {
          last_name = COALESCE($2, last_name),
          email = COALESCE($3, email),
          phone = COALESCE($4, phone),
-         department = COALESCE($5, department),
-         role = COALESCE($6, role),
+         department = CASE WHEN $11 THEN $5 ELSE department END,
+         role = CASE WHEN $12 THEN $6 ELSE role END,
          fingerprint_id = COALESCE($7, fingerprint_id),
          rfid_uid = COALESCE($8, rfid_uid),
          is_active = COALESCE($9, is_active),
          is_archived = COALESCE($10, is_archived),
          updated_at = NOW()
-       WHERE id = $11
+       WHERE id = $13
        RETURNING ${USER_FIELDS}`,
-      [namesProvided ? firstName : null, namesProvided ? lastName : null, email ?? null, phone ?? null, departmentValue, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, isArchived ?? null, id],
+      [
+        namesProvided ? firstName : null,
+        namesProvided ? lastName : null,
+        email ?? null,
+        phone ?? null,
+        departmentValue ?? null,
+        roleValue ?? null,
+        fingerprintId ?? null,
+        rfidUid ?? null,
+        isActive ?? null,
+        isArchived ?? null,
+        departmentProvided,
+        roleProvided,
+        id,
+      ],
     );
 
     if (result.rowCount === 0) {

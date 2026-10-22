@@ -689,18 +689,64 @@ authRouter.post('/reset-password', async (req, res) => {
   }
 });
 
+authRouter.post('/validate-current-password', authMiddleware, async (req, res) => {
+  const currentPassword = String(req.body.currentPassword || '');
+
+  if (!currentPassword) {
+    return res.status(400).json({
+      errors: { currentPassword: 'Current password is required.' },
+    });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT password_hash
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const passwordMatch = await bcrypt.compare(currentPassword, adminResult.rows[0].password_hash);
+
+    if (!passwordMatch) {
+      return res.status(400).json({
+        errors: { currentPassword: 'Current password is incorrect.' },
+      });
+    }
+
+    return res.json({ valid: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Unable to validate current password' });
+  }
+});
+
 authRouter.post('/change-password', authMiddleware, async (req, res) => {
   const currentPassword = String(req.body.currentPassword || '');
   const newPassword = String(req.body.newPassword || '');
+  const confirmPassword = String(req.body.confirmPassword || '');
+  const validationErrors = {};
 
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({ error: 'Current password and new password are required' });
+  if (!currentPassword) {
+    validationErrors.currentPassword = 'Current password is required.';
   }
-
-  const passwordPolicyError = validatePasswordPolicy(newPassword);
-
-  if (passwordPolicyError) {
-    return res.status(400).json({ error: passwordPolicyError });
+  if (!newPassword) {
+    validationErrors.newPassword = 'New password is required.';
+  } else {
+    const passwordPolicyError = validatePasswordPolicy(newPassword);
+    if (passwordPolicyError) {
+      validationErrors.newPassword = passwordPolicyError;
+    }
+  }
+  if (!confirmPassword) {
+    validationErrors.confirmPassword = 'Please confirm your new password.';
+  } else if (newPassword !== confirmPassword) {
+    validationErrors.confirmPassword = 'Passwords do not match.';
   }
 
   try {
@@ -717,16 +763,21 @@ authRouter.post('/change-password', authMiddleware, async (req, res) => {
     }
 
     const admin = adminResult.rows[0];
-    const passwordMatch = await bcrypt.compare(currentPassword, admin.password_hash);
+    if (currentPassword) {
+      const passwordMatch = await bcrypt.compare(currentPassword, admin.password_hash);
 
-    if (!passwordMatch) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
+      if (!passwordMatch) {
+        validationErrors.currentPassword = 'Current password is incorrect.';
+      } else if (currentPassword === newPassword) {
+        validationErrors.newPassword = 'New password must be different from the current password.';
+      }
     }
 
-    if (currentPassword === newPassword) {
-      return res
-        .status(400)
-        .json({ error: 'New password must be different from the current password' });
+    if (Object.keys(validationErrors).length > 0) {
+      return res.status(400).json({
+        error: 'Please correct the highlighted fields.',
+        errors: validationErrors,
+      });
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 12);

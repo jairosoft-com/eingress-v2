@@ -9,7 +9,7 @@ import {
   Send,
   UserRound,
 } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import eingressIcon from '../assets/icons/eingress-icon.png';
@@ -17,15 +17,18 @@ import eingressIcon from '../assets/icons/eingress-icon.png';
 import { API_BASE_URL } from '../lib/api';
 
 type RegistrationErrors = {
-  department?: string;
   email?: string;
   firstName?: string;
   lastName?: string;
   phoneNumber?: string;
+  role?: string;
   form?: string;
 };
 
-const departments = ['Employee', 'Student', 'Staff', 'Intern'];
+type RoleOption = {
+  id: number;
+  name: string;
+};
 
 function stripNonLetters(value: string) {
   return value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ '’-]/g, '');
@@ -57,8 +60,8 @@ function validateSingleField(
       return 'Enter a valid 10-digit mobile number starting with 9.';
   }
 
-  if (fieldName === 'department') {
-    if (!value) return 'Department is required.';
+  if (fieldName === 'role') {
+    if (!value) return 'Role is required.';
   }
 
   return undefined;
@@ -69,7 +72,7 @@ function validateRegistrationForm(
   lastName: string,
   email: string,
   phoneNumber: string,
-  department: string,
+  role: string,
 ): RegistrationErrors {
   const errors: RegistrationErrors = {};
 
@@ -97,8 +100,8 @@ function validateRegistrationForm(
     errors.phoneNumber = 'Enter a valid 10-digit mobile number starting with 9.';
   }
 
-  if (!department) {
-    errors.department = 'Department is required.';
+  if (!role) {
+    errors.role = 'Role is required.';
   }
 
   return errors;
@@ -110,10 +113,63 @@ export function RegistrationPage() {
   const [email, setEmail] = useState('');
   // Holds only the 10-digit local part (9XXXXXXXXX); +63 is a fixed prefix, prepended on submit.
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [department, setDepartment] = useState('');
+  const [role, setRole] = useState('');
+  const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
+  const [rolesError, setRolesError] = useState('');
+  const [rolesRequest, setRolesRequest] = useState(0);
   const [errors, setErrors] = useState<RegistrationErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+
+  useEffect(() => {
+    let isCurrentRequest = true;
+
+    async function loadRoles() {
+      setRolesLoading(true);
+      setRolesError('');
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/roles/active`);
+        const data = (await response.json().catch(() => null)) as
+          | RoleOption[]
+          | { error?: string }
+          | null;
+
+        if (!response.ok) {
+          const message = data && !Array.isArray(data) ? data.error : undefined;
+          throw new Error(message || 'Role options could not be loaded.');
+        }
+
+        if (!Array.isArray(data)) {
+          throw new Error('Role options could not be loaded.');
+        }
+
+        if (isCurrentRequest) {
+          setRoles(data);
+          setRole((currentRole) =>
+            data.some((option) => option.name === currentRole) ? currentRole : '',
+          );
+        }
+      } catch (error) {
+        if (isCurrentRequest) {
+          setRoles([]);
+          setRole('');
+          setRolesError(
+            error instanceof Error ? error.message : 'Role options could not be loaded.',
+          );
+        }
+      } finally {
+        if (isCurrentRequest) setRolesLoading(false);
+      }
+    }
+
+    void loadRoles();
+
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [rolesRequest]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -123,8 +179,12 @@ export function RegistrationPage() {
       lastName,
       email,
       phoneNumber,
-      department,
+      role,
     );
+    if (rolesLoading || roles.length === 0) {
+      validationErrors.role =
+        rolesError || 'No active roles are available. Please try again later.';
+    }
     setErrors(validationErrors);
     setSuccessMessage('');
 
@@ -143,7 +203,7 @@ export function RegistrationPage() {
         body: JSON.stringify({
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          department,
+          role,
           email,
           phone: `+63${phoneNumber}`,
         }),
@@ -152,11 +212,11 @@ export function RegistrationPage() {
       const data = (await response.json().catch(() => null)) as {
         error?: string;
         errors?: {
-          department?: string;
           email?: string;
           firstName?: string;
           lastName?: string;
           phone?: string;
+          role?: string;
         };
         field?: string;
         request_code?: string;
@@ -165,11 +225,11 @@ export function RegistrationPage() {
       if (!response.ok) {
         if (response.status === 400 && data?.errors) {
           const fieldErrors: RegistrationErrors = {
-            department: data.errors.department,
             email: data.errors.email,
             firstName: data.errors.firstName,
             lastName: data.errors.lastName,
             phoneNumber: data.errors.phone,
+            role: data.errors.role,
           };
 
           if (Object.values(fieldErrors).some(Boolean)) {
@@ -219,7 +279,7 @@ export function RegistrationPage() {
       setLastName('');
       setEmail('');
       setPhoneNumber('');
-      setDepartment('');
+      setRole('');
     } catch (error) {
       setErrors({
         form: error instanceof Error ? error.message : 'Registration could not be submitted.',
@@ -405,34 +465,58 @@ export function RegistrationPage() {
           </section>
 
           <section className="question-card">
-            <label htmlFor="department">
+            <label htmlFor="role">
               Role <span aria-hidden="true">*</span>
             </label>
             <div className="google-input-shell select-shell">
               <Building2 size={20} aria-hidden="true" />
               <select
-                aria-describedby={errors.department ? 'department-error' : undefined}
-                aria-invalid={Boolean(errors.department)}
-                id="department"
-                name="department"
+                aria-describedby={errors.role ? 'role-error' : undefined}
+                aria-invalid={Boolean(errors.role)}
+                disabled={rolesLoading || roles.length === 0}
+                id="role"
+                name="role"
                 onChange={(event) => {
-                  setDepartment(event.target.value);
-                  const error = validateSingleField('department', event.target.value);
-                  setErrors((prev) => ({ ...prev, department: error }));
+                  setRole(event.target.value);
+                  const error = validateSingleField('role', event.target.value);
+                  setErrors((prev) => ({ ...prev, role: error }));
                 }}
-                value={department}
+                value={role}
               >
-                <option value="">Choose role</option>
-                {departments.map((departmentName) => (
-                  <option key={departmentName} value={departmentName}>
-                    {departmentName}
+                <option value="">
+                  {rolesLoading
+                    ? 'Loading roles...'
+                    : roles.length
+                      ? 'Choose role'
+                      : 'No active roles available'}
+                </option>
+                {roles.map((roleOption) => (
+                  <option key={roleOption.id} value={roleOption.name}>
+                    {roleOption.name}
                   </option>
                 ))}
               </select>
             </div>
-            {errors.department ? (
-              <span className="field-error" id="department-error">
-                {errors.department}
+            {rolesError ? (
+              <span className="field-error" id="role-options-error" role="alert">
+                {rolesError}{' '}
+                <button
+                  className="clear-form-button"
+                  onClick={() => setRolesRequest((request) => request + 1)}
+                  type="button"
+                >
+                  Retry
+                </button>
+              </span>
+            ) : null}
+            {!rolesLoading && !rolesError && roles.length === 0 ? (
+              <span className="field-error" id="role-options-error" role="alert">
+                No active roles are available. Registration cannot be submitted.
+              </span>
+            ) : null}
+            {errors.role ? (
+              <span className="field-error" id="role-error">
+                {errors.role}
               </span>
             ) : null}
           </section>
@@ -440,7 +524,7 @@ export function RegistrationPage() {
           <div className="registration-actions">
             <button
               className="gradient-button registration-submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || rolesLoading || roles.length === 0}
               type="submit"
             >
               {isSubmitting ? (
@@ -463,7 +547,7 @@ export function RegistrationPage() {
                 setLastName('');
                 setEmail('');
                 setPhoneNumber('');
-                setDepartment('');
+                setRole('');
                 setErrors({});
                 setSuccessMessage('');
               }}

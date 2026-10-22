@@ -22,6 +22,7 @@ import { reportsRouter } from './routes/reports.js';
 import { auditLogsRouter } from './routes/auditLogs.js';
 import { settingsRouter } from './routes/settings.js';
 import { departmentsRouter } from './routes/departments.js';
+import { rolesRouter } from './routes/roles.js';
 import { createWebSocketServer } from './ws.js';
 import { runAccessExpirationCheck } from './lib/accessExpiration.js';
 
@@ -82,6 +83,7 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/departments', departmentsRouter);
+app.use('/api/roles', rolesRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/kiosk', kioskRouter);
 
