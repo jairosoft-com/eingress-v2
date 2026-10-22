@@ -9,7 +9,7 @@ import {
   LockKeyhole,
   ShieldCheck,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useAuth } from '../auth/useAuth';
@@ -58,6 +58,9 @@ export function ChangePasswordPage() {
   const [errors, setErrors] = useState<ChangePasswordErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [hasValidatedNewPassword, setHasValidatedNewPassword] = useState(false);
+  const [hasValidatedConfirmPassword, setHasValidatedConfirmPassword] = useState(false);
+  const currentPasswordValidationRequest = useRef(0);
 
   const requirementResults = useMemo(
     () => getPasswordRequirementResults(newPassword),
@@ -65,6 +68,96 @@ export function ChangePasswordPage() {
   );
   const passedCount = requirementResults.filter((requirement) => requirement.passed).length;
   const strength = getPasswordStrength(newPassword ? passedCount : 0);
+  const newPasswordError = (password: string) => {
+    if (!password) {
+      return 'New password is required.';
+    }
+
+    const unmetRequirements = getPasswordRequirementResults(password)
+      .filter((requirement) => !requirement.passed)
+      .map((requirement) => requirement.label);
+
+    return unmetRequirements.length > 0
+      ? `Password must meet these requirements: ${unmetRequirements.join(', ')}.`
+      : undefined;
+  };
+
+  async function validateCurrentPassword(password: string) {
+    const requestId = ++currentPasswordValidationRequest.current;
+
+    if (!password) {
+      setErrors((current) => ({
+        ...current,
+        currentPassword: 'Current password is required.',
+      }));
+      return;
+    }
+
+    if (!session?.accessToken) {
+      setErrors((current) => ({
+        ...current,
+        form: 'Unable to validate current password. Please sign in again.',
+      }));
+      return;
+    }
+
+    setErrors((current) => {
+      const next = { ...current };
+      delete next.currentPassword;
+      return next;
+    });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/validate-current-password`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ currentPassword: password }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        errors?: ChangePasswordErrors;
+      } | null;
+
+      if (requestId !== currentPasswordValidationRequest.current) {
+        return;
+      }
+
+      if (!response.ok) {
+        setErrors((current) => ({
+          ...current,
+          ...(data?.errors ?? { form: data?.error || 'Unable to validate current password.' }),
+        }));
+      }
+    } catch {
+      if (requestId === currentPasswordValidationRequest.current) {
+        setErrors((current) => ({
+          ...current,
+          form: 'Unable to validate current password. Please try again.',
+        }));
+      }
+    }
+  }
+
+  function validateNewPassword(password: string) {
+    setErrors((current) => ({
+      ...current,
+      newPassword: newPasswordError(password),
+    }));
+  }
+
+  function validateConfirmPassword(password: string, confirmation: string) {
+    setErrors((current) => ({
+      ...current,
+      confirmPassword: !confirmation
+        ? 'Please confirm your new password.'
+        : password !== confirmation
+          ? 'Passwords do not match.'
+          : undefined,
+    }));
+  }
 
   useEffect(() => {
     if (!successMessage) {
@@ -88,8 +181,9 @@ export function ChangePasswordPage() {
       validationErrors.currentPassword = 'Current password is required.';
     }
 
-    if (requirementResults.some((requirement) => !requirement.passed)) {
-      validationErrors.newPassword = 'Password does not meet all requirements.';
+    const passwordError = newPasswordError(newPassword);
+    if (passwordError) {
+      validationErrors.newPassword = passwordError;
     }
 
     if (!confirmPassword) {
@@ -100,7 +194,14 @@ export function ChangePasswordPage() {
 
     setErrors(validationErrors);
 
-    if (Object.keys(validationErrors).length > 0 || !session?.accessToken) {
+    if (Object.keys(validationErrors).length > 0) {
+      if (currentPassword && session?.accessToken) {
+        await validateCurrentPassword(currentPassword);
+      }
+      return;
+    }
+
+    if (!session?.accessToken) {
       return;
     }
 
@@ -191,7 +292,17 @@ export function ChangePasswordPage() {
                   autoComplete="current-password"
                   id="currentPassword"
                   name="currentPassword"
-                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  onBlur={(event) => void validateCurrentPassword(event.target.value)}
+                  onChange={(event) => {
+                    currentPasswordValidationRequest.current += 1;
+                    setCurrentPassword(event.target.value);
+                    setErrors((current) => {
+                      const next = { ...current };
+                      delete next.currentPassword;
+                      delete next.form;
+                      return next;
+                    });
+                  }}
                   placeholder="Enter your current password"
                   type={showCurrentPassword ? 'text' : 'password'}
                   value={currentPassword}
@@ -222,7 +333,20 @@ export function ChangePasswordPage() {
                   autoComplete="new-password"
                   id="newPassword"
                   name="newPassword"
-                  onChange={(event) => setNewPassword(event.target.value)}
+                  onBlur={(event) => {
+                    setHasValidatedNewPassword(true);
+                    validateNewPassword(event.target.value);
+                  }}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setNewPassword(value);
+                    if (hasValidatedNewPassword) {
+                      validateNewPassword(value);
+                    }
+                    if (hasValidatedConfirmPassword) {
+                      validateConfirmPassword(value, confirmPassword);
+                    }
+                  }}
                   placeholder="Enter your new password"
                   type={showNewPassword ? 'text' : 'password'}
                   value={newPassword}
@@ -272,7 +396,17 @@ export function ChangePasswordPage() {
                   autoComplete="new-password"
                   id="confirmPassword"
                   name="confirmPassword"
-                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  onBlur={(event) => {
+                    setHasValidatedConfirmPassword(true);
+                    validateConfirmPassword(newPassword, event.target.value);
+                  }}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setConfirmPassword(value);
+                    if (hasValidatedConfirmPassword) {
+                      validateConfirmPassword(newPassword, value);
+                    }
+                  }}
                   placeholder="Confirm your new password"
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPassword}

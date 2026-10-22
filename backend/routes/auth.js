@@ -689,6 +689,43 @@ authRouter.post('/reset-password', async (req, res) => {
   }
 });
 
+authRouter.post('/validate-current-password', authMiddleware, async (req, res) => {
+  const currentPassword = String(req.body.currentPassword || '');
+
+  if (!currentPassword) {
+    return res.status(400).json({
+      errors: { currentPassword: 'Current password is required.' },
+    });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT password_hash
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const passwordMatch = await bcrypt.compare(currentPassword, adminResult.rows[0].password_hash);
+
+    if (!passwordMatch) {
+      return res.status(400).json({
+        errors: { currentPassword: 'Current password is incorrect.' },
+      });
+    }
+
+    return res.json({ valid: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Unable to validate current password' });
+  }
+});
+
 authRouter.post('/change-password', authMiddleware, async (req, res) => {
   const currentPassword = String(req.body.currentPassword || '');
   const newPassword = String(req.body.newPassword || '');
