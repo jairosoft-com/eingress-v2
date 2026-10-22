@@ -57,7 +57,7 @@ export async function checkRoleAssignable(role, { strict = true } = {}) {
   const name = normalizeRoleName(role);
 
   if (!name) {
-    return { name: '' };
+    return strict ? { error: 'Role is required.' } : { name: '' };
   }
 
   await ensureRolesTable();
