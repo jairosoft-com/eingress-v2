@@ -1,5 +1,5 @@
 import express from 'express';
-import { query } from '../db.js';
+import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
@@ -7,6 +7,7 @@ import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
 import { checkDepartmentAssignable } from '../lib/departments.js';
 import { checkRoleAssignable } from '../lib/roles.js';
+import { generateUserId, USER_ID_LOCK_KEY } from '../lib/userIds.js';
 
 
 export const usersRouter = express.Router();
@@ -82,13 +83,29 @@ usersRouter.get('/', async (req, res) => {
   }
 });
 
-usersRouter.post('/', async (req, res) => {
-  const { employeeId, email, phone, department, role, fingerprintId, rfidUid, isActive = true } = req.body;
-  const { firstName, lastName, errors } = validateNameParts(req.body);
+// Preview of the User ID a new user in this role would get (display only; the ID is assigned when the user is saved).
+usersRouter.get('/next-id', async (req, res) => {
+  try {
+    const roleCheck = await checkRoleAssignable(req.query.role);
 
-  if (!employeeId) {
-    errors.employeeId = 'Employee ID is required.';
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+    }
+
+    if (!roleCheck.userIdPrefix) {
+      const message = `Role "${roleCheck.name}" has no User ID prefix. Set one in Role Management first.`;
+      return res.status(400).json({ error: message, errors: { role: message } });
+    }
+
+    res.json({ prefix: roleCheck.userIdPrefix, userId: await generateUserId(pool, roleCheck.userIdPrefix) });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+usersRouter.post('/', async (req, res) => {
+  const { email, phone, department, role, fingerprintId, rfidUid, isActive = true } = req.body;
+  const { firstName, lastName, errors } = validateNameParts(req.body);
 
   if (!role || !String(role).trim()) {
     errors.role = 'Role is required.';
@@ -110,13 +127,33 @@ usersRouter.post('/', async (req, res) => {
       return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
     }
 
+    if (!roleCheck.userIdPrefix) {
+      const message = `Role "${roleCheck.name}" has no User ID prefix. Set one in Role Management first.`;
+      return res.status(400).json({ error: message, errors: { role: message } });
+    }
+
     const expirationDate = getDefaultExpirationForRole(roleCheck.name);
-    const result = await query(
-      `INSERT INTO users (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
-       RETURNING ${USER_FIELDS}`,
-      [employeeId, firstName, lastName, email || null, phone || null, departmentCheck.name || null, roleCheck.name, fingerprintId || null, rfidUid || null, isActive, expirationDate],
-    );
+    const client = await pool.connect();
+    let result;
+
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock($1)', [USER_ID_LOCK_KEY]);
+      const employeeId = await generateUserId(client, roleCheck.userIdPrefix);
+      result = await client.query(
+        `INSERT INTO users (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
+         RETURNING ${USER_FIELDS}`,
+        [employeeId, firstName, lastName, email || null, phone || null, departmentCheck.name || null, roleCheck.name, fingerprintId || null, rfidUid || null, isActive, expirationDate],
+      );
+      await client.query('COMMIT');
+    } catch (insertError) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw insertError;
+    } finally {
+      client.release();
+    }
+
     const user = result.rows[0];
     await query(
       `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
