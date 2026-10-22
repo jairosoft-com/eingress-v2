@@ -252,6 +252,7 @@ type UserEditForm = {
   firstName: string;
   lastName: string;
   rfidUid: string;
+  department: string;
   role: string;
   email: string;
   fingerprintId: string;
@@ -259,6 +260,7 @@ type UserEditForm = {
 
 type UserFormFieldErrors = {
   department?: string;
+  role?: string;
   employeeId?: string;
   firstName?: string;
   lastName?: string;
@@ -714,8 +716,6 @@ function getAvatarTone(index: number) {
   return tones[index % tones.length];
 }
 
-const USER_ROLE_OPTIONS = ['Employee', 'Student', 'Staff', 'Intern'];
-
 function maskRfid(value: string) {
   if (!value || value === '-') {
     return '-';
@@ -812,7 +812,10 @@ export function UserManagementPage() {
   const dateTimeSettings = useDateTimeSettings();
   const [now, setNow] = useState(() => Date.now());
   const [users, setUsers] = useState<UserRecord[]>([]);
-  const [activeDepartments, setActiveDepartments] = useState<string[]>([]);
+  const [departments, setDepartments] = useState<
+    { id: number; name: string; is_active: boolean }[]
+  >([]);
+  const [roles, setRoles] = useState<{ id: number; name: string; is_active: boolean }[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [usersErrorMessage, setUsersErrorMessage] = useState('');
   const [userSearch, setUserSearch] = useState('');
@@ -825,7 +828,8 @@ export function UserManagementPage() {
     firstName: '',
     lastName: '',
     rfidUid: '',
-    role: 'Employee',
+    department: '',
+    role: '',
     email: '',
     fingerprintId: '',
   });
@@ -840,7 +844,7 @@ export function UserManagementPage() {
     email: '',
     phone: '',
     department: '',
-    role: 'Employee',
+    role: '',
     rfidUid: '',
     fingerprintId: '',
   });
@@ -913,23 +917,129 @@ export function UserManagementPage() {
     };
   }, [session?.accessToken]);
 
+  async function refreshOrganizationOptions() {
+    try {
+      const headers = session?.accessToken
+        ? { Authorization: `Bearer ${session.accessToken}` }
+        : undefined;
+
+      const [deptRes, rolesRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/departments`, { headers }),
+        fetch(`${API_BASE_URL}/roles`, { headers }),
+      ]);
+
+      if (deptRes.ok) {
+        const deptData = (await deptRes.json().catch(() => null)) as
+          | { id: number; name: string; is_active: boolean }[]
+          | null;
+        if (Array.isArray(deptData)) {
+          setDepartments(deptData);
+        }
+      } else {
+        const activeDeptRes = await fetch(`${API_BASE_URL}/departments/active`);
+        if (activeDeptRes.ok) {
+          const activeDeptData = (await activeDeptRes.json().catch(() => null)) as
+            | { id: number; name: string }[]
+            | null;
+          if (Array.isArray(activeDeptData)) {
+            setDepartments(
+              activeDeptData.map((d) => ({ id: d.id, name: d.name, is_active: true })),
+            );
+          }
+        }
+      }
+
+      if (rolesRes.ok) {
+        const rolesData = (await rolesRes.json().catch(() => null)) as
+          | { id: number; name: string; is_active: boolean }[]
+          | null;
+        if (Array.isArray(rolesData)) {
+          setRoles(rolesData);
+        }
+      } else {
+        const activeRolesRes = await fetch(`${API_BASE_URL}/roles/active`);
+        if (activeRolesRes.ok) {
+          const activeRolesData = (await activeRolesRes.json().catch(() => null)) as
+            | { id: number; name: string }[]
+            | null;
+          if (Array.isArray(activeRolesData)) {
+            setRoles(activeRolesData.map((r) => ({ id: r.id, name: r.name, is_active: true })));
+          }
+        }
+      }
+    } catch {
+      // Leave existing options if fetch fails
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController();
 
-    void fetch(`${API_BASE_URL}/departments/active`, { signal: controller.signal })
-      .then(async (response) => {
-        const data = (await response.json().catch(() => null)) as { name: string }[] | null;
+    async function loadOrgOptions() {
+      try {
+        const headers = session?.accessToken
+          ? { Authorization: `Bearer ${session.accessToken}` }
+          : undefined;
 
-        if (response.ok && Array.isArray(data)) {
-          setActiveDepartments(data.map((department) => department.name));
+        const [deptRes, rolesRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/departments`, { headers, signal: controller.signal }),
+          fetch(`${API_BASE_URL}/roles`, { headers, signal: controller.signal }),
+        ]);
+
+        if (deptRes.ok) {
+          const deptData = (await deptRes.json().catch(() => null)) as
+            | { id: number; name: string; is_active: boolean }[]
+            | null;
+          if (Array.isArray(deptData)) {
+            setDepartments(deptData);
+          }
+        } else {
+          const activeDeptRes = await fetch(`${API_BASE_URL}/departments/active`, {
+            signal: controller.signal,
+          });
+          if (activeDeptRes.ok) {
+            const activeDeptData = (await activeDeptRes.json().catch(() => null)) as
+              | { id: number; name: string }[]
+              | null;
+            if (Array.isArray(activeDeptData)) {
+              setDepartments(
+                activeDeptData.map((d) => ({ id: d.id, name: d.name, is_active: true })),
+              );
+            }
+          }
         }
-      })
-      .catch(() => {
-        // Leave the department list empty if it cannot be loaded.
-      });
 
-    return () => controller.abort();
-  }, []);
+        if (rolesRes.ok) {
+          const rolesData = (await rolesRes.json().catch(() => null)) as
+            | { id: number; name: string; is_active: boolean }[]
+            | null;
+          if (Array.isArray(rolesData)) {
+            setRoles(rolesData);
+          }
+        } else {
+          const activeRolesRes = await fetch(`${API_BASE_URL}/roles/active`, {
+            signal: controller.signal,
+          });
+          if (activeRolesRes.ok) {
+            const activeRolesData = (await activeRolesRes.json().catch(() => null)) as
+              | { id: number; name: string }[]
+              | null;
+            if (Array.isArray(activeRolesData)) {
+              setRoles(activeRolesData.map((r) => ({ id: r.id, name: r.name, is_active: true })));
+            }
+          }
+        }
+      } catch {
+        // Leave existing options if fetch fails
+      }
+    }
+
+    void loadOrgOptions();
+
+    return () => {
+      controller.abort();
+    };
+  }, [session?.accessToken]);
 
   useEffect(() => {
     if (!isRfidScannerOpen) {
@@ -1124,12 +1234,14 @@ export function UserManagementPage() {
       return;
     }
 
+    void refreshOrganizationOptions();
     setEditingUser(user);
     setEditForm({
       firstName: user.first_name || '',
       lastName: user.last_name || '',
       rfidUid: user.rfid_uid || '',
-      role: user.role || 'Employee',
+      department: user.department || '',
+      role: user.role || '',
       email: user.email || '',
       fingerprintId: user.fingerprint_id || '',
     });
@@ -1222,6 +1334,7 @@ export function UserManagementPage() {
     const firstName = editForm.firstName.trim();
     const lastName = editForm.lastName.trim();
     const rfidUid = editForm.rfidUid.trim();
+    const department = editForm.department.trim();
     const role = editForm.role.trim();
     const email = editForm.email.trim();
     const fingerprintId = editForm.fingerprintId.trim();
@@ -1242,6 +1355,28 @@ export function UserManagementPage() {
       return;
     }
 
+    if (!role) {
+      setEditFieldErrors({ role: 'Role is required.' });
+      setEditFormError('');
+      return;
+    }
+
+    if (role !== (editingUser.role || '').trim() && !activeRoles.includes(role)) {
+      setEditFieldErrors({ role: 'Selected role is inactive or unavailable.' });
+      setEditFormError('');
+      return;
+    }
+
+    if (
+      department &&
+      department !== (editingUser.department || '').trim() &&
+      !activeDepartments.includes(department)
+    ) {
+      setEditFieldErrors({ department: 'Selected department is inactive or unavailable.' });
+      setEditFormError('');
+      return;
+    }
+
     try {
       setUpdatingUserId(editingUser.id);
       setEditFormError('');
@@ -1258,6 +1393,7 @@ export function UserManagementPage() {
         body: JSON.stringify({
           firstName,
           lastName,
+          department: department || null,
           role,
           email,
           rfidUid: rfidUid || null,
@@ -1274,7 +1410,10 @@ export function UserManagementPage() {
         !response.ok &&
         data &&
         'errors' in data &&
-        (data.errors?.firstName || data.errors?.lastName)
+        (data.errors?.firstName ||
+          data.errors?.lastName ||
+          data.errors?.department ||
+          data.errors?.role)
       ) {
         setEditFieldErrors(data.errors);
         return;
@@ -1323,7 +1462,24 @@ export function UserManagementPage() {
       lastName: validateNamePart('Last name', lastName),
     };
 
-    if (fieldErrors.employeeId || fieldErrors.firstName || fieldErrors.lastName) {
+    if (!role) {
+      fieldErrors.role =
+        activeRoles.length === 0 ? 'No active roles available.' : 'Role is required.';
+    } else if (!activeRoles.includes(role)) {
+      fieldErrors.role = 'Selected role is inactive or unavailable.';
+    }
+
+    if (department && !activeDepartments.includes(department)) {
+      fieldErrors.department = 'Selected department is inactive or unavailable.';
+    }
+
+    if (
+      fieldErrors.employeeId ||
+      fieldErrors.firstName ||
+      fieldErrors.lastName ||
+      fieldErrors.role ||
+      fieldErrors.department
+    ) {
       setCreateFieldErrors(fieldErrors);
       setCreateFormError('');
       return;
@@ -1349,7 +1505,7 @@ export function UserManagementPage() {
           email,
           phone: `+63${phone}`,
           department: department || null,
-          role: role || 'Employee',
+          role,
           rfidUid: rfidUid || null,
           fingerprintId: fingerprintId || null,
           isActive: true,
@@ -1366,6 +1522,7 @@ export function UserManagementPage() {
         data &&
         'errors' in data &&
         (data.errors?.department ||
+          data.errors?.role ||
           data.errors?.employeeId ||
           data.errors?.firstName ||
           data.errors?.lastName)
@@ -1391,7 +1548,7 @@ export function UserManagementPage() {
         email: '',
         phone: '',
         department: '',
-        role: 'Employee',
+        role: activeRoles.includes('Employee') ? 'Employee' : activeRoles[0] || '',
         rfidUid: '',
         fingerprintId: '',
       });
@@ -1415,8 +1572,16 @@ export function UserManagementPage() {
     await submitEditUserDetails();
   }
 
-  const roleOptions = USER_ROLE_OPTIONS;
-  const departmentOptions = activeDepartments;
+  const activeDepartments = departments.filter((dept) => dept.is_active).map((dept) => dept.name);
+
+  const activeRoles = roles.filter((role) => role.is_active).map((role) => role.name);
+
+  const roleSet = new Set<string>();
+  roles.forEach((r) => roleSet.add(r.name));
+  users.forEach((u) => {
+    if (u.role) roleSet.add(u.role);
+  });
+  const tableRoleFilterOptions = Array.from(roleSet).sort((a, b) => a.localeCompare(b));
 
   function validateCreateUserField(
     fieldName: keyof CreateUserErrors,
@@ -1602,10 +1767,14 @@ export function UserManagementPage() {
               className="primary-action-button"
               type="button"
               onClick={() => {
+                void refreshOrganizationOptions();
                 setIsCreateUserOpen(true);
                 setCreateFormError('');
                 setCreateFieldErrors({});
                 setCreateErrors({});
+                const defaultRole = activeRoles.includes('Employee')
+                  ? 'Employee'
+                  : activeRoles[0] || '';
                 setCreateForm({
                   employeeId: '',
                   firstName: '',
@@ -1613,7 +1782,7 @@ export function UserManagementPage() {
                   email: '',
                   phone: '',
                   department: '',
-                  role: 'Employee',
+                  role: defaultRole,
                   rfidUid: '',
                   fingerprintId: '',
                 });
@@ -1677,7 +1846,7 @@ export function UserManagementPage() {
             value={departmentFilter}
           >
             <option>All Roles</option>
-            {roleOptions.map((role) => (
+            {tableRoleFilterOptions.map((role) => (
               <option key={role}>{role}</option>
             ))}
           </select>
@@ -1957,15 +2126,80 @@ export function UserManagementPage() {
                 <label className="user-edit-field">
                   <span>Role *</span>
                   <select
-                    onChange={(event) =>
-                      setEditForm((currentForm) => ({ ...currentForm, role: event.target.value }))
-                    }
+                    aria-invalid={Boolean(editFieldErrors.role)}
+                    onChange={(event) => {
+                      const role = event.target.value;
+                      setEditForm((currentForm) => ({ ...currentForm, role }));
+                      setEditFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        role: undefined,
+                      }));
+                    }}
                     value={editForm.role}
                   >
-                    {roleOptions.map((role) => (
-                      <option key={role}>{role}</option>
-                    ))}
+                    {editingUser.role && !activeRoles.includes(editingUser.role) ? (
+                      <option disabled value={editingUser.role}>
+                        {editingUser.role} (Inactive)
+                      </option>
+                    ) : null}
+                    {activeRoles.length === 0 &&
+                    (!editingUser.role || activeRoles.includes(editingUser.role)) ? (
+                      <option disabled value="">
+                        No active roles available
+                      </option>
+                    ) : (
+                      activeRoles.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))
+                    )}
                   </select>
+                  {editFieldErrors.role ? (
+                    <small className="field-error">{editFieldErrors.role}</small>
+                  ) : null}
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Department</span>
+                  <select
+                    aria-invalid={Boolean(editFieldErrors.department)}
+                    onChange={(event) => {
+                      const department = event.target.value;
+                      setEditForm((currentForm) => ({ ...currentForm, department }));
+                      setEditFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        department: undefined,
+                      }));
+                    }}
+                    value={editForm.department}
+                  >
+                    {editingUser.department &&
+                    !activeDepartments.includes(editingUser.department) ? (
+                      <option disabled value={editingUser.department}>
+                        {editingUser.department} (Inactive)
+                      </option>
+                    ) : null}
+                    {activeDepartments.length === 0 &&
+                    (!editingUser.department ||
+                      activeDepartments.includes(editingUser.department)) ? (
+                      <option disabled value="">
+                        No active departments available
+                      </option>
+                    ) : (
+                      <>
+                        <option value="">Choose department</option>
+                        {activeDepartments.map((department) => (
+                          <option key={department} value={department}>
+                            {department}
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                  {editFieldErrors.department ? (
+                    <small className="field-error">{editFieldErrors.department}</small>
+                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
@@ -2074,7 +2308,13 @@ export function UserManagementPage() {
                 <div>
                   <span>
                     Department
-                    <small>{editingUser.department || '-'}</small>
+                    <small>
+                      {editForm.department
+                        ? !activeDepartments.includes(editForm.department)
+                          ? `${editForm.department} (Inactive)`
+                          : editForm.department
+                        : '-'}
+                    </small>
                   </span>
                 </div>
                 <div>
@@ -2288,18 +2528,35 @@ export function UserManagementPage() {
                 <label className="user-edit-field">
                   <span>Role *</span>
                   <select
-                    onChange={(event) =>
+                    aria-invalid={Boolean(createFieldErrors.role)}
+                    onChange={(event) => {
+                      const role = event.target.value;
                       setCreateForm((currentForm) => ({
                         ...currentForm,
-                        role: event.target.value,
-                      }))
-                    }
+                        role,
+                      }));
+                      setCreateFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        role: undefined,
+                      }));
+                    }}
                     value={createForm.role}
                   >
-                    {roleOptions.map((role) => (
-                      <option key={role}>{role}</option>
-                    ))}
+                    {activeRoles.length === 0 ? (
+                      <option disabled value="">
+                        No active roles available
+                      </option>
+                    ) : (
+                      activeRoles.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))
+                    )}
                   </select>
+                  {createFieldErrors.role ? (
+                    <small className="field-error">{createFieldErrors.role}</small>
+                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
@@ -2316,12 +2573,20 @@ export function UserManagementPage() {
                     }}
                     value={createForm.department}
                   >
-                    <option value="">Choose department</option>
-                    {departmentOptions.map((department) => (
-                      <option key={department} value={department}>
-                        {department}
+                    {activeDepartments.length === 0 ? (
+                      <option disabled value="">
+                        No active departments available
                       </option>
-                    ))}
+                    ) : (
+                      <>
+                        <option value="">Choose department</option>
+                        {activeDepartments.map((department) => (
+                          <option key={department} value={department}>
+                            {department}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   {createFieldErrors.department ? (
                     <small className="field-error">{createFieldErrors.department}</small>
