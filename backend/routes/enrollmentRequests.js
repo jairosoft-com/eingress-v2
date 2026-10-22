@@ -85,10 +85,10 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
   const client = await pool.connect();
 
   try {
-    const { department, email, phone } = req.body;
+    const { role, email, phone } = req.body;
     const { firstName, lastName, errors } = validateNameParts(req.body);
 
-    if (!department) errors.department = 'Department is required.';
+    if (!role) errors.role = 'Role is required.';
     if (!email) errors.email = 'Email is required.';
     if (!phone) errors.phone = 'Phone number is required.';
 
@@ -96,12 +96,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       return res.status(400).json({ error: Object.values(errors).join(' '), errors });
     }
 
-    const departmentCheck = await checkDepartmentAssignable(department, { strict: false });
-    const roleCheck = await checkRoleAssignable(role, { strict: false });
-
-    if (departmentCheck.error) {
-      return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
-    }
+    const roleCheck = await checkRoleAssignable(role);
 
     if (roleCheck.error) {
       return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
@@ -209,7 +204,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
         employeeId,
         firstName,
         lastName,
-        department.trim(),
+        roleCheck.name,
         'New Enrollment',
         email.trim(),
         normalizedPhone,
@@ -371,7 +366,7 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
       }
 
       const departmentCheck = await checkDepartmentAssignable(request.department, { strict: false });
-      const roleCheck = await checkRoleAssignable(request.role, { strict: false });
+      const roleCheck = await checkRoleAssignable(request.department, { strict: false });
 
       if (departmentCheck.error) {
         await client.query('ROLLBACK');
