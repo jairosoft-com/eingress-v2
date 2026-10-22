@@ -86,6 +86,20 @@ INSERT INTO departments (name) VALUES
   ('IT Department'), ('HR Department'), ('Operations'), ('Admin'), ('Engineering')
 ON CONFLICT DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS roles (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS roles_name_idx ON roles (name);
+
+INSERT INTO roles (name) VALUES
+  ('Intern'), ('Student'), ('Employee')
+ON CONFLICT DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS devices (
   id BIGSERIAL PRIMARY KEY,
   device_code VARCHAR(50) NOT NULL UNIQUE,

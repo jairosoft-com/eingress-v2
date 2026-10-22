@@ -6,6 +6,8 @@ import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
 import { checkDepartmentAssignable } from '../lib/departments.js';
+import { checkRoleAssignable } from '../lib/roles.js';
+
 
 export const usersRouter = express.Router();
 
@@ -94,9 +96,14 @@ usersRouter.post('/', async (req, res) => {
 
   try {
     const departmentCheck = await checkDepartmentAssignable(department);
+    const roleCheck = await checkRoleAssignable(role);
 
     if (departmentCheck.error) {
       return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
+    }
+
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
     }
 
     const expirationDate = getDefaultExpirationForRole(role);
@@ -198,6 +205,23 @@ usersRouter.patch('/:id', async (req, res) => {
         }
 
         departmentValue = departmentCheck.name;
+      }
+    }
+
+    let roleValue = role ?? null;
+
+    if (roleValue !== null && String(roleValue).trim() !== '') {
+      const currentUser = await query(`SELECT role FROM users WHERE id = $1`, [id]);
+      const currentRole = String(currentUser.rows[0]?.role ?? '').trim().toLowerCase();
+
+      if (currentUser.rowCount > 0 && currentRole !== String(roleValue).trim().replace(/\s+/g, ' ').toLowerCase()) {
+        const roleCheck = await checkRoleAssignable(roleValue);
+
+        if (roleCheck.error) {
+          return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+        }
+
+        roleValue = roleCheck.name;
       }
     }
 

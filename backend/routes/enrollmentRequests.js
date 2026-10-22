@@ -13,6 +13,7 @@ import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
 import { checkDepartmentAssignable } from '../lib/departments.js';
+import { checkRoleAssignable } from '../lib/roles.js';
 
 export const enrollmentRequestsRouter = express.Router();
 
@@ -96,9 +97,14 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
     }
 
     const departmentCheck = await checkDepartmentAssignable(department, { strict: false });
+    const roleCheck = await checkRoleAssignable(role, { strict: false });
 
     if (departmentCheck.error) {
       return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
+    }
+
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
     }
 
     const fullName = composeFullName(firstName, lastName);
@@ -281,9 +287,14 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
     }
 
     const departmentCheck = await checkDepartmentAssignable(department, { strict: false });
+    const roleCheck = await checkRoleAssignable(role, { strict: false });
 
     if (departmentCheck.error) {
       return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
+    }
+
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
     }
 
     await client.query('BEGIN');
@@ -360,10 +371,16 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
       }
 
       const departmentCheck = await checkDepartmentAssignable(request.department, { strict: false });
+      const roleCheck = await checkRoleAssignable(request.role, { strict: false });
 
       if (departmentCheck.error) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: departmentCheck.error });
+      }
+
+      if (roleCheck.error) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: roleCheck.error });
       }
 
       const expirationDate = getDefaultExpirationForRole(request.department);
