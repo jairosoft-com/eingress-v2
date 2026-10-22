@@ -113,18 +113,19 @@ export function ChangePasswordPage() {
           Authorization: `Bearer ${session.accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ currentPassword, newPassword }),
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
       });
 
       const data = (await response.json().catch(() => null)) as {
         error?: string;
+        errors?: ChangePasswordErrors;
         message?: string;
       } | null;
 
       if (!response.ok) {
         const message = data?.error || 'Unable to update password.';
 
-        setErrors(response.status === 401 ? { currentPassword: message } : { form: message });
+        setErrors(data?.errors ?? { form: message });
         return;
       }
 
