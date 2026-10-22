@@ -170,10 +170,6 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
         newName,
         role.name,
       ]);
-      await client.query(`UPDATE enrollment_requests SET role = $1 WHERE LOWER(TRIM(role)) = LOWER($2)`, [
-        newName,
-        role.name,
-      ]);
     }
 
     await client.query('COMMIT');
