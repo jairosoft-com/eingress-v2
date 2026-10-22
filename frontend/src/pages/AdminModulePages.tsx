@@ -1504,7 +1504,6 @@ export function UserManagementPage() {
       lastName: validateNamePart('Last name', lastName),
     };
     const formErrors: CreateUserErrors = {
-      employeeId: validateCreateUserField('employeeId', employeeId),
       email: validateCreateUserField('email', email),
       phone: validateCreateUserField('phone', phone),
     };
@@ -1524,7 +1523,6 @@ export function UserManagementPage() {
     setCreateErrors(formErrors);
 
     if (
-      formErrors.employeeId ||
       formErrors.email ||
       formErrors.phone ||
       fieldErrors.firstName ||
@@ -2466,11 +2464,6 @@ export function UserManagementPage() {
                         : 'Assigned automatically'
                     }
                   />
-                  {createErrors.employeeId || createFieldErrors.employeeId ? (
-                    <small className="field-error" id="create-employee-id-error">
-                      {createErrors.employeeId || createFieldErrors.employeeId}
-                    </small>
-                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
