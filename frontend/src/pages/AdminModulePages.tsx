@@ -181,10 +181,16 @@ type DepartmentAction =
   | { kind: 'rename'; id: string; name: string }
   | { kind: 'status'; id: string; isActive: boolean; confirm: boolean };
 
-type Role = { id: string; name: string; is_active: boolean; user_count: number };
+type Role = {
+  id: string;
+  name: string;
+  is_active: boolean;
+  user_count: number;
+  user_id_prefix: string | null;
+};
 type RoleAction =
-  | { kind: 'add'; name: string }
-  | { kind: 'rename'; id: string; name: string }
+  | { kind: 'add'; name: string; userIdPrefix: string }
+  | { kind: 'rename'; id: string; name: string; userIdPrefix: string }
   | { kind: 'status'; id: string; isActive: boolean; confirm: boolean };
 
 function isAdminSettingsProfile(value: unknown): value is AdminSettingsProfile {
@@ -261,7 +267,6 @@ type UserEditForm = {
 type UserFormFieldErrors = {
   department?: string;
   role?: string;
-  employeeId?: string;
   firstName?: string;
   lastName?: string;
 };
@@ -278,7 +283,6 @@ function validateNamePart(label: string, value: string): string | undefined {
 }
 
 type CreateUserForm = {
-  employeeId: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -290,7 +294,6 @@ type CreateUserForm = {
 };
 
 type CreateUserErrors = {
-  employeeId?: string;
   email?: string;
   phone?: string;
 };
@@ -838,7 +841,6 @@ export function UserManagementPage() {
   const [editErrors, setEditErrors] = useState<CreateUserErrors>({});
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateUserForm>({
-    employeeId: '',
     firstName: '',
     lastName: '',
     email: '',
@@ -849,6 +851,10 @@ export function UserManagementPage() {
     fingerprintId: '',
   });
   const [createFormError, setCreateFormError] = useState('');
+  const [nextUserIdPreview, setNextUserIdPreview] = useState<{
+    role: string;
+    userId: string;
+  } | null>(null);
   const [createFieldErrors, setCreateFieldErrors] = useState<UserFormFieldErrors>({});
   const [createErrors, setCreateErrors] = useState<CreateUserErrors>({});
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -1440,13 +1446,50 @@ export function UserManagementPage() {
     }
   }
 
+  useEffect(() => {
+    if (!isCreateUserOpen || !createForm.role || !session?.accessToken) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const role = createForm.role;
+
+    void fetch(`${API_BASE_URL}/users/next-id?role=${encodeURIComponent(role)}`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+          userId?: string;
+        } | null;
+
+        if (response.ok && data?.userId) {
+          setNextUserIdPreview({ role, userId: data.userId });
+          setCreateFieldErrors((currentErrors) => ({ ...currentErrors, role: undefined }));
+        } else {
+          setNextUserIdPreview(null);
+          setCreateFieldErrors((currentErrors) => ({
+            ...currentErrors,
+            role: data?.error ?? 'Unable to generate a User ID for this role.',
+          }));
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+
+        setNextUserIdPreview(null);
+      });
+
+    return () => controller.abort();
+  }, [isCreateUserOpen, createForm.role, session?.accessToken]);
+
   async function submitCreateUserDetails() {
     if (!session?.accessToken) {
       setCreateFormError('Please sign in again to create users.');
       return;
     }
 
-    const employeeId = createForm.employeeId.trim();
     const firstName = createForm.firstName.trim();
     const lastName = createForm.lastName.trim();
     const email = createForm.email.trim();
@@ -1457,7 +1500,6 @@ export function UserManagementPage() {
     const fingerprintId = createForm.fingerprintId.trim();
 
     const fieldErrors: UserFormFieldErrors = {
-      employeeId: employeeId ? undefined : 'Employee ID is required.',
       firstName: validateNamePart('First name', firstName),
       lastName: validateNamePart('Last name', lastName),
     };
@@ -1474,7 +1516,6 @@ export function UserManagementPage() {
     }
 
     if (
-      fieldErrors.employeeId ||
       fieldErrors.firstName ||
       fieldErrors.lastName ||
       fieldErrors.role ||
@@ -1498,8 +1539,6 @@ export function UserManagementPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          employeeId,
-
           firstName,
           lastName,
           email,
@@ -1523,7 +1562,6 @@ export function UserManagementPage() {
         'errors' in data &&
         (data.errors?.department ||
           data.errors?.role ||
-          data.errors?.employeeId ||
           data.errors?.firstName ||
           data.errors?.lastName)
       ) {
@@ -1541,8 +1579,8 @@ export function UserManagementPage() {
 
       setUsers((currentUsers) => [data as UserRecord, ...currentUsers]);
       setIsCreateUserOpen(false);
+      setNextUserIdPreview(null);
       setCreateForm({
-        employeeId: '',
         firstName: '',
         lastName: '',
         email: '',
@@ -1587,10 +1625,6 @@ export function UserManagementPage() {
     fieldName: keyof CreateUserErrors,
     value: string,
   ): string | undefined {
-    if (fieldName === 'employeeId') {
-      if (!value.trim()) return 'Employee / User ID is required.';
-    }
-
     if (fieldName === 'email') {
       if (!value.trim()) return 'Email address is required.';
       if (
@@ -1772,11 +1806,11 @@ export function UserManagementPage() {
                 setCreateFormError('');
                 setCreateFieldErrors({});
                 setCreateErrors({});
+                setNextUserIdPreview(null);
                 const defaultRole = activeRoles.includes('Employee')
                   ? 'Employee'
                   : activeRoles[0] || '';
                 setCreateForm({
-                  employeeId: '',
                   firstName: '',
                   lastName: '',
                   email: '',
@@ -2401,38 +2435,22 @@ export function UserManagementPage() {
               </h3>
               <div className="user-edit-grid two-columns">
                 <label className="user-edit-field">
-                  <span>Employee / User ID *</span>
+                  <span>User ID</span>
                   <input
-                    aria-describedby={
-                      createErrors.employeeId ? 'create-employee-id-error' : undefined
+                    readOnly
+                    value={
+                      nextUserIdPreview?.role === createForm.role
+                        ? nextUserIdPreview.userId
+                        : 'Assigned automatically'
                     }
-                    aria-invalid={Boolean(createErrors.employeeId)}
-                    autoFocus
-                    onBlur={() =>
-                      setCreateErrors((prev) => ({
-                        ...prev,
-                        employeeId: validateCreateUserField('employeeId', createForm.employeeId),
-                      }))
-                    }
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setCreateForm((currentForm) => ({ ...currentForm, employeeId: value }));
-                      setCreateErrors((prev) => ({
-                        ...prev,
-                        employeeId: validateCreateUserField('employeeId', value),
-                      }));
-                    }}
-                    value={createForm.employeeId}
                   />
-                  {createFieldErrors.employeeId ? (
-                    <small className="field-error">{createFieldErrors.employeeId}</small>
-                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
                   <span>First Name *</span>
                   <input
                     aria-invalid={Boolean(createFieldErrors.firstName)}
+                    autoFocus
                     onChange={(event) => {
                       const firstName = stripNonLetters(event.target.value);
                       setCreateForm((currentForm) => ({ ...currentForm, firstName }));
@@ -4459,6 +4477,28 @@ function validateRoleName(rawName: string, roles: Role[], ignoreId?: string): st
   return undefined;
 }
 
+function validateUserIdPrefix(
+  rawPrefix: string,
+  roles: Role[],
+  ignoreId?: string,
+): string | undefined {
+  const prefix = rawPrefix.trim();
+
+  if (!prefix) return 'User ID prefix is required.';
+  if (!/^[A-Za-z]{3}$/.test(prefix)) {
+    return 'User ID prefix must be exactly 3 letters (A-Z), with no spaces, numbers or symbols.';
+  }
+  if (
+    roles.some(
+      (role) => role.id !== ignoreId && role.user_id_prefix?.toUpperCase() === prefix.toUpperCase(),
+    )
+  ) {
+    return 'That User ID prefix is already used by another role.';
+  }
+
+  return undefined;
+}
+
 function sortRoles(roles: Role[]) {
   return [...roles].sort((roleA, roleB) =>
     roleA.name.localeCompare(roleB.name, undefined, { sensitivity: 'base' }),
@@ -4506,6 +4546,8 @@ export function SettingsPage() {
   );
   const [roles, setRoles] = useState<Role[]>([]);
   const [newRole, setNewRole] = useState('');
+  const [newRolePrefix, setNewRolePrefix] = useState('');
+  const [editingRolePrefix, setEditingRolePrefix] = useState('');
   const [roleSearch, setRoleSearch] = useState('');
   const [roleStatusFilter, setRoleStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
@@ -4981,14 +5023,14 @@ export function SettingsPage() {
           ? await fetch(`${API_BASE_URL}/roles`, {
               method: 'POST',
               headers,
-              body: JSON.stringify({ name: action.name }),
+              body: JSON.stringify({ name: action.name, userIdPrefix: action.userIdPrefix }),
             })
           : await fetch(`${API_BASE_URL}/roles/${action.id}`, {
               method: 'PATCH',
               headers,
               body: JSON.stringify(
                 action.kind === 'rename'
-                  ? { name: action.name }
+                  ? { name: action.name, userIdPrefix: action.userIdPrefix }
                   : { isActive: action.isActive, confirm: action.confirm },
               ),
             });
@@ -5022,14 +5064,16 @@ export function SettingsPage() {
         ),
       );
       setNewRole('');
+      setNewRolePrefix('');
       setEditingRoleId(null);
       setEditingRoleName('');
+      setEditingRolePrefix('');
       setRoleError('');
       setRoleMessage(
         action.kind === 'add'
           ? 'Role added.'
           : action.kind === 'rename'
-            ? 'Role renamed.'
+            ? 'Role updated.'
             : saved.is_active
               ? 'Role activated.'
               : 'Role deactivated.',
@@ -5185,19 +5229,24 @@ export function SettingsPage() {
   }
 
   function addRole() {
-    const error = validateRoleName(newRole, roles);
+    const error = validateRoleName(newRole, roles) ?? validateUserIdPrefix(newRolePrefix, roles);
 
     if (error) {
       setRoleError(error);
       return;
     }
 
-    startRoleAction({ kind: 'add', name: newRole.trim().replace(/\s+/g, ' ') });
+    startRoleAction({
+      kind: 'add',
+      name: newRole.trim().replace(/\s+/g, ' '),
+      userIdPrefix: newRolePrefix.trim().toUpperCase(),
+    });
   }
 
   function startRenamingRole(role: Role) {
     setEditingRoleId(role.id);
     setEditingRoleName(role.name);
+    setEditingRolePrefix(role.user_id_prefix ?? '');
     setRoleError('');
     setRoleMessage('');
   }
@@ -5205,25 +5254,28 @@ export function SettingsPage() {
   function cancelRenamingRole() {
     setEditingRoleId(null);
     setEditingRoleName('');
+    setEditingRolePrefix('');
     setRoleError('');
   }
 
   function saveRoleRename(role: Role) {
     const name = editingRoleName.trim().replace(/\s+/g, ' ');
+    const userIdPrefix = editingRolePrefix.trim().toUpperCase();
 
-    if (name === role.name) {
+    if (name === role.name && userIdPrefix === (role.user_id_prefix ?? '')) {
       cancelRenamingRole();
       return;
     }
 
-    const error = validateRoleName(name, roles, role.id);
+    const error =
+      validateRoleName(name, roles, role.id) ?? validateUserIdPrefix(userIdPrefix, roles, role.id);
 
     if (error) {
       setRoleError(error);
       return;
     }
 
-    startRoleAction({ kind: 'rename', id: role.id, name });
+    startRoleAction({ kind: 'rename', id: role.id, name, userIdPrefix });
   }
 
   function toggleRoleStatus(role: Role) {
@@ -5782,6 +5834,19 @@ export function SettingsPage() {
                 placeholder="e.g. Employee"
                 value={newRole}
               />
+              <input
+                aria-label="User ID prefix"
+                maxLength={10}
+                onChange={(e) => setNewRolePrefix(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addRole();
+                  }
+                }}
+                placeholder="User ID prefix, e.g. EMP"
+                value={newRolePrefix}
+              />
 
               <button className="organization-edit-button" onClick={addRole} type="button">
                 Add
@@ -5821,6 +5886,7 @@ export function SettingsPage() {
                 <thead>
                   <tr>
                     <th>Role</th>
+                    <th>User ID Prefix</th>
                     <th>Users</th>
                     <th>Access Status</th>
                     <th>Actions</th>
@@ -5830,7 +5896,7 @@ export function SettingsPage() {
                 <tbody>
                   {visibleRoles.length === 0 ? (
                     <tr>
-                      <td colSpan={4}>
+                      <td colSpan={5}>
                         {roles.length === 0 ? 'No roles yet.' : 'No roles match your search.'}
                       </td>
                     </tr>
@@ -5857,6 +5923,27 @@ export function SettingsPage() {
                             role.name
                           )}
                         </td>
+                        <td>
+                          {editingRoleId === role.id ? (
+                            <input
+                              aria-label={`User ID prefix for ${role.name}`}
+                              maxLength={10}
+                              onChange={(e) => setEditingRolePrefix(e.target.value.toUpperCase())}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  saveRoleRename(role);
+                                } else if (e.key === 'Escape') {
+                                  cancelRenamingRole();
+                                }
+                              }}
+                              placeholder="e.g. EMP"
+                              value={editingRolePrefix}
+                            />
+                          ) : (
+                            (role.user_id_prefix ?? 'Not set')
+                          )}
+                        </td>
                         <td>{role.user_count}</td>
                         <td>{role.is_active ? 'Active' : 'Inactive'}</td>
                         <td>
@@ -5864,7 +5951,7 @@ export function SettingsPage() {
                             {editingRoleId === role.id ? (
                               <>
                                 <button
-                                  aria-label="Save role name"
+                                  aria-label="Save role"
                                   className="activate"
                                   onClick={() => saveRoleRename(role)}
                                   title="Save"
@@ -5885,10 +5972,10 @@ export function SettingsPage() {
                             ) : (
                               <>
                                 <button
-                                  aria-label={`Rename ${role.name}`}
+                                  aria-label={`Edit ${role.name}`}
                                   className="edit"
                                   onClick={() => startRenamingRole(role)}
-                                  title="Rename"
+                                  title="Edit"
                                   type="button"
                                 >
                                   <Pencil size={16} />

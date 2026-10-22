@@ -96,9 +96,18 @@ CREATE TABLE IF NOT EXISTS roles (
 
 CREATE UNIQUE INDEX IF NOT EXISTS roles_name_idx ON roles (name);
 
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS user_id_prefix VARCHAR(3);
+CREATE UNIQUE INDEX IF NOT EXISTS roles_user_id_prefix_idx ON roles (UPPER(user_id_prefix)) WHERE user_id_prefix IS NOT NULL;
+
 INSERT INTO roles (name) VALUES
   ('Intern'), ('Student'), ('Employee')
 ON CONFLICT DO NOTHING;
+
+SET user_id_prefix = d.prefix
+FROM (VALUES ('Employee', 'EMP'), ('Intern', 'INT'), ('Staff', 'STA'), ('Student', 'STU')) AS d(name, prefix)
+WHERE LOWER(r.name) = LOWER(d.name)
+  AND r.user_id_prefix IS NULL
+  AND NOT EXISTS (SELECT 1 FROM roles o WHERE UPPER(o.user_id_prefix) = d.prefix);
 
 CREATE TABLE IF NOT EXISTS devices (
   id BIGSERIAL PRIMARY KEY,
@@ -235,7 +244,6 @@ INSERT INTO system_settings (id)
 VALUES (1)
 ON CONFLICT (id) DO NOTHING;
 
--- Password is "admin123". Change it immediately after first login.
 INSERT INTO admins (username, email, password_hash, rfid_uid)
 VALUES (
   'JairosoftAdmin',

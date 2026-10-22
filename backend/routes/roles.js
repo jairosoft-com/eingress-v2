@@ -6,6 +6,7 @@ import {
   ensureRolesTable,
   MAX_ROLE_NAME_LENGTH,
   normalizeRoleName,
+  validateUserIdPrefix,
 } from '../lib/roles.js';
 
 export const rolesRouter = express.Router();
@@ -16,7 +17,7 @@ void ensureRolesTable().catch((error) => {
 
 // user_count: users currently assigned to the role (archived users are not counted).
 const ROLE_SELECT = `
-  SELECT r.id, r.name, r.is_active, r.created_at, r.updated_at,
+  SELECT r.id, r.name, r.is_active, r.user_id_prefix, r.created_at, r.updated_at,
     (SELECT COUNT(*)::int FROM users u
      WHERE LOWER(TRIM(u.role)) = LOWER(r.name) AND COALESCE(u.is_archived, FALSE) = FALSE) AS user_count
   FROM roles r`;
@@ -32,6 +33,17 @@ function validateName(body) {
   return { name };
 }
 
+// A unique violation is either the role name or the User ID prefix (told apart by the index name).
+function duplicateRoleResponse(err) {
+  if (String(err.constraint ?? '').includes('prefix')) {
+    const message = 'This User ID prefix is already used by another role.';
+    return { error: message, errors: { userIdPrefix: message } };
+  }
+
+  const message = 'Existing role. This role name is already in use.';
+  return { error: message, errors: { name: message } };
+}
+
 function logAudit(req, action, details) {
   return query(
     `INSERT INTO audit_logs (admin_id, action, module, details, ip_address) VALUES ($1, $2, $3, $4, $5)`,
@@ -43,7 +55,7 @@ function logAudit(req, action, details) {
 rolesRouter.get('/active', async (req, res) => {
   try {
     await ensureRolesTable();
-    const result = await query(`SELECT id, name FROM roles WHERE is_active = TRUE ORDER BY LOWER(name)`);
+    const result = await query(`SELECT id, name, user_id_prefix FROM roles WHERE is_active = TRUE ORDER BY LOWER(name)`);
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -80,23 +92,28 @@ rolesRouter.get('/', authMiddleware, async (req, res) => {
 rolesRouter.post('/', authMiddleware, async (req, res) => {
   const { name, error } = validateName(req.body);
 
-  if (error) {
-    return res.status(400).json({ error, errors: { name: error } });
+  const prefixCheck = validateUserIdPrefix(req.body.userIdPrefix);
+  const errors = {};
+  if (error) errors.name = error;
+  if (prefixCheck.error) errors.userIdPrefix = prefixCheck.error;
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({ error: Object.values(errors).join(' '), errors });
   }
 
   try {
     await ensureRolesTable();
-    const inserted = await query(`INSERT INTO roles (name) VALUES ($1) RETURNING id`, [name]);
-    await logAudit(req, 'Added Role', `Added role ${name}`);
+    const inserted = await query(`INSERT INTO roles (name, user_id_prefix) VALUES ($1, $2) RETURNING id`, [
+      name,
+      prefixCheck.prefix,
+    ]);
+    await logAudit(req, 'Added Role', `Added role ${name} (User ID prefix ${prefixCheck.prefix})`);
     await createNotification('Role Added', `Role ${name} was added.`, 'success');
     const result = await query(`${ROLE_SELECT} WHERE r.id = $1`, [inserted.rows[0].id]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err?.code === '23505') {
-      return res.status(409).json({
-        error: 'Existing role. This role name is already in use.',
-        errors: { name: 'Existing role. This role name is already in use.' },
-      });
+      return res.status(409).json(duplicateRoleResponse(err));
     }
 
     res.status(500).json({ error: 'Internal server error' });
@@ -117,9 +134,15 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
   }
 
   const validated = nameProvided ? validateName(req.body) : {};
+  const prefixProvided = req.body.userIdPrefix !== undefined;
+  const prefixCheck = prefixProvided ? validateUserIdPrefix(req.body.userIdPrefix) : {};
 
   if (validated.error) {
     return res.status(400).json({ error: validated.error, errors: { name: validated.error } });
+  }
+
+  if (prefixCheck.error) {
+    return res.status(400).json({ error: prefixCheck.error, errors: { userIdPrefix: prefixCheck.error } });
   }
 
   const client = await pool.connect();
@@ -128,7 +151,10 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
     await ensureRolesTable();
     await client.query('BEGIN');
 
-    const current = await client.query(`SELECT id, name, is_active FROM roles WHERE id = $1 FOR UPDATE`, [id]);
+    const current = await client.query(
+      `SELECT id, name, is_active, user_id_prefix FROM roles WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
 
     if (current.rowCount === 0) {
       await client.query('ROLLBACK');
@@ -138,6 +164,15 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
     const role = current.rows[0];
     const newName = validated.name ?? role.name;
     const newActive = isActive ?? role.is_active;
+    const newPrefix = prefixCheck.prefix ?? role.user_id_prefix;
+
+    // Editing a role that has no prefix yet must supply one (status-only changes are not an edit).
+    if ((nameProvided || prefixProvided) && !newPrefix) {
+      await client.query('ROLLBACK');
+      const message = 'User ID prefix is required.';
+      return res.status(400).json({ error: message, errors: { userIdPrefix: message } });
+    }
+
     const deactivating = role.is_active && !newActive;
 
     if (deactivating && confirm !== true) {
@@ -158,11 +193,10 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
       }
     }
 
-    await client.query(`UPDATE roles SET name = $1, is_active = $2, updated_at = NOW() WHERE id = $3`, [
-      newName,
-      newActive,
-      id,
-    ]);
+    await client.query(
+      `UPDATE roles SET name = $1, is_active = $2, user_id_prefix = $3, updated_at = NOW() WHERE id = $4`,
+      [newName, newActive, newPrefix, id],
+    );
 
     // users and enrollment requests store the role name, so a rename has to follow them.
     if (newName !== role.name) {
@@ -176,10 +210,14 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
 
     const changes = [];
     if (newName !== role.name) changes.push(`renamed ${role.name} to ${newName}`);
+    if (newPrefix !== role.user_id_prefix) {
+      changes.push(`set User ID prefix of ${newName} to ${newPrefix} (existing User IDs are unchanged)`);
+    }
     if (newActive !== role.is_active) changes.push(`${newActive ? 'activated' : 'deactivated'} ${newName}`);
 
     if (changes.length > 0) {
-      const action = newName !== role.name ? 'Updated Role' : newActive ? 'Activated Role' : 'Deactivated Role';
+      const edited = newName !== role.name || newPrefix !== role.user_id_prefix;
+      const action = edited ? 'Updated Role' : newActive ? 'Activated Role' : 'Deactivated Role';
       await logAudit(req, action, `Role ${changes.join(', ')}`);
       await createNotification('Role Updated', `Role ${changes.join(', ')}.`, 'success');
     }
@@ -190,10 +228,7 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
     await client.query('ROLLBACK').catch(() => {});
 
     if (err?.code === '23505') {
-      return res.status(409).json({
-        error: 'Existing role. This role name is already in use.',
-        errors: { name: 'Existing role. This role name is already in use.' },
-      });
+      return res.status(409).json(duplicateRoleResponse(err));
     }
 
     res.status(500).json({ error: 'Internal server error' });

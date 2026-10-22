@@ -14,23 +14,9 @@ import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
 import { checkDepartmentAssignable } from '../lib/departments.js';
 import { checkRoleAssignable } from '../lib/roles.js';
+import { generateUserId } from '../lib/userIds.js';
 
 export const enrollmentRequestsRouter = express.Router();
-
-async function getNextEmployeeId(client) {
-  const result = await client.query(
-    `SELECT COALESCE(MAX(employee_number), 0) + 1 AS next_number
-     FROM (
-       SELECT NULLIF(REGEXP_REPLACE(employee_id, '^EMP', ''), '')::INTEGER AS employee_number
-       FROM enrollment_requests
-       WHERE employee_id ~ '^EMP[0-9]+$'
-     ) employee_ids`,
-  );
-
-  const nextNumber = Number(result.rows[0]?.next_number ?? 1);
-
-  return `EMP${String(nextNumber).padStart(3, '0')}`;
-}
 
 // Collapses common Philippine phone formats to +63XXXXXXXXXX so "0917 123 4567", "9171234567"
 // and "+63 917 123 4567" are recognised as the same number for duplicate-checking, and so the
@@ -100,6 +86,11 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
 
     if (roleCheck.error) {
       return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+    }
+
+    if (!roleCheck.userIdPrefix) {
+      const message = `Role "${roleCheck.name}" has no User ID prefix yet. Please contact an administrator.`;
+      return res.status(400).json({ error: message, errors: { role: message } });
     }
 
     const fullName = composeFullName(firstName, lastName);
@@ -192,7 +183,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       });
     }
 
-    const employeeId = await getNextEmployeeId(client);
+    const employeeId = await generateUserId(client, roleCheck.userIdPrefix);
     await resetEnrollmentSequencesIfEmpty(client);
 
     const result = await client.query(
