@@ -1343,15 +1343,13 @@ export function UserManagementPage() {
       firstName: validateNamePart('First name', firstName),
       lastName: validateNamePart('Last name', lastName),
     };
+    const emailError = validateCreateUserField('email', email);
 
-    if (nameErrors.firstName || nameErrors.lastName) {
-      setEditFieldErrors(nameErrors);
+    setEditFieldErrors(nameErrors);
+    setEditErrors({ email: emailError });
+
+    if (nameErrors.firstName || nameErrors.lastName || emailError) {
       setEditFormError('');
-      return;
-    }
-
-    if (!email) {
-      setEditFormError('Email is required.');
       return;
     }
 
@@ -1457,11 +1455,26 @@ export function UserManagementPage() {
     const fingerprintId = createForm.fingerprintId.trim();
 
     const fieldErrors: UserFormFieldErrors = {
-      employeeId: employeeId ? undefined : 'Employee ID is required.',
       firstName: validateNamePart('First name', firstName),
       lastName: validateNamePart('Last name', lastName),
     };
 
+    const formErrors: CreateUserErrors = {
+      employeeId: validateCreateUserField('employeeId', employeeId),
+      email: validateCreateUserField('email', email),
+      phone: validateCreateUserField('phone', phone),
+    };
+
+    setCreateFieldErrors(fieldErrors);
+    setCreateErrors(formErrors);
+
+    if (
+      fieldErrors.firstName ||
+      fieldErrors.lastName ||
+      formErrors.employeeId ||
+      formErrors.email ||
+      formErrors.phone
+    ) {
     if (!role) {
       fieldErrors.role =
         activeRoles.length === 0 ? 'No active roles available.' : 'Role is required.';
@@ -2089,12 +2102,18 @@ export function UserManagementPage() {
                   <input
                     aria-invalid={Boolean(editFieldErrors.firstName)}
                     autoFocus
+                    onBlur={() =>
+                      setEditFieldErrors((current) => ({
+                        ...current,
+                        firstName: validateNamePart('First name', editForm.firstName.trim()),
+                      }))
+                    }
                     onChange={(event) => {
                       const firstName = stripNonLetters(event.target.value);
                       setEditForm((currentForm) => ({ ...currentForm, firstName }));
-                      setEditFieldErrors((currentErrors) => ({
-                        ...currentErrors,
-                        firstName: undefined,
+                      setEditFieldErrors((current) => ({
+                        ...current,
+                        firstName: validateNamePart('First name', firstName.trim()),
                       }));
                     }}
                     value={editForm.firstName}
@@ -2108,12 +2127,18 @@ export function UserManagementPage() {
                   <span>Last Name *</span>
                   <input
                     aria-invalid={Boolean(editFieldErrors.lastName)}
+                    onBlur={() =>
+                      setEditFieldErrors((current) => ({
+                        ...current,
+                        lastName: validateNamePart('Last name', editForm.lastName.trim()),
+                      }))
+                    }
                     onChange={(event) => {
                       const lastName = stripNonLetters(event.target.value);
                       setEditForm((currentForm) => ({ ...currentForm, lastName }));
-                      setEditFieldErrors((currentErrors) => ({
-                        ...currentErrors,
-                        lastName: undefined,
+                      setEditFieldErrors((current) => ({
+                        ...current,
+                        lastName: validateNamePart('Last name', lastName.trim()),
                       }));
                     }}
                     value={editForm.lastName}
@@ -2424,8 +2449,10 @@ export function UserManagementPage() {
                     }}
                     value={createForm.employeeId}
                   />
-                  {createFieldErrors.employeeId ? (
-                    <small className="field-error">{createFieldErrors.employeeId}</small>
+                  {createErrors.employeeId ? (
+                    <small className="field-error" id="create-employee-id-error">
+                      {createErrors.employeeId}
+                    </small>
                   ) : null}
                 </label>
 
@@ -2433,12 +2460,18 @@ export function UserManagementPage() {
                   <span>First Name *</span>
                   <input
                     aria-invalid={Boolean(createFieldErrors.firstName)}
+                    onBlur={() =>
+                      setCreateFieldErrors((current) => ({
+                        ...current,
+                        firstName: validateNamePart('First name', createForm.firstName.trim()),
+                      }))
+                    }
                     onChange={(event) => {
                       const firstName = stripNonLetters(event.target.value);
                       setCreateForm((currentForm) => ({ ...currentForm, firstName }));
-                      setCreateFieldErrors((currentErrors) => ({
-                        ...currentErrors,
-                        firstName: undefined,
+                      setCreateFieldErrors((current) => ({
+                        ...current,
+                        firstName: validateNamePart('First name', firstName.trim()),
                       }));
                     }}
                     value={createForm.firstName}
@@ -2451,6 +2484,12 @@ export function UserManagementPage() {
                   <span>Last Name *</span>
                   <input
                     aria-invalid={Boolean(createFieldErrors.lastName)}
+                    onBlur={() =>
+                      setCreateFieldErrors((current) => ({
+                        ...current,
+                        lastName: validateNamePart('Last name', createForm.lastName.trim()),
+                      }))
+                    }
                     onChange={(event) => {
                       const lastName = stripNonLetters(event.target.value);
                       setCreateForm((currentForm) => ({ ...currentForm, lastName }));
