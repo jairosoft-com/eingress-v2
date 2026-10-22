@@ -19,7 +19,6 @@ import {
   TrendingUp,
   UsersRound,
   X,
-  Trash2,
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
@@ -181,7 +180,12 @@ type DepartmentAction =
   | { kind: 'add'; name: string }
   | { kind: 'rename'; id: string; name: string }
   | { kind: 'status'; id: string; isActive: boolean; confirm: boolean };
-type Role = { id: string; name: string; status: 'Active' | 'Inactive' };
+
+type Role = { id: string; name: string; is_active: boolean; user_count: number };
+type RoleAction =
+  | { kind: 'add'; name: string }
+  | { kind: 'rename'; id: string; name: string }
+  | { kind: 'status'; id: string; isActive: boolean; confirm: boolean };
 
 function isAdminSettingsProfile(value: unknown): value is AdminSettingsProfile {
   if (!value || typeof value !== 'object') {
@@ -4122,6 +4126,7 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
 }
 
 const MAX_DEPARTMENT_NAME_LENGTH = 120;
+const MAX_ROLE_NAME_LENGTH = 120;
 
 function validateDepartmentName(
   rawName: string,
@@ -4152,6 +4157,28 @@ function sortDepartments(departments: Department[]) {
   );
 }
 
+function validateRoleName(rawName: string, roles: Role[], ignoreId?: string): string | undefined {
+  const name = rawName.trim().replace(/\s+/g, ' ');
+
+  if (!name) return 'Role name is required.';
+  if (name.length > MAX_ROLE_NAME_LENGTH) {
+    return `Role name must be ${MAX_ROLE_NAME_LENGTH} characters or fewer.`;
+  }
+  if (
+    roles.some((role) => role.id !== ignoreId && role.name.toLowerCase() === name.toLowerCase())
+  ) {
+    return 'That role already exists.';
+  }
+
+  return undefined;
+}
+
+function sortRoles(roles: Role[]) {
+  return [...roles].sort((roleA, roleB) =>
+    roleA.name.localeCompare(roleB.name, undefined, { sensitivity: 'base' }),
+  );
+}
+
 export function SettingsPage() {
   const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<'general' | 'security' | 'organization'>('general');
@@ -4178,9 +4205,6 @@ export function SettingsPage() {
   const [changeRfidInput, setChangeRfidInput] = useState('');
   const [changeRfidError, setChangeRfidError] = useState('');
   const [isChangingRfid, setIsChangingRfid] = useState(false);
-  const [isEditingOrganization, setIsEditingOrganization] = useState(false);
-  const [organizationError, setOrganizationError] = useState('');
-  const [organizationMessage, setOrganizationMessage] = useState('');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [newDepartment, setNewDepartment] = useState('');
   const [departmentSearch, setDepartmentSearch] = useState('');
@@ -4195,11 +4219,17 @@ export function SettingsPage() {
     null,
   );
   const [roles, setRoles] = useState<Role[]>([]);
-  const [draftRoles, setDraftRoles] = useState<Role[]>([]);
   const [newRole, setNewRole] = useState('');
-  const [verifyTarget, setVerifyTarget] = useState<'profile' | 'organization' | 'department'>(
-    'profile',
-  );
+  const [roleSearch, setRoleSearch] = useState('');
+  const [roleStatusFilter, setRoleStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [editingRoleName, setEditingRoleName] = useState('');
+  const [roleError, setRoleError] = useState('');
+  const [roleMessage, setRoleMessage] = useState('');
+  const [pendingRoleAction, setPendingRoleAction] = useState<RoleAction | null>(null);
+  const [verifyTarget, setVerifyTarget] = useState<
+    'profile' | 'organization' | 'department' | 'role'
+  >('profile');
 
   useEffect(() => {
     if (verifyRfidStep !== 'success') return;
@@ -4291,6 +4321,33 @@ export function SettingsPage() {
         if (error instanceof DOMException && error.name === 'AbortError') return;
 
         setDepartmentError('Unable to load departments.');
+      });
+
+    return () => controller.abort();
+  }, [activeTab, session?.accessToken]);
+
+  useEffect(() => {
+    if (activeTab !== 'organization' || !session?.accessToken) return;
+
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE_URL}/roles`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as Role[] | null;
+
+        if (response.ok && Array.isArray(data)) {
+          setRoles(data);
+        } else {
+          setRoleError('Unable to load roles.');
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+
+        setRoleError('Unable to load roles.');
       });
 
     return () => controller.abort();
@@ -4433,7 +4490,9 @@ export function SettingsPage() {
     setIsEditingProfile(true);
   }
 
-  function openVerifyRfidModal(target: 'profile' | 'organization' | 'department' = 'profile') {
+  function openVerifyRfidModal(
+    target: 'profile' | 'organization' | 'department' | 'role' = 'profile',
+  ) {
     if (target === 'profile' && !editedName.trim()) {
       setProfileError('Admin name is required.');
       return;
@@ -4500,72 +4559,6 @@ export function SettingsPage() {
       setVerifyRfidError(error instanceof Error ? error.message : 'Unable to update admin name.');
       setVerifyRfidStep('error');
     }
-  }
-
-  async function submitOrganizationChange() {
-    if (!session?.accessToken) return;
-
-    if (!verifyRfidInput.trim()) {
-      setVerifyRfidError('Please scan or enter your RFID card.');
-      return;
-    }
-    setVerifyRfidStep('saving');
-    setVerifyRfidError('');
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/me/verify-rfid`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ rfidCode: verifyRfidInput.trim() }),
-      });
-      const data = (await response.json().catch(() => null)) as {
-        verified?: boolean;
-        error?: string;
-      } | null;
-
-      if (!response.ok || !data?.verified) {
-        throw new Error(data?.error ?? 'RFID verification failed.');
-      }
-
-      setRoles(draftRoles);
-      setIsEditingOrganization(false);
-      setOrganizationMessage('Organization settings updated successfully.');
-      setVerifySuccessCountdown(5);
-      setVerifyRfidStep('success');
-    } catch (error) {
-      setVerifyRfidError(error instanceof Error ? error.message : 'RFID verification failed.');
-      setVerifyRfidStep('error');
-    }
-  }
-
-  function addRole() {
-    const name = newRole.trim();
-    if (!name) {
-      setOrganizationError('Role name is required.');
-      return;
-    }
-    if (draftRoles.some((r) => r.name.toLowerCase() === name.toLowerCase())) {
-      setOrganizationError('That role already exists.');
-      return;
-    }
-    setDraftRoles((prev) => [...prev, { id: crypto.randomUUID(), name, status: 'Active' }]);
-    setNewRole('');
-    setOrganizationError('');
-  }
-
-  function removeRole(id: string) {
-    setDraftRoles((prev) => prev.filter((r) => r.id !== id));
-  }
-
-  function toggleRoleStatus(id: string) {
-    setDraftRoles((prev) =>
-      prev.map((r) =>
-        r.id === id ? { ...r, status: r.status === 'Active' ? 'Inactive' : 'Active' } : r,
-      ),
-    );
   }
 
   async function submitDepartmentChange() {
@@ -4666,10 +4659,109 @@ export function SettingsPage() {
     }
   }
 
+  async function submitRoleChange() {
+    if (!session?.accessToken || !pendingRoleAction) return;
+
+    if (!verifyRfidInput.trim()) {
+      setVerifyRfidError('Please scan or enter your RFID card.');
+      return;
+    }
+    setVerifyRfidStep('saving');
+    setVerifyRfidError('');
+
+    const action = pendingRoleAction;
+    const headers = {
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      const verifyResponse = await fetch(`${API_BASE_URL}/auth/me/verify-rfid`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ rfidCode: verifyRfidInput.trim() }),
+      });
+      const verifyData = (await verifyResponse.json().catch(() => null)) as {
+        verified?: boolean;
+        error?: string;
+      } | null;
+
+      if (!verifyResponse.ok || !verifyData?.verified) {
+        throw new Error(verifyData?.error ?? 'RFID verification failed.');
+      }
+
+      const response =
+        action.kind === 'add'
+          ? await fetch(`${API_BASE_URL}/roles`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ name: action.name }),
+            })
+          : await fetch(`${API_BASE_URL}/roles/${action.id}`, {
+              method: 'PATCH',
+              headers,
+              body: JSON.stringify(
+                action.kind === 'rename'
+                  ? { name: action.name }
+                  : { isActive: action.isActive, confirm: action.confirm },
+              ),
+            });
+      const data = (await response.json().catch(() => null)) as
+        | (Role & { error?: string })
+        | { error?: string; requiresConfirmation?: boolean }
+        | null;
+
+      if (!response.ok || !data || !('id' in data)) {
+        if (
+          action.kind === 'status' &&
+          data &&
+          'requiresConfirmation' in data &&
+          data.requiresConfirmation
+        ) {
+          setPendingRoleAction({ ...action, confirm: true });
+        }
+
+        throw new Error(
+          data && 'error' in data && data.error ? data.error : 'Unable to save role.',
+        );
+      }
+
+      const saved = data as Role;
+
+      setRoles((current) =>
+        sortRoles(
+          action.kind === 'add'
+            ? [...current, saved]
+            : current.map((role) => (role.id === saved.id ? saved : role)),
+        ),
+      );
+      setNewRole('');
+      setEditingRoleId(null);
+      setEditingRoleName('');
+      setRoleError('');
+      setRoleMessage(
+        action.kind === 'add'
+          ? 'Role added.'
+          : action.kind === 'rename'
+            ? 'Role renamed.'
+            : saved.is_active
+              ? 'Role activated.'
+              : 'Role deactivated.',
+      );
+      setPendingRoleAction(null);
+      setVerifySuccessCountdown(5);
+      setVerifyRfidStep('success');
+    } catch (error) {
+      setVerifyRfidError(error instanceof Error ? error.message : 'Unable to save role.');
+      setVerifyRfidStep('error');
+    }
+  }
+
   function submitVerifiedChange() {
     if (verifyTarget === 'department') return submitDepartmentChange();
+    if (verifyTarget === 'role') return submitRoleChange();
 
-    return verifyTarget === 'organization' ? submitOrganizationChange() : submitProfileNameChange();
+    return submitProfileNameChange();
   }
 
   function openChangeRfidModal() {
@@ -4718,14 +4810,6 @@ export function SettingsPage() {
     } finally {
       setIsChangingRfid(false);
     }
-  }
-
-  function startEditingOrganization() {
-    setDraftRoles(roles);
-    setNewRole('');
-    setOrganizationError('');
-    setOrganizationMessage('');
-    setIsEditingOrganization(true);
   }
 
   function startDepartmentAction(action: DepartmentAction) {
@@ -4803,6 +4887,84 @@ export function SettingsPage() {
     const matchesStatus =
       departmentStatusFilter === 'All' ||
       (departmentStatusFilter === 'Active' ? department.is_active : !department.is_active);
+
+    return matchesSearch && matchesStatus;
+  });
+
+  function startRoleAction(action: RoleAction) {
+    setRoleError('');
+    setRoleMessage('');
+    setPendingRoleAction(action);
+    openVerifyRfidModal('role');
+  }
+
+  function addRole() {
+    const error = validateRoleName(newRole, roles);
+
+    if (error) {
+      setRoleError(error);
+      return;
+    }
+
+    startRoleAction({ kind: 'add', name: newRole.trim().replace(/\s+/g, ' ') });
+  }
+
+  function startRenamingRole(role: Role) {
+    setEditingRoleId(role.id);
+    setEditingRoleName(role.name);
+    setRoleError('');
+    setRoleMessage('');
+  }
+
+  function cancelRenamingRole() {
+    setEditingRoleId(null);
+    setEditingRoleName('');
+    setRoleError('');
+  }
+
+  function saveRoleRename(role: Role) {
+    const name = editingRoleName.trim().replace(/\s+/g, ' ');
+
+    if (name === role.name) {
+      cancelRenamingRole();
+      return;
+    }
+
+    const error = validateRoleName(name, roles, role.id);
+
+    if (error) {
+      setRoleError(error);
+      return;
+    }
+
+    startRoleAction({ kind: 'rename', id: role.id, name });
+  }
+
+  function toggleRoleStatus(role: Role) {
+    if (
+      role.is_active &&
+      role.user_count > 0 &&
+      !window.confirm(
+        `${role.user_count} user(s) are assigned to ${role.name}. They will keep this role, but no new users can be assigned to it once it is inactive. Deactivate it?`,
+      )
+    ) {
+      return;
+    }
+
+    startRoleAction({
+      kind: 'status',
+      id: role.id,
+      isActive: !role.is_active,
+      confirm: role.is_active,
+    });
+  }
+
+  const visibleRoles = roles.filter((role) => {
+    const matchesSearch =
+      !roleSearch.trim() || role.name.toLowerCase().includes(roleSearch.trim().toLowerCase());
+    const matchesStatus =
+      roleStatusFilter === 'All' ||
+      (roleStatusFilter === 'Active' ? role.is_active : !role.is_active);
 
     return matchesSearch && matchesStatus;
   });
@@ -5170,7 +5332,6 @@ export function SettingsPage() {
         <div className="organization-stack">
           <section className="module-panel settings-card">
             <h2>Department Management</h2>
-            <p>Manage Departments Management Department</p>
             <div className="organization-input-row">
               <label> Add Department </label>
               <input
@@ -5322,11 +5483,9 @@ export function SettingsPage() {
 
           <section className="module-panel settings-card">
             <h2>Role Management</h2>
-            <p>Manage user roles across the system.</p>
             <div className="organization-input-row">
               <label> Add Role </label>
               <input
-                disabled={!isEditingOrganization}
                 onChange={(e) => setNewRole(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -5338,60 +5497,127 @@ export function SettingsPage() {
                 value={newRole}
               />
 
-              <button
-                className="organization-edit-button"
-                disabled={!isEditingOrganization}
-                onClick={addRole}
-                type="button"
-              >
+              <button className="organization-edit-button" onClick={addRole} type="button">
                 Add
               </button>
             </div>
+
+            <div className="enrollment-search-row">
+              <input
+                aria-label="Search roles"
+                onChange={(e) => setRoleSearch(e.target.value)}
+                placeholder="Search roles..."
+                type="search"
+                value={roleSearch}
+              />
+              <select
+                aria-label="Filter roles by status"
+                onChange={(e) =>
+                  setRoleStatusFilter(e.target.value as 'All' | 'Active' | 'Inactive')
+                }
+                value={roleStatusFilter}
+              >
+                <option value="All">All Status</option>
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+
+            {roleError ? (
+              <p className="module-table-message error" role="alert">
+                {roleError}
+              </p>
+            ) : null}
+            {roleMessage ? <p className="module-table-message">{roleMessage}</p> : null}
 
             <div className="user-table-wrap">
               <table className="managed-table user-management-table">
                 <thead>
                   <tr>
-                    <th>Roles</th>
+                    <th>Role</th>
+                    <th>Users</th>
                     <th>Access Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {(isEditingOrganization ? draftRoles : roles).length === 0 ? (
+                  {visibleRoles.length === 0 ? (
                     <tr>
-                      <td colSpan={3}>No roles yet.</td>
+                      <td colSpan={4}>
+                        {roles.length === 0 ? 'No roles yet.' : 'No roles match your search.'}
+                      </td>
                     </tr>
                   ) : (
-                    (isEditingOrganization ? draftRoles : roles).map((role) => (
+                    visibleRoles.map((role) => (
                       <tr key={role.id}>
-                        <td>{role.name}</td>
-                        <td>{role.status}</td>
+                        <td>
+                          {editingRoleId === role.id ? (
+                            <input
+                              aria-label={`Rename ${role.name}`}
+                              autoFocus
+                              onChange={(e) => setEditingRoleName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  saveRoleRename(role);
+                                } else if (e.key === 'Escape') {
+                                  cancelRenamingRole();
+                                }
+                              }}
+                              value={editingRoleName}
+                            />
+                          ) : (
+                            role.name
+                          )}
+                        </td>
+                        <td>{role.user_count}</td>
+                        <td>{role.is_active ? 'Active' : 'Inactive'}</td>
                         <td>
                           <div className="user-row-actions">
-                            <button
-                              aria-label={
-                                role.status === 'Active' ? 'Deactivate role' : 'Activate role'
-                              }
-                              className={role.status === 'Active' ? 'deactivate' : 'activate'}
-                              disabled={!isEditingOrganization}
-                              onClick={() => toggleRoleStatus(role.id)}
-                              title={role.status === 'Active' ? 'Deactivate' : 'Activate'}
-                              type="button"
-                            >
-                              <Power size={16} />
-                            </button>
-                            <button
-                              aria-label="Remove role"
-                              className="archive"
-                              disabled={!isEditingOrganization}
-                              onClick={() => removeRole(role.id)}
-                              title="Remove"
-                              type="button"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            {editingRoleId === role.id ? (
+                              <>
+                                <button
+                                  aria-label="Save role name"
+                                  className="activate"
+                                  onClick={() => saveRoleRename(role)}
+                                  title="Save"
+                                  type="button"
+                                >
+                                  <Check size={16} />
+                                </button>
+                                <button
+                                  aria-label="Cancel renaming"
+                                  className="archive"
+                                  onClick={cancelRenamingRole}
+                                  title="Cancel"
+                                  type="button"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  aria-label={`Rename ${role.name}`}
+                                  className="edit"
+                                  onClick={() => startRenamingRole(role)}
+                                  title="Rename"
+                                  type="button"
+                                >
+                                  <Pencil size={16} />
+                                </button>
+                                <button
+                                  aria-label={role.is_active ? 'Deactivate role' : 'Activate role'}
+                                  className={role.is_active ? 'deactivate' : 'activate'}
+                                  onClick={() => toggleRoleStatus(role)}
+                                  title={role.is_active ? 'Deactivate' : 'Activate'}
+                                  type="button"
+                                >
+                                  <Power size={16} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -5401,27 +5627,6 @@ export function SettingsPage() {
               </table>
             </div>
           </section>
-          {organizationError ? (
-            <p className="module-table-message error" role="alert">
-              {organizationError}
-            </p>
-          ) : null}
-          {organizationMessage ? (
-            <p className="module-table-message">{organizationMessage}</p>
-          ) : null}
-          <div className="admin-profile-footer">
-            <button
-              className="admin-profile-edit-button"
-              onClick={() =>
-                isEditingOrganization
-                  ? openVerifyRfidModal('organization')
-                  : startEditingOrganization()
-              }
-              type="button"
-            >
-              {isEditingOrganization ? 'Save Changes' : 'Edit'}
-            </button>
-          </div>
         </div>
       )}
 
