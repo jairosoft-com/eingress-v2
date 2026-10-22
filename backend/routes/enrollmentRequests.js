@@ -12,6 +12,7 @@ import { getDuplicateUserMessage } from './users.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
+import { checkDepartmentAssignable } from '../lib/departments.js';
 
 export const enrollmentRequestsRouter = express.Router();
 
@@ -92,6 +93,12 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
 
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({ error: Object.values(errors).join(' '), errors });
+    }
+
+    const departmentCheck = await checkDepartmentAssignable(department, { strict: false });
+
+    if (departmentCheck.error) {
+      return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
     }
 
     const fullName = composeFullName(firstName, lastName);
@@ -273,6 +280,12 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
       return res.status(400).json({ error: Object.values(errors).join(' '), errors });
     }
 
+    const departmentCheck = await checkDepartmentAssignable(department, { strict: false });
+
+    if (departmentCheck.error) {
+      return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
+    }
+
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock($1)', [20260617]);
     await resetEnrollmentSequencesIfEmpty(client);
@@ -344,6 +357,13 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
       if (!rfidUid) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'RFID UID is required before approving enrollment.' });
+      }
+
+      const departmentCheck = await checkDepartmentAssignable(request.department, { strict: false });
+
+      if (departmentCheck.error) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: departmentCheck.error });
       }
 
       const expirationDate = getDefaultExpirationForRole(request.department);
