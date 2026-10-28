@@ -2,6 +2,8 @@ import express from 'express';
 import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { createNotification } from '../lib/notifications.js';
+import { broadcastMessage } from '../ws.js';
+import { fullNameSql } from '../lib/personName.js';
 import {
   ensureRolesTable,
   MAX_ROLE_NAME_LENGTH,
@@ -89,6 +91,42 @@ rolesRouter.get('/', authMiddleware, async (req, res) => {
   }
 });
 
+rolesRouter.get('/:id/users', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Valid role id is required' });
+  }
+
+  try {
+    await ensureRolesTable();
+    const roleResult = await query(
+      `SELECT r.id, r.name, r.is_active, r.user_id_prefix, r.created_at, r.updated_at
+       FROM roles r
+       WHERE r.id = $1`,
+      [id],
+    );
+
+    if (roleResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Role not found' });
+    }
+
+    const role = roleResult.rows[0];
+    const usersResult = await query(
+      `SELECT id, employee_id, ${fullNameSql()} AS full_name, first_name, last_name,
+              email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at
+       FROM users
+       WHERE LOWER(TRIM(role)) = LOWER(TRIM($1)) AND COALESCE(is_archived, FALSE) = FALSE
+       ORDER BY LOWER(last_name), LOWER(first_name), employee_id`,
+      [role.name],
+    );
+
+    res.json(usersResult.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 rolesRouter.post('/', authMiddleware, async (req, res) => {
   const { name, error } = validateName(req.body);
 
@@ -110,6 +148,10 @@ rolesRouter.post('/', authMiddleware, async (req, res) => {
     await logAudit(req, 'Added Role', `Added role ${name} (User ID prefix ${prefixCheck.prefix})`);
     await createNotification('Role Added', `Role ${name} was added.`, 'success');
     const result = await query(`${ROLE_SELECT} WHERE r.id = $1`, [inserted.rows[0].id]);
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'created', role: result.rows[0] },
+    });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err?.code === '23505') {
@@ -223,6 +265,14 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
     }
 
     const result = await query(`${ROLE_SELECT} WHERE r.id = $1`, [id]);
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'updated', role: result.rows[0] },
+    });
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'role_updated', role: result.rows[0] },
+    });
     res.json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
