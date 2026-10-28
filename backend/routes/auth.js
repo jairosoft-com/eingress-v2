@@ -217,13 +217,32 @@ authRouter.post('/login', async (req, res) => {
 
     const admin = adminResult.rows[0];
     const now = Date.now();
+    const lockedUntilMs = admin.locked_until ? new Date(admin.locked_until).getTime() : null;
 
-    if (lockoutEnabled && admin.locked_until && new Date(admin.locked_until).getTime() > now) {
-      const minutesLeft = Math.ceil((new Date(admin.locked_until).getTime() - now) / 60_000);
+    // Still locked: tell the client exactly when the lock ends
+    if (lockoutEnabled && lockedUntilMs && lockedUntilMs > now) {
+      const retryAfterSeconds = Math.ceil((lockedUntilMs - now) / 1000);
+      const minutesLeft = Math.ceil(retryAfterSeconds / 60);
 
+      res.set('Retry-After', String(retryAfterSeconds));
       return res.status(423).json({
         error: `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute(s).`,
+        lockedUntil: lockedUntilMs,
+        retryAfterSeconds,
       });
+    }
+
+    // Lock has expired: clear the stale lock and counters so the user starts fresh
+    if (lockedUntilMs && lockedUntilMs <= now) {
+      await query(
+        `UPDATE admins
+        SET failed_login_attempts = 0, last_failed_login_at = NULL, locked_until = NULL
+        WHERE id = $1`,
+        [admin.id],
+      );
+      admin.failed_login_attempts = 0;
+      admin.last_failed_login_at = null;
+      admin.locked_until = null;
     }
 
     const passwordMatch = await bcrypt.compare(password, admin.password_hash);
@@ -256,23 +275,23 @@ authRouter.post('/login', async (req, res) => {
           now - new Date(admin.last_failed_login_at).getTime() > resetFailedAttemptsAfterMinutes * 60_000;
         const nextAttempts = (resetWindowElapsed ? 0 : admin.failed_login_attempts) + 1;
         const isNowLocked = nextAttempts >= maxFailedAttempts;
+        const lockedUntil = now + lockoutDurationMinutes * 60_000;
 
         await query(
           `UPDATE admins
-           SET failed_login_attempts = $1,
-             last_failed_login_at = NOW(),
-             locked_until = $2
-           WHERE id = $3`,
-          [
-            nextAttempts,
-            isNowLocked ? new Date(now + lockoutDurationMinutes * 60_000) : null,
-            admin.id,
-          ],
+          SET failed_login_attempts = $1,
+            last_failed_login_at = NOW(),
+            locked_until = $2
+          WHERE id = $3`,
+          [nextAttempts, isNowLocked ? new Date(lockedUntil) : null, admin.id],
         );
 
         if (isNowLocked) {
+          res.set('Retry-After', String(lockoutDurationMinutes * 60));
           return res.status(423).json({
             error: `Account locked due to too many failed attempts. Try again in ${lockoutDurationMinutes} minute(s).`,
+            lockedUntil,
+            retryAfterSeconds: lockoutDurationMinutes * 60,
           });
         }
       }
