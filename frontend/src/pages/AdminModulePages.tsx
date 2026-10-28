@@ -17,11 +17,12 @@ import {
   Power,
   Search,
   TrendingUp,
+  Users,
   UsersRound,
   X,
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { API_BASE_URL } from '../lib/api';
@@ -1145,7 +1146,7 @@ export function UserManagementPage() {
 
       socket?.close();
     };
-  }, [isRfidScannerOpen]);
+  }, [isRfidScannerOpen, editingUser, isCreateUserOpen]);
 
   async function updateUserStatus(id: number, isActive: boolean) {
     if (!session?.accessToken) {
@@ -1184,6 +1185,8 @@ export function UserManagementPage() {
           user.id === id ? { ...user, is_active: isActive, is_archived: false } : user,
         ),
       );
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      window.dispatchEvent(new CustomEvent('roles:changed'));
       window.alert(isActive ? 'User reactivated successfully.' : 'User deactivated successfully.');
     } catch (error) {
       setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to update user.');
@@ -1229,6 +1232,8 @@ export function UserManagementPage() {
           user.id === id ? { ...user, is_active: false, is_archived: true } : user,
         ),
       );
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      window.dispatchEvent(new CustomEvent('roles:changed'));
       window.alert('User archived successfully.');
     } catch (error) {
       setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to archive user.');
@@ -1438,6 +1443,8 @@ export function UserManagementPage() {
       );
       setEditingUser(null);
       setEditErrors({});
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      window.dispatchEvent(new CustomEvent('roles:changed'));
       window.alert('User details saved successfully.');
     } catch (error) {
       setEditFormError(error instanceof Error ? error.message : 'Unable to save user details.');
@@ -1599,6 +1606,8 @@ export function UserManagementPage() {
         fingerprintId: '',
       });
       setCreateErrors({});
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      window.dispatchEvent(new CustomEvent('roles:changed'));
       window.alert('User created successfully.');
     } catch (error) {
       setCreateFormError(error instanceof Error ? error.message : 'Unable to create user.');
@@ -4576,6 +4585,9 @@ export function SettingsPage() {
     null,
   );
   const [roles, setRoles] = useState<Role[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
+  const [assignedUsersSearch, setAssignedUsersSearch] = useState('');
   const [newRole, setNewRole] = useState('');
   const [newRolePrefix, setNewRolePrefix] = useState('');
   const [editingRolePrefix, setEditingRolePrefix] = useState('');
@@ -4644,6 +4656,7 @@ export function SettingsPage() {
         }
         if (profileResponse.ok && profileData) setProfile(profileData);
         if (usersResponse.ok && Array.isArray(usersData)) {
+          setUsers(usersData);
           setTotalUsers(usersData.filter((user) => !user.is_archived).length);
         }
       })
@@ -4658,59 +4671,135 @@ export function SettingsPage() {
     return () => controller.abort();
   }, [session?.accessToken]);
 
+  const refreshOrganizationUsersAndRoles = useCallback(async () => {
+    if (!session?.accessToken) return;
+
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
+    try {
+      const [rolesRes, usersRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/roles`, { headers }),
+        fetch(`${API_BASE_URL}/users`, { headers }),
+      ]);
+
+      if (rolesRes.ok) {
+        const rolesData = (await rolesRes.json().catch(() => null)) as Role[] | null;
+        if (Array.isArray(rolesData)) {
+          setRoles(rolesData);
+        }
+      }
+
+      if (usersRes.ok) {
+        const usersData = (await usersRes.json().catch(() => null)) as UserRecord[] | null;
+        if (Array.isArray(usersData)) {
+          setUsers(usersData);
+          setTotalUsers(usersData.filter((user) => !user.is_archived).length);
+        }
+      }
+    } catch {
+      // Ignore background refresh errors
+    }
+  }, [session]);
+
   useEffect(() => {
     if (activeTab !== 'organization' || !session?.accessToken) return;
 
     const controller = new AbortController();
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
 
-    void fetch(`${API_BASE_URL}/departments`, {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        const data = (await response.json().catch(() => null)) as Department[] | null;
+    void Promise.all([
+      fetch(`${API_BASE_URL}/departments`, { headers, signal: controller.signal }),
+      fetch(`${API_BASE_URL}/roles`, { headers, signal: controller.signal }),
+      fetch(`${API_BASE_URL}/users`, { headers, signal: controller.signal }),
+    ])
+      .then(async ([deptResponse, rolesResponse, usersResponse]) => {
+        const deptData = (await deptResponse.json().catch(() => null)) as Department[] | null;
+        const rolesData = (await rolesResponse.json().catch(() => null)) as Role[] | null;
+        const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
 
-        if (response.ok && Array.isArray(data)) {
-          setDepartments(data);
+        if (deptResponse.ok && Array.isArray(deptData)) {
+          setDepartments(deptData);
         } else {
           setDepartmentError('Unable to load departments.');
+        }
+
+        if (rolesResponse.ok && Array.isArray(rolesData)) {
+          setRoles(rolesData);
+        } else {
+          setRoleError('Unable to load roles.');
+        }
+
+        if (usersResponse.ok && Array.isArray(usersData)) {
+          setUsers(usersData);
+          setTotalUsers(usersData.filter((user) => !user.is_archived).length);
         }
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return;
 
         setDepartmentError('Unable to load departments.');
-      });
-
-    return () => controller.abort();
-  }, [activeTab, session?.accessToken]);
-
-  useEffect(() => {
-    if (activeTab !== 'organization' || !session?.accessToken) return;
-
-    const controller = new AbortController();
-
-    void fetch(`${API_BASE_URL}/roles`, {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        const data = (await response.json().catch(() => null)) as Role[] | null;
-
-        if (response.ok && Array.isArray(data)) {
-          setRoles(data);
-        } else {
-          setRoleError('Unable to load roles.');
-        }
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-
         setRoleError('Unable to load roles.');
       });
 
-    return () => controller.abort();
-  }, [activeTab, session?.accessToken]);
+    const intervalId = window.setInterval(() => {
+      void refreshOrganizationUsersAndRoles();
+    }, 2500);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [activeTab, session?.accessToken, refreshOrganizationUsersAndRoles]);
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    let socket: WebSocket | null = null;
+    let shouldReconnect = true;
+    let reconnectTimeoutId: number | null = null;
+
+    function handleRealtimeUpdate() {
+      void refreshOrganizationUsersAndRoles();
+    }
+
+    function connectSocket() {
+      socket = new WebSocket(WS_BASE_URL);
+
+      socket.addEventListener('message', (event) => {
+        try {
+          const message = JSON.parse(event.data as string) as { type?: string };
+          if (
+            message.type === 'users:changed' ||
+            message.type === 'roles:changed' ||
+            message.type === 'activity:event' ||
+            message.type === 'notification:created' ||
+            message.type === 'enrollment:reviewed'
+          ) {
+            handleRealtimeUpdate();
+          }
+        } catch {
+          // Ignore non-json
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        if (!shouldReconnect) return;
+        reconnectTimeoutId = window.setTimeout(connectSocket, 2000);
+      });
+    }
+
+    connectSocket();
+
+    window.addEventListener('users:changed', handleRealtimeUpdate);
+    window.addEventListener('roles:changed', handleRealtimeUpdate);
+
+    return () => {
+      shouldReconnect = false;
+      if (reconnectTimeoutId) window.clearTimeout(reconnectTimeoutId);
+      socket?.close();
+      window.removeEventListener('users:changed', handleRealtimeUpdate);
+      window.removeEventListener('roles:changed', handleRealtimeUpdate);
+    };
+  }, [session?.accessToken, refreshOrganizationUsersAndRoles]);
 
   const updateSetting = <K extends keyof SystemSettings>(key: K, value: SystemSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }));
@@ -5338,6 +5427,51 @@ export function SettingsPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const selectedRole = roles.find((role) => String(role.id) === String(selectedRoleId)) ?? null;
+
+  const assignedUsersForSelectedRole = useMemo(() => {
+    if (!selectedRole) return [];
+    const targetRole = selectedRole.name.trim().toLowerCase();
+    return users.filter(
+      (user) => !user.is_archived && (user.role || '').trim().toLowerCase() === targetRole,
+    );
+  }, [users, selectedRole]);
+
+  const filteredAssignedUsers = useMemo(() => {
+    if (!assignedUsersSearch.trim()) return assignedUsersForSelectedRole;
+    const term = assignedUsersSearch.trim().toLowerCase();
+    return assignedUsersForSelectedRole.filter((user) => {
+      const name = (
+        user.last_name && user.first_name
+          ? `${user.last_name}, ${user.first_name}`
+          : user.full_name || ''
+      ).toLowerCase();
+      const empId = (user.employee_id || '').toLowerCase();
+      const email = (user.email || '').toLowerCase();
+      const dept = (user.department || '').toLowerCase();
+      return (
+        name.includes(term) || empId.includes(term) || email.includes(term) || dept.includes(term)
+      );
+    });
+  }, [assignedUsersForSelectedRole, assignedUsersSearch]);
+
+  function handleSelectRole(role: Role) {
+    if (editingRoleId === role.id) return;
+    if (selectedRoleId === role.id) {
+      setSelectedRoleId(null);
+      setAssignedUsersSearch('');
+      return;
+    }
+    setSelectedRoleId(role.id);
+    setAssignedUsersSearch('');
+    setTimeout(() => {
+      const el = document.getElementById('role-assigned-users');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 60);
+  }
+
   return (
     <section className="module-page">
       <PageHeader title="Settings" description="Configure system preferences and parameters." />
@@ -5913,7 +6047,7 @@ export function SettingsPage() {
             {roleMessage ? <p className="module-table-message">{roleMessage}</p> : null}
 
             <div className="user-table-wrap">
-              <table className="managed-table user-management-table">
+              <table className="managed-table user-management-table role-management-table">
                 <thead>
                   <tr>
                     <th>Role</th>
@@ -5932,104 +6066,256 @@ export function SettingsPage() {
                       </td>
                     </tr>
                   ) : (
-                    visibleRoles.map((role) => (
-                      <tr key={role.id}>
-                        <td>
-                          {editingRoleId === role.id ? (
-                            <input
-                              aria-label={`Rename ${role.name}`}
-                              autoFocus
-                              onChange={(e) => setEditingRoleName(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  saveRoleRename(role);
-                                } else if (e.key === 'Escape') {
-                                  cancelRenamingRole();
-                                }
-                              }}
-                              value={editingRoleName}
-                            />
-                          ) : (
-                            role.name
-                          )}
-                        </td>
-                        <td>
-                          {editingRoleId === role.id ? (
-                            <input
-                              aria-label={`User ID prefix for ${role.name}`}
-                              maxLength={10}
-                              onChange={(e) => setEditingRolePrefix(e.target.value.toUpperCase())}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  saveRoleRename(role);
-                                } else if (e.key === 'Escape') {
-                                  cancelRenamingRole();
-                                }
-                              }}
-                              placeholder="e.g. EMP"
-                              value={editingRolePrefix}
-                            />
-                          ) : (
-                            (role.user_id_prefix ?? 'Not set')
-                          )}
-                        </td>
-                        <td>{role.user_count}</td>
-                        <td>{role.is_active ? 'Active' : 'Inactive'}</td>
-                        <td>
-                          <div className="user-row-actions">
+                    visibleRoles.map((role) => {
+                      const isSelected = selectedRole?.id === role.id;
+                      return (
+                        <tr
+                          key={role.id}
+                          className={`role-row ${isSelected ? 'selected-role-row' : ''}`}
+                          data-testid={`role-row-${role.name.toLowerCase().replace(/\s+/g, '-')}`}
+                          onClick={() => handleSelectRole(role)}
+                        >
+                          <td>
                             {editingRoleId === role.id ? (
-                              <>
-                                <button
-                                  aria-label="Save role"
-                                  className="activate"
-                                  onClick={() => saveRoleRename(role)}
-                                  title="Save"
-                                  type="button"
-                                >
-                                  <Check size={16} />
-                                </button>
-                                <button
-                                  aria-label="Cancel renaming"
-                                  className="archive"
-                                  onClick={cancelRenamingRole}
-                                  title="Cancel"
-                                  type="button"
-                                >
-                                  <X size={16} />
-                                </button>
-                              </>
+                              <input
+                                aria-label={`Rename ${role.name}`}
+                                autoFocus
+                                onChange={(e) => setEditingRoleName(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    saveRoleRename(role);
+                                  } else if (e.key === 'Escape') {
+                                    cancelRenamingRole();
+                                  }
+                                }}
+                                value={editingRoleName}
+                              />
                             ) : (
-                              <>
-                                <button
-                                  aria-label={`Edit ${role.name}`}
-                                  className="edit"
-                                  onClick={() => startRenamingRole(role)}
-                                  title="Edit"
-                                  type="button"
-                                >
-                                  <Pencil size={16} />
-                                </button>
-                                <button
-                                  aria-label={role.is_active ? 'Deactivate role' : 'Activate role'}
-                                  className={role.is_active ? 'deactivate' : 'activate'}
-                                  onClick={() => toggleRoleStatus(role)}
-                                  title={role.is_active ? 'Deactivate' : 'Activate'}
-                                  type="button"
-                                >
-                                  <Power size={16} />
-                                </button>
-                              </>
+                              role.name
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td>
+                            {editingRoleId === role.id ? (
+                              <input
+                                aria-label={`User ID prefix for ${role.name}`}
+                                maxLength={10}
+                                onChange={(e) => setEditingRolePrefix(e.target.value.toUpperCase())}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    saveRoleRename(role);
+                                  } else if (e.key === 'Escape') {
+                                    cancelRenamingRole();
+                                  }
+                                }}
+                                placeholder="e.g. EMP"
+                                value={editingRolePrefix}
+                              />
+                            ) : (
+                              (role.user_id_prefix ?? 'Not set')
+                            )}
+                          </td>
+                          <td>{role.user_count}</td>
+                          <td>{role.is_active ? 'Active' : 'Inactive'}</td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <div className="user-row-actions">
+                              {editingRoleId === role.id ? (
+                                <>
+                                  <button
+                                    aria-label="Save role"
+                                    className="activate"
+                                    onClick={() => saveRoleRename(role)}
+                                    title="Save"
+                                    type="button"
+                                  >
+                                    <Check size={16} />
+                                  </button>
+                                  <button
+                                    aria-label="Cancel renaming"
+                                    className="archive"
+                                    onClick={cancelRenamingRole}
+                                    title="Cancel"
+                                    type="button"
+                                  >
+                                    <X size={16} />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    aria-label={`View users assigned to ${role.name}`}
+                                    className={`view-users ${isSelected ? 'active' : ''}`}
+                                    onClick={() => handleSelectRole(role)}
+                                    title={
+                                      isSelected ? 'Hide Assigned Users' : 'View Assigned Users'
+                                    }
+                                    type="button"
+                                  >
+                                    <Users size={16} />
+                                  </button>
+                                  <button
+                                    aria-label={`Edit ${role.name}`}
+                                    className="edit"
+                                    onClick={() => startRenamingRole(role)}
+                                    title="Edit"
+                                    type="button"
+                                  >
+                                    <Pencil size={16} />
+                                  </button>
+                                  <button
+                                    aria-label={
+                                      role.is_active ? 'Deactivate role' : 'Activate role'
+                                    }
+                                    className={role.is_active ? 'deactivate' : 'activate'}
+                                    onClick={() => toggleRoleStatus(role)}
+                                    title={role.is_active ? 'Deactivate' : 'Activate'}
+                                    type="button"
+                                  >
+                                    <Power size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
+
+            {selectedRole ? (
+              <div
+                className="role-assigned-users-container"
+                data-testid="role-assigned-users"
+                id="role-assigned-users"
+              >
+                <div className="role-assigned-users-header">
+                  <div>
+                    <div className="role-assigned-title-row">
+                      <h3>
+                        Assigned Users:{' '}
+                        <span className="highlight-role-name">{selectedRole.name}</span>
+                      </h3>
+                      <span
+                        className={`role-assigned-status-badge ${selectedRole.is_active ? 'active' : 'inactive'}`}
+                      >
+                        {selectedRole.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      <span className="role-assigned-count-badge">
+                        {assignedUsersForSelectedRole.length}{' '}
+                        {assignedUsersForSelectedRole.length === 1 ? 'user' : 'users'}
+                      </span>
+                    </div>
+                    <p className="role-assigned-subtitle">
+                      Accurate real-time record of all users currently assigned to{' '}
+                      <strong>{selectedRole.name}</strong>.
+                    </p>
+                  </div>
+                  <div className="role-assigned-controls">
+                    <input
+                      aria-label="Filter assigned users"
+                      className="role-assigned-search"
+                      onChange={(e) => setAssignedUsersSearch(e.target.value)}
+                      placeholder="Filter assigned users..."
+                      type="search"
+                      value={assignedUsersSearch}
+                    />
+                    <button
+                      aria-label="Close assigned users view"
+                      className="close-assigned-button"
+                      onClick={() => setSelectedRoleId(null)}
+                      type="button"
+                    >
+                      <X size={16} /> Close
+                    </button>
+                  </div>
+                </div>
+
+                <div className="user-table-wrap">
+                  <table className="managed-table user-management-table assigned-users-table">
+                    <thead>
+                      <tr>
+                        <th>User</th>
+                        <th>User ID</th>
+                        <th>Department</th>
+                        <th>Access Status</th>
+                        <th>Biometric Status</th>
+                        <th>RFID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAssignedUsers.length === 0 ? (
+                        <tr>
+                          <td className="module-table-message" colSpan={6}>
+                            {assignedUsersForSelectedRole.length === 0
+                              ? `No users are currently assigned to the "${selectedRole.name}" role.`
+                              : 'No assigned users match your filter.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredAssignedUsers.map((user, idx) => (
+                          <tr key={user.id}>
+                            <td>
+                              <span className="managed-user-cell">
+                                <span className={`managed-avatar ${getAvatarTone(idx)}`}>
+                                  {getInitials(
+                                    user.full_name ||
+                                      `${user.first_name ?? ''} ${user.last_name ?? ''}`,
+                                  )}
+                                </span>
+                                <span>
+                                  <strong>
+                                    {user.last_name && user.first_name
+                                      ? `${user.last_name}, ${user.first_name}`
+                                      : user.full_name}
+                                  </strong>
+                                  <small>{user.email || '—'}</small>
+                                </span>
+                              </span>
+                            </td>
+                            <td>
+                              <span className="user-id-code">{user.employee_id}</span>
+                            </td>
+                            <td>{user.department || '—'}</td>
+                            <td>
+                              <span
+                                className={`user-status-pill ${user.is_active ? 'success' : 'danger'}`}
+                              >
+                                {attendanceStatusIcon(user.is_active ? 'Active' : 'Disabled')}
+                                {user.is_active ? 'Active' : 'Disabled'}
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className={`user-status-pill ${user.fingerprint_id ? 'success' : 'danger'}`}
+                              >
+                                {attendanceStatusIcon(
+                                  user.fingerprint_id ? 'Registered' : 'Missing',
+                                )}
+                                {user.fingerprint_id ? 'Registered' : 'Missing'}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="rfid-code">{user.rfid_uid || '—'}</span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="role-selection-prompt">
+                <Users size={18} />
+                <span>Select a role above to view all currently assigned users in real time.</span>
+              </div>
+            )}
           </section>
         </div>
       )}

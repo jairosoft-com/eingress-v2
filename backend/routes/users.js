@@ -2,6 +2,7 @@ import express from 'express';
 import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
+import { broadcastMessage } from '../ws.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
@@ -70,12 +71,22 @@ export function getDuplicateUserMessage(error) {
 }
 
 usersRouter.get('/', async (req, res) => {
+  const role = req.query.role ? String(req.query.role).trim() : null;
+  const where = ['COALESCE(is_archived, FALSE) = FALSE'];
+  const params = [];
+
+  if (role) {
+    params.push(role);
+    where.push(`LOWER(TRIM(role)) = LOWER(TRIM($${params.length}))`);
+  }
+
   try {
     const result = await query(
       `SELECT ${USER_FIELDS}
        FROM users
-       WHERE COALESCE(is_archived, FALSE) = FALSE
+       WHERE ${where.join(' AND ')}
        ORDER BY LOWER(last_name), LOWER(first_name), employee_id`,
+      params,
     );
     res.json(result.rows);
   } catch (error) {
@@ -174,6 +185,14 @@ usersRouter.post('/', async (req, res) => {
       `${user.full_name} (${user.employee_id}) was added successfully.`,
       'success',
     );
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'created', userId: user.id, user },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_assigned', role: user.role },
+    });
     res.status(201).json(result.rows[0]);
   } catch (error) {
     const duplicateError = getDuplicateUserMessage(error);
@@ -331,6 +350,14 @@ usersRouter.patch('/:id', async (req, res) => {
       `${user.full_name} (${user.employee_id}) details were updated successfully.`,
       'success',
     );
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'updated', userId: user.id, user },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_updated', role: user.role },
+    });
     res.json(result.rows[0]);
   } catch (error) {
     const duplicateError = getDuplicateUserMessage(error);
@@ -384,6 +411,14 @@ usersRouter.patch('/:id/status', async (req, res) => {
       status: isActive ? 'Success' : 'Failed',
       time: user.updated_at,
     });
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'status_changed', userId: user.id, user },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_status_changed', role: user.role },
+    });
     res.json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -427,6 +462,14 @@ usersRouter.patch('/:id/archive', async (req, res) => {
       device: 'Admin Portal',
       status: isArchived ? 'Failed' : 'Success',
       time: user.updated_at,
+    });
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'archived', userId: user.id, user },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_archived', role: user.role },
     });
     res.json(result.rows[0]);
   } catch (error) {

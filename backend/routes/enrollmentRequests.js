@@ -442,6 +442,16 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
         status,
       },
     });
+    if (status === 'Approved') {
+      broadcastMessage({
+        type: 'users:changed',
+        payload: { action: 'enrolled', employeeId: request.employee_id },
+      });
+      broadcastMessage({
+        type: 'roles:changed',
+        payload: { action: 'user_enrolled' },
+      });
+    }
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
