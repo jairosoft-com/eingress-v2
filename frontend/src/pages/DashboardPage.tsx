@@ -9,11 +9,16 @@ import {
   TrendingUp,
   UsersRound,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
-import { formatDate, formatTime, formatWeekdayShort } from '../lib/dateTimeFormat';
+import {
+  formatDate,
+  formatTime,
+  formatWeekdayShort,
+  getLocalDateString,
+} from '../lib/dateTimeFormat';
 import { DateTimeSettings, useDateTimeSettings } from '../lib/systemSettingsStore';
 
 const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
@@ -73,8 +78,11 @@ type DashboardData = {
   attendanceTrend?: DashboardAttendanceTrendPoint[];
 };
 
-async function fetchDashboardData(accessToken: string, signal?: AbortSignal) {
-  const response = await fetch(`${API_BASE_URL}/dashboard`, {
+async function fetchDashboardData(accessToken: string, date?: string, signal?: AbortSignal) {
+  const url = date
+    ? `${API_BASE_URL}/dashboard?date=${encodeURIComponent(date)}`
+    : `${API_BASE_URL}/dashboard`;
+  const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     signal,
   });
@@ -160,57 +168,31 @@ function getChangeBadge(
   };
 }
 
-const metricDefinitions = [
-  {
-    label: 'Total Users',
-    value: '1,248',
-    Icon: UsersRound,
-    tone: 'red',
-  },
-  {
-    label: "Today's Attendance",
-    value: '—',
-    description: 'Unique users scanned today',
-    Icon: Fingerprint,
-    tone: 'blue',
-  },
-  {
-    label: 'Total Access',
-    value: '1,102',
-    Icon: MonitorSmartphone,
-    tone: 'purple',
-  },
-  {
-    label: 'Successful Attempts',
-    value: '0',
-    description: 'Granted scans today',
-    Icon: ShieldCheck,
-    tone: 'green',
-  },
-  {
-    label: 'Failed Attempts',
-    value: '23',
-    Icon: ShieldAlert,
-    tone: 'amber',
-  },
-  {
-    label: 'Active Devices',
-    value: '12',
-    Icon: Smartphone,
-    tone: 'blue',
-  },
-];
-
 const initialAccessEvents: ReturnType<typeof toAccessEvent>[] = [];
 
 export function DashboardPage() {
   const { session } = useAuth();
   const navigate = useNavigate();
   const dateTimeSettings = useDateTimeSettings();
+  const todayString = getLocalDateString(new Date(), dateTimeSettings);
+  const [selectedDate, setSelectedDate] = useState<string>(todayString);
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
   const [accessEvents, setAccessEvents] = useState(initialAccessEvents);
   const [attendanceRecords, setAttendanceRecords] = useState<DashboardAttendanceRecord[]>([]);
   const [attendanceTrend, setAttendanceTrend] = useState<DashboardAttendanceTrendPoint[]>([]);
+
+  const selectedDateRef = useRef(selectedDate);
+  const todayStringRef = useRef(todayString);
+
+  useEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+
+  useEffect(() => {
+    todayStringRef.current = todayString;
+  }, [todayString]);
 
   useEffect(() => {
     if (!session?.accessToken) {
@@ -219,7 +201,7 @@ export function DashboardPage() {
 
     const controller = new AbortController();
 
-    void fetchDashboardData(session.accessToken, controller.signal)
+    void fetchDashboardData(session.accessToken, selectedDate, controller.signal)
       .then((data) => {
         if (!controller.signal.aborted && data) {
           setDashboardMetrics(data.metrics ?? null);
@@ -233,7 +215,7 @@ export function DashboardPage() {
       });
 
     return () => controller.abort();
-  }, [session?.accessToken]);
+  }, [session?.accessToken, selectedDate]);
 
   useEffect(() => {
     if (!session?.accessToken) {
@@ -251,21 +233,23 @@ export function DashboardPage() {
         if (message.type === 'dashboard:metrics-changed' && message.payload) {
           const metricsPayload = message.payload as DashboardMetrics;
 
-          setDashboardMetrics((currentMetrics) => ({
-            ...(currentMetrics ?? {}),
-            active_devices: metricsPayload.active_devices ?? currentMetrics?.active_devices,
-            failed_attempts: metricsPayload.failed_attempts ?? currentMetrics?.failed_attempts,
-            successful_attempts:
-              metricsPayload.successful_attempts ?? currentMetrics?.successful_attempts,
-            todays_attendance:
-              metricsPayload.todays_attendance ?? currentMetrics?.todays_attendance,
-            total_access: metricsPayload.total_access ?? currentMetrics?.total_access,
-            total_users: metricsPayload.total_users ?? currentMetrics?.total_users,
-          }));
+          if (selectedDateRef.current === todayStringRef.current) {
+            setDashboardMetrics((currentMetrics) => ({
+              ...(currentMetrics ?? {}),
+              active_devices: metricsPayload.active_devices ?? currentMetrics?.active_devices,
+              failed_attempts: metricsPayload.failed_attempts ?? currentMetrics?.failed_attempts,
+              successful_attempts:
+                metricsPayload.successful_attempts ?? currentMetrics?.successful_attempts,
+              todays_attendance:
+                metricsPayload.todays_attendance ?? currentMetrics?.todays_attendance,
+              total_access: metricsPayload.total_access ?? currentMetrics?.total_access,
+              total_users: metricsPayload.total_users ?? currentMetrics?.total_users,
+            }));
+          }
         }
 
         if (message.type === 'attendance:changed') {
-          void fetchDashboardData(session.accessToken)
+          void fetchDashboardData(session.accessToken, selectedDateRef.current)
             .then((data) => {
               if (data) {
                 setDashboardMetrics(data.metrics ?? null);
@@ -293,6 +277,25 @@ export function DashboardPage() {
     return () => socket.close();
   }, [session?.accessToken]);
 
+  const isToday = selectedDate === todayString;
+  const selectedDateLabel = formatDate(selectedDate, dateTimeSettings);
+  const displayDateLabel = isToday ? `${selectedDateLabel} (Today)` : selectedDateLabel;
+
+  const handleDateButtonClick = () => {
+    if (dateInputRef.current) {
+      if (typeof dateInputRef.current.showPicker === 'function') {
+        try {
+          dateInputRef.current.showPicker();
+          return;
+        } catch {
+          // Fallback below
+        }
+      }
+      dateInputRef.current.focus();
+      dateInputRef.current.click();
+    }
+  };
+
   const metricValues: Record<string, number | null> = {
     'Active Devices': dashboardMetrics?.active_devices ?? null,
     'Successful Attempts': dashboardMetrics?.successful_attempts ?? null,
@@ -307,6 +310,48 @@ export function DashboardPage() {
     'Total Access': dashboardMetrics?.total_access_yesterday,
     'Total Users': dashboardMetrics?.total_users_yesterday,
   };
+
+  const metricDefinitions = [
+    {
+      label: 'Total Users',
+      value: '1,248',
+      Icon: UsersRound,
+      tone: 'red',
+    },
+    {
+      label: "Today's Attendance",
+      value: '—',
+      description: isToday ? 'Unique users scanned today' : 'Unique users scanned',
+      Icon: Fingerprint,
+      tone: 'blue',
+    },
+    {
+      label: 'Total Access',
+      value: '1,102',
+      Icon: MonitorSmartphone,
+      tone: 'purple',
+    },
+    {
+      label: 'Successful Attempts',
+      value: '0',
+      description: isToday ? 'Granted scans today' : 'Granted scans',
+      Icon: ShieldCheck,
+      tone: 'green',
+    },
+    {
+      label: 'Failed Attempts',
+      value: '23',
+      Icon: ShieldAlert,
+      tone: 'amber',
+    },
+    {
+      label: 'Active Devices',
+      value: '12',
+      Icon: Smartphone,
+      tone: 'blue',
+    },
+  ];
+
   const metrics = metricDefinitions.map((metric) => {
     const liveValue = metricValues[metric.label];
 
@@ -330,7 +375,6 @@ export function DashboardPage() {
       barHeight,
     };
   });
-  const todayLabel = formatDate(new Date(), dateTimeSettings);
   const firstName = session?.adminName?.trim().split(/\s+/)[0] || 'Admin';
 
   return (
@@ -338,13 +382,47 @@ export function DashboardPage() {
       <header className="dashboard-header">
         <div>
           <h1 id="dashboard-title">Admin Dashboard</h1>
-          <p>Welcome back, {firstName}! Here's what's happening with your system today.</p>
+          <p>
+            Welcome back, {firstName}! Here's what's happening with your system{' '}
+            {isToday ? 'today' : `on ${selectedDateLabel}`}.
+          </p>
         </div>
 
-        <button className="date-button" type="button">
-          <CalendarDays size={20} />
-          <span>{todayLabel} (Today)</span>
-        </button>
+        <div className="date-picker-control">
+          <button
+            className="date-button"
+            type="button"
+            onClick={handleDateButtonClick}
+            title="Select date"
+            aria-label="Select date"
+          >
+            <CalendarDays size={20} />
+            <span>{displayDateLabel}</span>
+          </button>
+          <input
+            ref={dateInputRef}
+            type="date"
+            aria-label="Select date"
+            className="dashboard-date-input"
+            value={selectedDate}
+            onChange={(event) => {
+              if (event.target.value) {
+                setSelectedDate(event.target.value);
+              }
+            }}
+          />
+          {!isToday && (
+            <button
+              type="button"
+              className="today-reset-button"
+              onClick={() => setSelectedDate(todayString)}
+              title="Reset to today"
+              aria-label="Reset date to today"
+            >
+              Today
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="stats-grid">
@@ -455,7 +533,9 @@ export function DashboardPage() {
         aria-labelledby="dashboard-attendance-title"
       >
         <div className="panel-heading">
-          <h2 id="dashboard-attendance-title">Today's Attendance</h2>
+          <h2 id="dashboard-attendance-title">
+            {isToday ? "Today's Attendance" : `Attendance (${selectedDateLabel})`}
+          </h2>
           <button className="text-button" type="button" onClick={() => navigate('/attendance')}>
             View all
           </button>
@@ -500,7 +580,9 @@ export function DashboardPage() {
               ) : (
                 <tr>
                   <td colSpan={7} className="empty-state-row">
-                    No attendance records are available for today yet.
+                    {isToday
+                      ? 'No attendance records are available for today yet.'
+                      : `No attendance records are available for ${selectedDateLabel}.`}
                   </td>
                 </tr>
               )}

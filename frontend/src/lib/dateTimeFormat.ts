@@ -29,10 +29,34 @@ function getZonedDateParts(date: Date, timeZone: string | undefined) {
   return { year: get('year'), month: get('month'), day: get('day') };
 }
 
+export function getLocalDateString(
+  date: Date = new Date(),
+  settings: DateTimeSettings = getDateTimeSettings(),
+): string {
+  const { year, month, day } = getZonedDateParts(date, resolveTimeZone(settings.time_zone));
+  return `${year}-${month}-${day}`;
+}
+
 export function formatDate(
   value: string | Date,
   settings: DateTimeSettings = getDateTimeSettings(),
 ): string {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [year, month, day] = trimmed.split('-');
+      switch (settings.date_format) {
+        case 'DD/MM/YYYY':
+          return `${day}/${month}/${year}`;
+        case 'YYYY-MM-DD':
+          return `${year}-${month}-${day}`;
+        case 'MM/DD/YYYY':
+        default:
+          return `${month}/${day}/${year}`;
+      }
+    }
+  }
+
   const date = toDate(value);
 
   if (Number.isNaN(date.getTime())) {
