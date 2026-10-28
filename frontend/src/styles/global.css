@@ -168,6 +168,56 @@ button {
   box-shadow: 0 10px 26px rgb(18 32 61 / 5%);
 }
 
+.date-picker-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.date-button {
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.date-button:hover,
+.date-button:focus-visible {
+  border-color: #3165f6;
+  outline: none;
+}
+
+.dashboard-date-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0.01;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  clip: rect(0, 0, 0, 0);
+  pointer-events: none;
+}
+
+.today-reset-button {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #3165f6;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: #edf2fe;
+  cursor: pointer;
+  border: 0;
+  transition: background 0.15s ease;
+}
+
+.today-reset-button:hover {
+  background: #dbe6fd;
+}
+
 .help-link,
 .text-button {
   color: #2449d8;

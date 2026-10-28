@@ -9,19 +9,30 @@ dashboardRouter.use(authMiddleware);
 
 dashboardRouter.get('/', async (req, res, next) => {
   try {
+    const rawDate = typeof req.query.date === 'string' ? req.query.date.trim() : null;
+    const isValidDate = rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate) && !Number.isNaN(new Date(rawDate).getTime());
+    const targetDate = isValidDate ? rawDate : null;
+
     const [metrics, recentEvents, devices, attendanceTrend, attendanceRecords] = await Promise.all([
       query(
         `SELECT
-          (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE) AS total_users,
-          (SELECT COUNT(DISTINCT user_id)::int FROM attendance_records WHERE attendance_date = CURRENT_DATE AND status <> 'Absent') AS todays_attendance,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE) AS total_access,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Granted') AS successful_attempts,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Denied') AS failed_attempts,
-          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online') AS active_devices,
-          (SELECT COUNT(*)::int FROM users WHERE created_at < CURRENT_DATE AND (is_active = TRUE OR deactivated_at >= CURRENT_DATE)) AS total_users_yesterday,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE - 1) AS total_access_yesterday,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE - 1 AND result = 'Denied') AS failed_attempts_yesterday,
-          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online' AND created_at < CURRENT_DATE) AS active_devices_yesterday`,
+          CASE 
+            WHEN COALESCE($1::date, CURRENT_DATE) = CURRENT_DATE THEN (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE)
+            ELSE (SELECT COUNT(*)::int FROM users WHERE created_at::date <= $1::date AND (is_active = TRUE OR (deactivated_at IS NOT NULL AND deactivated_at::date > $1::date)))
+          END AS total_users,
+          (SELECT COUNT(DISTINCT user_id)::int FROM attendance_records WHERE attendance_date = COALESCE($1::date, CURRENT_DATE) AND status <> 'Absent') AS todays_attendance,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = COALESCE($1::date, CURRENT_DATE)) AS total_access,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = COALESCE($1::date, CURRENT_DATE) AND result = 'Granted') AS successful_attempts,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = COALESCE($1::date, CURRENT_DATE) AND result = 'Denied') AS failed_attempts,
+          CASE
+            WHEN COALESCE($1::date, CURRENT_DATE) = CURRENT_DATE THEN (SELECT COUNT(*)::int FROM devices WHERE status = 'Online')
+            ELSE (SELECT COUNT(*)::int FROM devices WHERE status = 'Online' AND created_at::date <= $1::date)
+          END AS active_devices,
+          (SELECT COUNT(*)::int FROM users WHERE created_at::date <= (COALESCE($1::date, CURRENT_DATE) - 1) AND (is_active = TRUE OR (deactivated_at IS NOT NULL AND deactivated_at::date >= COALESCE($1::date, CURRENT_DATE)))) AS total_users_yesterday,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = (COALESCE($1::date, CURRENT_DATE) - 1)) AS total_access_yesterday,
+          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = (COALESCE($1::date, CURRENT_DATE) - 1) AND result = 'Denied') AS failed_attempts_yesterday,
+          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online' AND created_at::date <= (COALESCE($1::date, CURRENT_DATE) - 1)) AS active_devices_yesterday`,
+        [targetDate],
       ),
       query(
         `SELECT *
@@ -71,28 +82,33 @@ dashboardRouter.get('/', async (req, res, next) => {
           COUNT(DISTINCT user_id) FILTER (WHERE check_out_at IS NOT NULL)::int AS check_outs,
           COUNT(DISTINCT user_id)::int AS total
          FROM attendance_records
-         WHERE attendance_date >= CURRENT_DATE - INTERVAL '6 days'
+         WHERE attendance_date >= COALESCE($1::date, CURRENT_DATE) - INTERVAL '6 days'
+           AND attendance_date <= COALESCE($1::date, CURRENT_DATE)
          GROUP BY attendance_date
          ORDER BY attendance_date`,
+        [targetDate],
       ),
       query(
         `SELECT u.employee_id,
           ${fullNameSql('u')} AS name,
           u.department,
           u.role,
+          ar.attendance_date,
           ar.check_in_at,
           ar.check_out_at,
           COALESCE(ar.status::text, 'Present') AS status,
           COALESCE(ar.location, 'Office') AS location
          FROM attendance_records ar
          JOIN users u ON u.id = ar.user_id
-         WHERE ar.attendance_date = CURRENT_DATE
+         WHERE ar.attendance_date = COALESCE($1::date, CURRENT_DATE)
          ORDER BY ar.check_in_at DESC NULLS LAST, ${fullNameSql('u')}
          LIMIT 10`,
+        [targetDate],
       ),
     ]);
 
     res.json({
+      selectedDate: targetDate,
       metrics: metrics.rows[0],
       recentEvents: recentEvents.rows,
       devices: devices.rows,
