@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { API_BASE_URL } from '../lib/api';
@@ -3701,6 +3701,56 @@ function ReportPreviewModal({
   );
 }
 
+type ReportFieldErrors = {
+  search?: string;
+  date?: string;
+};
+
+function validateReportSearchField(value: string): string | undefined {
+  if (!value) return undefined;
+  if (!value.trim()) {
+    return 'Search cannot contain only spaces.';
+  }
+  if (value.length > 100) {
+    return 'Search query must not exceed 100 characters.';
+  }
+  if (!/^[A-Za-z0-9À-ÖØ-öø-ÿ\s._'-]+$/.test(value)) {
+    return 'Search contains invalid characters. Use letters, numbers, hyphens, and spaces only.';
+  }
+  return undefined;
+}
+
+function validateReportDateField(value: string): string | undefined {
+  if (!value) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return 'Please enter a valid date in YYYY-MM-DD format.';
+  }
+  const [yearStr, monthStr, dayStr] = value.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return 'Please enter a valid date.';
+  }
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return 'Please enter a valid date.';
+  }
+  const today = new Date();
+  const todayYear = today.getFullYear();
+  const todayMonth = today.getMonth() + 1;
+  const todayDay = today.getDate();
+  const todayFormatted = `${todayYear}-${String(todayMonth).padStart(2, '0')}-${String(todayDay).padStart(2, '0')}`;
+  if (value > todayFormatted) {
+    return 'Date cannot be in the future.';
+  }
+  return undefined;
+}
+
 export function ReportsPage() {
   const { session } = useAuth();
   const dateTimeSettings = useDateTimeSettings();
@@ -3711,6 +3761,9 @@ export function ReportsPage() {
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<ReportFieldErrors>({});
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [appliedReportFilters, setAppliedReportFilters] = useState({
     date: '',
     department: '',
@@ -3803,7 +3856,92 @@ export function ReportsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.accessToken, reportsCurrentPage, appliedReportFilters]);
 
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current);
+    };
+  }, []);
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    setSearchFilter(value);
+
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+
+    const immediateError = validateReportSearchField(value);
+    if (!immediateError) {
+      setFieldErrors((prev) => ({ ...prev, search: undefined }));
+    } else {
+      searchDebounceRef.current = setTimeout(() => {
+        setFieldErrors((prev) => ({ ...prev, search: immediateError }));
+      }, 400);
+    }
+  };
+
+  const handleSearchBlur = () => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    const error = validateReportSearchField(searchFilter);
+    setFieldErrors((prev) => ({ ...prev, search: error }));
+  };
+
+  const handleDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    const isBadInput = event.target.validity?.badInput;
+    setDateFilter(value);
+
+    if (dateDebounceRef.current) {
+      clearTimeout(dateDebounceRef.current);
+    }
+
+    const immediateError = isBadInput
+      ? 'Please enter a valid date.'
+      : validateReportDateField(value);
+    if (!immediateError) {
+      setFieldErrors((prev) => ({ ...prev, date: undefined }));
+    } else {
+      dateDebounceRef.current = setTimeout(() => {
+        setFieldErrors((prev) => ({ ...prev, date: immediateError }));
+      }, 400);
+    }
+  };
+
+  const handleDateBlur = (event: React.FocusEvent<HTMLInputElement>) => {
+    if (dateDebounceRef.current) {
+      clearTimeout(dateDebounceRef.current);
+    }
+    const isBadInput = event.target.validity?.badInput;
+    const error = isBadInput ? 'Please enter a valid date.' : validateReportDateField(dateFilter);
+    setFieldErrors((prev) => ({ ...prev, date: error }));
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      onFilterReports();
+    }
+  };
+
   const onFilterReports = () => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current);
+
+    const searchError = validateReportSearchField(searchFilter);
+    const dateError = validateReportDateField(dateFilter);
+
+    setFieldErrors({
+      search: searchError,
+      date: dateError,
+    });
+
+    if (searchError || dateError) {
+      return;
+    }
+
     setAppliedReportFilters({
       date: dateFilter,
       department: departmentFilter,
@@ -3826,6 +3964,20 @@ export function ReportsPage() {
 
   const onGenerateReport = async () => {
     if (!session?.accessToken) return;
+
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current);
+
+    const searchError = validateReportSearchField(searchFilter);
+    const dateError = validateReportDateField(dateFilter);
+
+    if (searchError || dateError) {
+      setFieldErrors({
+        search: searchError,
+        date: dateError,
+      });
+      return;
+    }
 
     setIsGenerating(true);
     setGenerateError('');
@@ -3918,7 +4070,8 @@ export function ReportsPage() {
     if (!session?.accessToken) return;
 
     const controller = new AbortController();
-    const params = dateFilter ? `?date=${dateFilter}` : '';
+    const isValidDate = !validateReportDateField(dateFilter);
+    const params = dateFilter && isValidDate ? `?date=${dateFilter}` : '';
 
     void fetch(`${API_BASE_URL}/reports/summary${params}`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
@@ -3980,57 +4133,101 @@ export function ReportsPage() {
       {activeTab === 'reports' ? (
         <>
           <div className="module-filter-row report-filter-row">
-            <select
-              aria-label="Report Type"
-              onChange={(event) => {
-                setReportType(event.target.value as ReportType);
-                setStatusFilter('');
-              }}
-              value={reportType}
-            >
-              {REPORT_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label="Date"
-              onChange={(event) => setDateFilter(event.target.value)}
-              type="date"
-              value={dateFilter}
-            />
-            <select
-              aria-label="Department"
-              onChange={(event) => setDepartmentFilter(event.target.value)}
-              value={departmentFilter}
-            >
-              <option value="">All Departments</option>
-              {departmentOptions.map((department) => (
-                <option key={department} value={department}>
-                  {department}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Status"
-              disabled={REPORT_STATUS_OPTIONS[reportType].length === 0}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              value={statusFilter}
-            >
-              <option value="">All Status</option>
-              {REPORT_STATUS_OPTIONS[reportType].map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label="Search"
-              onChange={(event) => setSearchFilter(event.target.value)}
-              placeholder="Search by name or ID..."
-              value={searchFilter}
-            />
+            <div className="report-filter-field">
+              <select
+                aria-label="Report Type"
+                id="report-type-filter"
+                onChange={(event) => {
+                  setReportType(event.target.value as ReportType);
+                  setStatusFilter('');
+                }}
+                value={reportType}
+              >
+                {REPORT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="report-filter-field">
+              <input
+                aria-describedby={fieldErrors.date ? 'report-date-error' : undefined}
+                aria-invalid={Boolean(fieldErrors.date)}
+                aria-label="Date"
+                id="report-date-filter"
+                onBlur={handleDateBlur}
+                onChange={handleDateChange}
+                onKeyDown={handleKeyDown}
+                type="date"
+                value={dateFilter}
+              />
+              {fieldErrors.date ? (
+                <span
+                  className="field-error"
+                  id="report-date-error"
+                  role="alert"
+                  title={fieldErrors.date}
+                >
+                  {fieldErrors.date}
+                </span>
+              ) : null}
+            </div>
+            <div className="report-filter-field">
+              <select
+                aria-label="Department"
+                id="report-department-filter"
+                onChange={(event) => setDepartmentFilter(event.target.value)}
+                value={departmentFilter}
+              >
+                <option value="">All Departments</option>
+                {departmentOptions.map((department) => (
+                  <option key={department} value={department}>
+                    {department}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="report-filter-field">
+              <select
+                aria-label="Status"
+                disabled={REPORT_STATUS_OPTIONS[reportType].length === 0}
+                id="report-status-filter"
+                onChange={(event) => setStatusFilter(event.target.value)}
+                value={statusFilter}
+              >
+                <option value="">All Status</option>
+                {REPORT_STATUS_OPTIONS[reportType].map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="report-filter-field">
+              <input
+                aria-describedby={fieldErrors.search ? 'report-search-error' : undefined}
+                aria-invalid={Boolean(fieldErrors.search)}
+                aria-label="Search"
+                id="report-search-filter"
+                onBlur={handleSearchBlur}
+                onChange={handleSearchChange}
+                onKeyDown={handleKeyDown}
+                placeholder="Search by name or ID..."
+                type="search"
+                value={searchFilter}
+              />
+              {fieldErrors.search ? (
+                <span
+                  className="field-error"
+                  id="report-search-error"
+                  role="alert"
+                  title={fieldErrors.search}
+                >
+                  {fieldErrors.search}
+                </span>
+              ) : null}
+            </div>
             <button className="filter-button" onClick={onFilterReports} type="button">
               Filter
               <Filter size={16} />
