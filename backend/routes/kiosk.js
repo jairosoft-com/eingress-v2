@@ -134,19 +134,34 @@ async function processKioskScanUnsafe(req, res) {
     const attendanceResult = await query(
       `INSERT INTO attendance_records
          (user_id, attendance_date, check_in_at, check_out_at, status, location, employee_id, full_name, department, role)
-       SELECT $1, CURRENT_DATE, MIN(access_time), MAX(access_time),
+       SELECT $1, attendance_day, MIN(access_time), MAX(access_time),
          (CASE
-           WHEN (MIN(access_time) AT TIME ZONE 'Asia/Manila')::time > TIME '08:00:00' THEN 'Late'
+           WHEN (MIN(access_time) AT TIME ZONE time_zone)::time > TIME '08:00:00' THEN 'Late'
            ELSE 'Present'
          END)::attendance_status,
          'Kiosk', $2, $3, $4, $5
-       FROM access_logs
-       WHERE user_id = $1 AND access_time::date = CURRENT_DATE AND result = 'Granted'
-         AND authentication_method = 'Fingerprint'
+       FROM (
+         SELECT al.access_time, settings.time_zone,
+           (NOW() AT TIME ZONE settings.time_zone)::date AS attendance_day
+         FROM access_logs al
+         CROSS JOIN (
+           SELECT COALESCE(
+             (SELECT NULLIF(time_zone, '') FROM system_settings ORDER BY id LIMIT 1),
+             'Asia/Manila'
+           ) AS time_zone
+         ) settings
+         WHERE al.user_id = $1
+           AND (al.access_time AT TIME ZONE settings.time_zone)::date =
+             (NOW() AT TIME ZONE settings.time_zone)::date
+           AND al.result = 'Granted'
+           AND al.authentication_method = 'Fingerprint'
+       ) daily_access
+       GROUP BY attendance_day, time_zone
        ON CONFLICT (user_id, attendance_date)
        DO UPDATE SET
          check_in_at = LEAST(attendance_records.check_in_at, EXCLUDED.check_in_at),
          check_out_at = GREATEST(attendance_records.check_out_at, EXCLUDED.check_out_at),
+         status = EXCLUDED.status,
          updated_at = NOW()
        RETURNING (xmax = 0) AS just_checked_in`,
       [user.id, user.employee_id, user.full_name, user.department, user.role],
