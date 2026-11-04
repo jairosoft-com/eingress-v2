@@ -3713,7 +3713,7 @@ function validateReportSearchField(value: string): string | undefined {
   }
 
   if (/\d/.test(value)) {
-    return /^\p{L}{3}\d{4}$/u.test(value)
+    return /^[A-Z]{3}\d{4}$/.test(value)
       ? undefined
       : 'Invalid ID or name format. (e.g. "EMP1234" or "John Doe").';
   }
