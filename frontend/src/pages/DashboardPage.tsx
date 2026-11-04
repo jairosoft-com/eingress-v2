@@ -175,7 +175,8 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const dateTimeSettings = useDateTimeSettings();
   const todayString = getLocalDateString(new Date(), dateTimeSettings);
-  const [selectedDate, setSelectedDate] = useState<string>(todayString);
+  const [customDate, setCustomDate] = useState<string | null>(null);
+  const selectedDate = customDate ?? todayString;
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
@@ -407,7 +408,7 @@ export function DashboardPage() {
             value={selectedDate}
             onChange={(event) => {
               if (event.target.value) {
-                setSelectedDate(event.target.value);
+                setCustomDate(event.target.value === todayString ? null : event.target.value);
               }
             }}
           />
@@ -415,7 +416,7 @@ export function DashboardPage() {
             <button
               type="button"
               className="today-reset-button"
-              onClick={() => setSelectedDate(todayString)}
+              onClick={() => setCustomDate(null)}
               title="Reset to today"
               aria-label="Reset date to today"
             >
