@@ -111,6 +111,17 @@ export function formatWeekdayShort(
   value: string | Date,
   settings: DateTimeSettings = getDateTimeSettings(),
 ): string {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    const [year, month, day] = value.trim().split('-').map(Number);
+    const utcMidday = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC',
+      weekday: 'short',
+    })
+      .format(utcMidday)
+      .toUpperCase();
+  }
+
   const date = toDate(value);
 
   if (Number.isNaN(date.getTime())) {
