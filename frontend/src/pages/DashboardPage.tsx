@@ -403,12 +403,14 @@ export function DashboardPage() {
           <input
             ref={dateInputRef}
             type="date"
+            max={todayString}
             aria-label="Select date"
             className="dashboard-date-input"
             value={selectedDate}
             onChange={(event) => {
-              if (event.target.value) {
-                setCustomDate(event.target.value === todayString ? null : event.target.value);
+              const val = event.target.value;
+              if (val && val <= todayString) {
+                setCustomDate(val === todayString ? null : val);
               }
             }}
           />
