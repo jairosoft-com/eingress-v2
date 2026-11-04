@@ -3711,12 +3711,17 @@ function validateReportSearchField(value: string): string | undefined {
   if (!value.trim()) {
     return 'Search cannot contain only spaces.';
   }
-  if (value.length > 100) {
-    return 'Search query must not exceed 100 characters.';
+
+  if (/\d/.test(value)) {
+    return /^\p{L}{3}\d{4}$/u.test(value)
+      ? undefined
+      : 'Invalid ID or name format. (e.g. "EMP1234" or "John Doe").';
   }
-  if (!/^[A-Za-z0-9À-ÖØ-öø-ÿ\s._'-]+$/.test(value)) {
-    return 'Search contains invalid characters. Use letters, numbers, hyphens, and spaces only.';
+
+  if (!/^[\p{L} ]+$/u.test(value)) {
+    return 'Name may contain letters and spaces only.';
   }
+
   return undefined;
 }
 
@@ -4208,12 +4213,12 @@ export function ReportsPage() {
               <input
                 aria-describedby={fieldErrors.search ? 'report-search-error' : undefined}
                 aria-invalid={Boolean(fieldErrors.search)}
-                aria-label="Search"
+                aria-label="Search by name or ID"
                 id="report-search-filter"
                 onBlur={handleSearchBlur}
                 onChange={handleSearchChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Search by name or ID..."
+                placeholder="Name or ID (e.g., EMP1234)..."
                 type="search"
                 value={searchFilter}
               />
