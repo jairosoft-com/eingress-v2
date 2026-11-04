@@ -40,7 +40,7 @@ export function getDateStringInTimeZone(
     timeZone: resolved,
     year: "numeric",
     month: "2-digit",
-    day: "2-digit",
+    day: "2-digit"
   }).formatToParts(date);
   const get = (type) => parts.find((part) => part.type === type)?.value ?? "";
 
