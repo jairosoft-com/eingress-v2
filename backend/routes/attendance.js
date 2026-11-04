@@ -1,21 +1,23 @@
-import express from 'express';
+import express from "express";
 
-import { query } from '../db.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { fullNameSql } from '../lib/personName.js';
+import { query } from "../db.js";
+import { authMiddleware } from "../middleware/auth.js";
+import { fullNameSql } from "../lib/personName.js";
+import { getDateStringInTimeZone, getSystemTimeZone } from "../lib/timezone.js";
 
 export const attendanceRouter = express.Router();
 attendanceRouter.use(authMiddleware);
 
-attendanceRouter.get('/', async (req, res, next) => {
+attendanceRouter.get("/", async (req, res, next) => {
   try {
-    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const timeZone = await getSystemTimeZone();
+    const date = req.query.date || getDateStringInTimeZone(timeZone);
     const department = req.query.department;
     const status = req.query.status;
     const search = req.query.search;
 
     const params = [date];
-    const where = ['ar.attendance_date = $1'];
+    const where = ["ar.attendance_date = $1"];
 
     if (department) {
       params.push(department);
@@ -29,16 +31,18 @@ attendanceRouter.get('/', async (req, res, next) => {
 
     if (search) {
       params.push(`%${search}%`);
-      where.push(`(${fullNameSql('u')} ILIKE $${params.length} OR u.employee_id ILIKE $${params.length})`);
+      where.push(
+        `(${fullNameSql("u")} ILIKE $${params.length} OR u.employee_id ILIKE $${params.length})`,
+      );
     }
 
     const result = await query(
-      `SELECT ar.id, ar.attendance_date, ar.check_in_at, ar.check_out_at, ar.status, ar.location,
-        u.employee_id, ${fullNameSql('u')} AS full_name, u.department, u.role
+      `SELECT ar.id, ar.attendance_date::text AS attendance_date, ar.check_in_at, ar.check_out_at, ar.status, ar.location,
+        u.employee_id, ${fullNameSql("u")} AS full_name, u.department, u.role
        FROM attendance_records ar
        JOIN users u ON u.id = ar.user_id
-       WHERE ${where.join(' AND ')}
-       ORDER BY ar.attendance_date DESC, ar.check_in_at DESC NULLS LAST, ${fullNameSql('u')}`,
+       WHERE ${where.join(" AND ")}
+       ORDER BY ar.attendance_date DESC, ar.check_in_at DESC NULLS LAST, ${fullNameSql("u")}`,
       params,
     );
 
@@ -48,9 +52,10 @@ attendanceRouter.get('/', async (req, res, next) => {
   }
 });
 
-attendanceRouter.get('/summary', async (req, res, next) => {
+attendanceRouter.get("/summary", async (req, res, next) => {
   try {
-    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const timeZone = await getSystemTimeZone();
+    const date = req.query.date || getDateStringInTimeZone(timeZone);
     const result = await query(
       `SELECT
         COUNT(*)::int AS total_records,

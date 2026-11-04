@@ -1,16 +1,19 @@
 import express from 'express';
-import { query } from '../db.js';
+import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { broadcastActivityEvent } from '../activityEvents.js';
+import { broadcastMessage } from '../ws.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
+import { checkDepartmentAssignable } from '../lib/departments.js';
+import { checkRoleAssignable } from '../lib/roles.js';
+import { generateUserId, USER_ID_LOCK_KEY } from '../lib/userIds.js';
+
 
 export const usersRouter = express.Router();
 
-// name_needs_review: legacy flag from the ticket 211793 migration; always false once first/last are NOT NULL.
 const USER_FIELDS = `id, employee_id, ${fullNameSql()} AS full_name, first_name, last_name,
-  (first_name IS NULL OR last_name IS NULL) AS name_needs_review,
   email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date, created_at, updated_at`;
 usersRouter.use(authMiddleware);
 
@@ -68,12 +71,22 @@ export function getDuplicateUserMessage(error) {
 }
 
 usersRouter.get('/', async (req, res) => {
+  const role = req.query.role ? String(req.query.role).trim() : null;
+  const where = ['COALESCE(is_archived, FALSE) = FALSE'];
+  const params = [];
+
+  if (role) {
+    params.push(role);
+    where.push(`LOWER(TRIM(role)) = LOWER(TRIM($${params.length}))`);
+  }
+
   try {
     const result = await query(
       `SELECT ${USER_FIELDS}
        FROM users
-       WHERE COALESCE(is_archived, FALSE) = FALSE
-       ORDER BY full_name`,
+       WHERE ${where.join(' AND ')}
+       ORDER BY LOWER(last_name), LOWER(first_name), employee_id`,
+      params,
     );
     res.json(result.rows);
   } catch (error) {
@@ -81,12 +94,32 @@ usersRouter.get('/', async (req, res) => {
   }
 });
 
+// Preview of the User ID a new user in this role would get (display only; the ID is assigned when the user is saved).
+usersRouter.get('/next-id', async (req, res) => {
+  try {
+    const roleCheck = await checkRoleAssignable(req.query.role);
+
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+    }
+
+    if (!roleCheck.userIdPrefix) {
+      const message = `Role "${roleCheck.name}" has no User ID prefix. Set one in Role Management first.`;
+      return res.status(400).json({ error: message, errors: { role: message } });
+    }
+
+    res.json({ prefix: roleCheck.userIdPrefix, userId: await generateUserId(pool, roleCheck.userIdPrefix) });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 usersRouter.post('/', async (req, res) => {
-  const { employeeId, email, phone, department, role, fingerprintId, rfidUid, isActive = true } = req.body;
+  const { email, phone, department, role, fingerprintId, rfidUid, isActive = true } = req.body;
   const { firstName, lastName, errors } = validateNameParts(req.body);
 
-  if (!employeeId) {
-    errors.employeeId = 'Employee ID is required.';
+  if (!role || !String(role).trim()) {
+    errors.role = 'Role is required.';
   }
 
   if (Object.keys(errors).length > 0) {
@@ -94,13 +127,44 @@ usersRouter.post('/', async (req, res) => {
   }
 
   try {
-    const expirationDate = getDefaultExpirationForRole(role);
-    const result = await query(
-      `INSERT INTO users (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
-       RETURNING ${USER_FIELDS}`,
-      [employeeId, firstName, lastName, email || null, phone || null, department || null, role || 'Employee', fingerprintId || null, rfidUid || null, isActive, expirationDate],
-    );
+    const departmentCheck = await checkDepartmentAssignable(department);
+    const roleCheck = await checkRoleAssignable(role);
+
+    if (departmentCheck.error) {
+      return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
+    }
+
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+    }
+
+    if (!roleCheck.userIdPrefix) {
+      const message = `Role "${roleCheck.name}" has no User ID prefix. Set one in Role Management first.`;
+      return res.status(400).json({ error: message, errors: { role: message } });
+    }
+
+    const expirationDate = getDefaultExpirationForRole(roleCheck.name);
+    const client = await pool.connect();
+    let result;
+
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock($1)', [USER_ID_LOCK_KEY]);
+      const employeeId = await generateUserId(client, roleCheck.userIdPrefix);
+      result = await client.query(
+        `INSERT INTO users (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
+         RETURNING ${USER_FIELDS}`,
+        [employeeId, firstName, lastName, email || null, phone || null, departmentCheck.name || null, roleCheck.name, fingerprintId || null, rfidUid || null, isActive, expirationDate],
+      );
+      await client.query('COMMIT');
+    } catch (insertError) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw insertError;
+    } finally {
+      client.release();
+    }
+
     const user = result.rows[0];
     await query(
       `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
@@ -121,6 +185,14 @@ usersRouter.post('/', async (req, res) => {
       `${user.full_name} (${user.employee_id}) was added successfully.`,
       'success',
     );
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'created', userId: user.id, user },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_assigned', role: user.role },
+    });
     res.status(201).json(result.rows[0]);
   } catch (error) {
     const duplicateError = getDuplicateUserMessage(error);
@@ -178,22 +250,80 @@ usersRouter.patch('/:id', async (req, res) => {
       }
     }
 
+    const departmentProvided = req.body.department !== undefined;
+    let departmentValue = departmentProvided ? (department ? String(department).trim() : null) : undefined;
+
+    if (departmentProvided && departmentValue !== null && departmentValue !== '') {
+      const currentUser = await query(`SELECT department FROM users WHERE id = $1`, [id]);
+      const currentDepartment = String(currentUser.rows[0]?.department ?? '').trim().toLowerCase();
+
+      if (currentUser.rowCount > 0 && currentDepartment !== departmentValue.replace(/\s+/g, ' ').toLowerCase()) {
+        const departmentCheck = await checkDepartmentAssignable(departmentValue);
+
+        if (departmentCheck.error) {
+          return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
+        }
+
+        departmentValue = departmentCheck.name;
+      } else if (currentUser.rowCount > 0) {
+        departmentValue = currentUser.rows[0]?.department ?? departmentValue;
+      }
+    }
+
+    const roleProvided = req.body.role !== undefined;
+    let roleValue = roleProvided ? (role ? String(role).trim() : '') : undefined;
+
+    if (roleProvided) {
+      if (!roleValue) {
+        return res.status(400).json({ error: 'Role is required.', errors: { role: 'Role is required.' } });
+      }
+
+      const currentUser = await query(`SELECT role FROM users WHERE id = $1`, [id]);
+      const currentRole = String(currentUser.rows[0]?.role ?? '').trim().toLowerCase();
+
+      if (currentUser.rowCount > 0 && currentRole !== roleValue.replace(/\s+/g, ' ').toLowerCase()) {
+        const roleCheck = await checkRoleAssignable(roleValue);
+
+        if (roleCheck.error) {
+          return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+        }
+
+        roleValue = roleCheck.name;
+      } else if (currentUser.rowCount > 0) {
+        roleValue = currentUser.rows[0]?.role ?? roleValue;
+      }
+    }
+
     const result = await query(
       `UPDATE users
        SET first_name = COALESCE($1, first_name),
          last_name = COALESCE($2, last_name),
          email = COALESCE($3, email),
          phone = COALESCE($4, phone),
-         department = COALESCE($5, department),
-         role = COALESCE($6, role),
+         department = CASE WHEN $11 THEN $5 ELSE department END,
+         role = CASE WHEN $12 THEN $6 ELSE role END,
          fingerprint_id = COALESCE($7, fingerprint_id),
          rfid_uid = COALESCE($8, rfid_uid),
          is_active = COALESCE($9, is_active),
          is_archived = COALESCE($10, is_archived),
          updated_at = NOW()
-       WHERE id = $11
+       WHERE id = $13
        RETURNING ${USER_FIELDS}`,
-      [namesProvided ? firstName : null, namesProvided ? lastName : null, email ?? null, phone ?? null, department ?? null, role ?? null, fingerprintId ?? null, rfidUid ?? null, isActive ?? null, isArchived ?? null, id],
+      [
+        namesProvided ? firstName : null,
+        namesProvided ? lastName : null,
+        email ?? null,
+        phone ?? null,
+        departmentValue ?? null,
+        roleValue ?? null,
+        fingerprintId ?? null,
+        rfidUid ?? null,
+        isActive ?? null,
+        isArchived ?? null,
+        departmentProvided,
+        roleProvided,
+        id,
+      ],
     );
 
     if (result.rowCount === 0) {
@@ -220,6 +350,14 @@ usersRouter.patch('/:id', async (req, res) => {
       `${user.full_name} (${user.employee_id}) details were updated successfully.`,
       'success',
     );
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'updated', userId: user.id, user },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_updated', role: user.role },
+    });
     res.json(result.rows[0]);
   } catch (error) {
     const duplicateError = getDuplicateUserMessage(error);
@@ -273,6 +411,14 @@ usersRouter.patch('/:id/status', async (req, res) => {
       status: isActive ? 'Success' : 'Failed',
       time: user.updated_at,
     });
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'status_changed', userId: user.id, user },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_status_changed', role: user.role },
+    });
     res.json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
@@ -316,6 +462,14 @@ usersRouter.patch('/:id/archive', async (req, res) => {
       device: 'Admin Portal',
       status: isArchived ? 'Failed' : 'Success',
       time: user.updated_at,
+    });
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'archived', userId: user.id, user },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_archived', role: user.role },
     });
     res.json(result.rows[0]);
   } catch (error) {

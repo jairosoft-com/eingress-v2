@@ -17,11 +17,12 @@ import {
   Power,
   Search,
   TrendingUp,
+  Users,
   UsersRound,
   X,
 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { API_BASE_URL } from '../lib/api';
@@ -104,7 +105,6 @@ type UserRecord = {
   is_active: boolean;
   is_archived?: boolean;
   last_name?: string | null;
-  name_needs_review?: boolean;
   phone: string | null;
   rfid_uid: string | null;
   role: string | null;
@@ -123,7 +123,6 @@ type UserDisplayRow = {
   expirationDate: string | null;
   id: number;
   name: string;
-  needsReview: boolean;
   online: boolean;
   rfidUid: string;
   role: string;
@@ -176,6 +175,24 @@ type AdminSettingsProfile = {
   rfidUid: string;
   role: string;
 };
+
+type Department = { id: string; name: string; is_active: boolean; user_count: number };
+type DepartmentAction =
+  | { kind: 'add'; name: string }
+  | { kind: 'rename'; id: string; name: string }
+  | { kind: 'status'; id: string; isActive: boolean; confirm: boolean };
+
+type Role = {
+  id: string;
+  name: string;
+  is_active: boolean;
+  user_count: number;
+  user_id_prefix: string | null;
+};
+type RoleAction =
+  | { kind: 'add'; name: string; userIdPrefix: string }
+  | { kind: 'rename'; id: string; name: string; userIdPrefix: string }
+  | { kind: 'status'; id: string; isActive: boolean; confirm: boolean };
 
 function isAdminSettingsProfile(value: unknown): value is AdminSettingsProfile {
   if (!value || typeof value !== 'object') {
@@ -242,13 +259,15 @@ type UserEditForm = {
   firstName: string;
   lastName: string;
   rfidUid: string;
+  department: string;
   role: string;
   email: string;
   fingerprintId: string;
 };
 
 type UserFormFieldErrors = {
-  employeeId?: string;
+  department?: string;
+  role?: string;
   firstName?: string;
   lastName?: string;
 };
@@ -265,7 +284,6 @@ function validateNamePart(label: string, value: string): string | undefined {
 }
 
 type CreateUserForm = {
-  employeeId: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -277,8 +295,6 @@ type CreateUserForm = {
 };
 
 type CreateUserErrors = {
-  employeeId?: string;
-  fullName?: string;
   email?: string;
   phone?: string;
 };
@@ -704,21 +720,29 @@ function getAvatarTone(index: number) {
   return tones[index % tones.length];
 }
 
-const USER_ROLE_OPTIONS = ['Employee', 'Student', 'Staff', 'Intern'];
-const USER_DEPARTMENT_OPTIONS = [
-  'IT Department',
-  'HR Department',
-  'Operations',
-  'Admin',
-  'Engineering',
-];
-
 function maskRfid(value: string) {
   if (!value || value === '-') {
     return '-';
   }
 
   return '••••••••';
+}
+
+function compareUsersBySurname(userA: UserRecord, userB: UserRecord) {
+  const hasNameA = Boolean(userA.last_name && userA.first_name);
+  const hasNameB = Boolean(userB.last_name && userB.first_name);
+
+  if (hasNameA !== hasNameB) {
+    return hasNameA ? -1 : 1;
+  }
+
+  const options = { sensitivity: 'base' } as const;
+
+  return (
+    (userA.last_name ?? '').localeCompare(userB.last_name ?? '', undefined, options) ||
+    (userA.first_name ?? '').localeCompare(userB.first_name ?? '', undefined, options) ||
+    userA.employee_id.localeCompare(userB.employee_id, undefined, options)
+  );
 }
 
 function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
@@ -737,8 +761,8 @@ function toUserDisplayRow(user: UserRecord, index: number): UserDisplayRow {
     employeeId: user.employee_id,
     expirationDate,
     id: user.id,
-    name: user.full_name,
-    needsReview: Boolean(user.name_needs_review),
+    name:
+      user.last_name && user.first_name ? `${user.last_name}, ${user.first_name}` : user.full_name,
     online: user.is_active,
     rfidUid: user.rfid_uid || '-',
     role: user.role || 'Employee',
@@ -792,6 +816,10 @@ export function UserManagementPage() {
   const dateTimeSettings = useDateTimeSettings();
   const [now, setNow] = useState(() => Date.now());
   const [users, setUsers] = useState<UserRecord[]>([]);
+  const [departments, setDepartments] = useState<
+    { id: number; name: string; is_active: boolean }[]
+  >([]);
+  const [roles, setRoles] = useState<{ id: number; name: string; is_active: boolean }[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [usersErrorMessage, setUsersErrorMessage] = useState('');
   const [userSearch, setUserSearch] = useState('');
@@ -804,7 +832,8 @@ export function UserManagementPage() {
     firstName: '',
     lastName: '',
     rfidUid: '',
-    role: 'Employee',
+    department: '',
+    role: '',
     email: '',
     fingerprintId: '',
   });
@@ -813,17 +842,20 @@ export function UserManagementPage() {
   const [editErrors, setEditErrors] = useState<CreateUserErrors>({});
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateUserForm>({
-    employeeId: '',
     firstName: '',
     lastName: '',
     email: '',
     phone: '',
     department: '',
-    role: 'Employee',
+    role: '',
     rfidUid: '',
     fingerprintId: '',
   });
   const [createFormError, setCreateFormError] = useState('');
+  const [nextUserIdPreview, setNextUserIdPreview] = useState<{
+    role: string;
+    userId: string;
+  } | null>(null);
   const [createFieldErrors, setCreateFieldErrors] = useState<UserFormFieldErrors>({});
   const [createErrors, setCreateErrors] = useState<CreateUserErrors>({});
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -892,6 +924,130 @@ export function UserManagementPage() {
     };
   }, [session?.accessToken]);
 
+  async function refreshOrganizationOptions() {
+    try {
+      const headers = session?.accessToken
+        ? { Authorization: `Bearer ${session.accessToken}` }
+        : undefined;
+
+      const [deptRes, rolesRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/departments`, { headers }),
+        fetch(`${API_BASE_URL}/roles`, { headers }),
+      ]);
+
+      if (deptRes.ok) {
+        const deptData = (await deptRes.json().catch(() => null)) as
+          | { id: number; name: string; is_active: boolean }[]
+          | null;
+        if (Array.isArray(deptData)) {
+          setDepartments(deptData);
+        }
+      } else {
+        const activeDeptRes = await fetch(`${API_BASE_URL}/departments/active`);
+        if (activeDeptRes.ok) {
+          const activeDeptData = (await activeDeptRes.json().catch(() => null)) as
+            | { id: number; name: string }[]
+            | null;
+          if (Array.isArray(activeDeptData)) {
+            setDepartments(
+              activeDeptData.map((d) => ({ id: d.id, name: d.name, is_active: true })),
+            );
+          }
+        }
+      }
+
+      if (rolesRes.ok) {
+        const rolesData = (await rolesRes.json().catch(() => null)) as
+          | { id: number; name: string; is_active: boolean }[]
+          | null;
+        if (Array.isArray(rolesData)) {
+          setRoles(rolesData);
+        }
+      } else {
+        const activeRolesRes = await fetch(`${API_BASE_URL}/roles/active`);
+        if (activeRolesRes.ok) {
+          const activeRolesData = (await activeRolesRes.json().catch(() => null)) as
+            | { id: number; name: string }[]
+            | null;
+          if (Array.isArray(activeRolesData)) {
+            setRoles(activeRolesData.map((r) => ({ id: r.id, name: r.name, is_active: true })));
+          }
+        }
+      }
+    } catch {
+      // Leave existing options if fetch fails
+    }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadOrgOptions() {
+      try {
+        const headers = session?.accessToken
+          ? { Authorization: `Bearer ${session.accessToken}` }
+          : undefined;
+
+        const [deptRes, rolesRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/departments`, { headers, signal: controller.signal }),
+          fetch(`${API_BASE_URL}/roles`, { headers, signal: controller.signal }),
+        ]);
+
+        if (deptRes.ok) {
+          const deptData = (await deptRes.json().catch(() => null)) as
+            | { id: number; name: string; is_active: boolean }[]
+            | null;
+          if (Array.isArray(deptData)) {
+            setDepartments(deptData);
+          }
+        } else {
+          const activeDeptRes = await fetch(`${API_BASE_URL}/departments/active`, {
+            signal: controller.signal,
+          });
+          if (activeDeptRes.ok) {
+            const activeDeptData = (await activeDeptRes.json().catch(() => null)) as
+              | { id: number; name: string }[]
+              | null;
+            if (Array.isArray(activeDeptData)) {
+              setDepartments(
+                activeDeptData.map((d) => ({ id: d.id, name: d.name, is_active: true })),
+              );
+            }
+          }
+        }
+
+        if (rolesRes.ok) {
+          const rolesData = (await rolesRes.json().catch(() => null)) as
+            | { id: number; name: string; is_active: boolean }[]
+            | null;
+          if (Array.isArray(rolesData)) {
+            setRoles(rolesData);
+          }
+        } else {
+          const activeRolesRes = await fetch(`${API_BASE_URL}/roles/active`, {
+            signal: controller.signal,
+          });
+          if (activeRolesRes.ok) {
+            const activeRolesData = (await activeRolesRes.json().catch(() => null)) as
+              | { id: number; name: string }[]
+              | null;
+            if (Array.isArray(activeRolesData)) {
+              setRoles(activeRolesData.map((r) => ({ id: r.id, name: r.name, is_active: true })));
+            }
+          }
+        }
+      } catch {
+        // Leave existing options if fetch fails
+      }
+    }
+
+    void loadOrgOptions();
+
+    return () => {
+      controller.abort();
+    };
+  }, [session?.accessToken]);
+
   useEffect(() => {
     if (!isRfidScannerOpen) {
       return;
@@ -942,7 +1098,11 @@ export function UserManagementPage() {
     let reconnectTimeoutId: number | null = null;
 
     function captureRfidUid(rfidUid: string) {
-      setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+      if (editingUser) {
+        setEditForm((currentForm) => ({ ...currentForm, rfidUid }));
+      } else if (isCreateUserOpen) {
+        setCreateForm((currentForm) => ({ ...currentForm, rfidUid }));
+      }
       setRfidScanInput('');
       setIsRfidScannerOpen(false);
     }
@@ -986,7 +1146,7 @@ export function UserManagementPage() {
 
       socket?.close();
     };
-  }, [isRfidScannerOpen]);
+  }, [isRfidScannerOpen, editingUser, isCreateUserOpen]);
 
   async function updateUserStatus(id: number, isActive: boolean) {
     if (!session?.accessToken) {
@@ -1025,6 +1185,8 @@ export function UserManagementPage() {
           user.id === id ? { ...user, is_active: isActive, is_archived: false } : user,
         ),
       );
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      window.dispatchEvent(new CustomEvent('roles:changed'));
       window.alert(isActive ? 'User reactivated successfully.' : 'User deactivated successfully.');
     } catch (error) {
       setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to update user.');
@@ -1070,6 +1232,8 @@ export function UserManagementPage() {
           user.id === id ? { ...user, is_active: false, is_archived: true } : user,
         ),
       );
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      window.dispatchEvent(new CustomEvent('roles:changed'));
       window.alert('User archived successfully.');
     } catch (error) {
       setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to archive user.');
@@ -1085,12 +1249,14 @@ export function UserManagementPage() {
       return;
     }
 
+    void refreshOrganizationOptions();
     setEditingUser(user);
     setEditForm({
       firstName: user.first_name || '',
       lastName: user.last_name || '',
       rfidUid: user.rfid_uid || '',
-      role: user.role || 'Employee',
+      department: user.department || '',
+      role: user.role || '',
       email: user.email || '',
       fingerprintId: user.fingerprint_id || '',
     });
@@ -1183,23 +1349,42 @@ export function UserManagementPage() {
     const firstName = editForm.firstName.trim();
     const lastName = editForm.lastName.trim();
     const rfidUid = editForm.rfidUid.trim();
+    const department = editForm.department.trim();
     const role = editForm.role.trim();
     const email = editForm.email.trim();
     const fingerprintId = editForm.fingerprintId.trim();
 
-    const nameErrors: UserFormFieldErrors = {
+    const fieldErrors: UserFormFieldErrors = {
       firstName: validateNamePart('First name', firstName),
       lastName: validateNamePart('Last name', lastName),
     };
+    const emailError = validateCreateUserField('email', email);
 
-    if (nameErrors.firstName || nameErrors.lastName) {
-      setEditFieldErrors(nameErrors);
-      setEditFormError('');
-      return;
+    if (!role) {
+      fieldErrors.role = 'Role is required.';
+    } else if (role !== (editingUser.role || '').trim() && !activeRoles.includes(role)) {
+      fieldErrors.role = 'Selected role is inactive or unavailable.';
     }
 
-    if (!email) {
-      setEditFormError('Email is required.');
+    if (
+      department &&
+      department !== (editingUser.department || '').trim() &&
+      !activeDepartments.includes(department)
+    ) {
+      fieldErrors.department = 'Selected department is inactive or unavailable.';
+    }
+
+    setEditFieldErrors(fieldErrors);
+    setEditErrors({ email: emailError });
+
+    if (
+      fieldErrors.firstName ||
+      fieldErrors.lastName ||
+      fieldErrors.role ||
+      fieldErrors.department ||
+      emailError
+    ) {
+      setEditFormError('');
       return;
     }
 
@@ -1219,6 +1404,7 @@ export function UserManagementPage() {
         body: JSON.stringify({
           firstName,
           lastName,
+          department: department || null,
           role,
           email,
           rfidUid: rfidUid || null,
@@ -1235,7 +1421,10 @@ export function UserManagementPage() {
         !response.ok &&
         data &&
         'errors' in data &&
-        (data.errors?.firstName || data.errors?.lastName)
+        (data.errors?.firstName ||
+          data.errors?.lastName ||
+          data.errors?.department ||
+          data.errors?.role)
       ) {
         setEditFieldErrors(data.errors);
         return;
@@ -1254,6 +1443,8 @@ export function UserManagementPage() {
       );
       setEditingUser(null);
       setEditErrors({});
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      window.dispatchEvent(new CustomEvent('roles:changed'));
       window.alert('User details saved successfully.');
     } catch (error) {
       setEditFormError(error instanceof Error ? error.message : 'Unable to save user details.');
@@ -1262,13 +1453,50 @@ export function UserManagementPage() {
     }
   }
 
+  useEffect(() => {
+    if (!isCreateUserOpen || !createForm.role || !session?.accessToken) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const role = createForm.role;
+
+    void fetch(`${API_BASE_URL}/users/next-id?role=${encodeURIComponent(role)}`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+          userId?: string;
+        } | null;
+
+        if (response.ok && data?.userId) {
+          setNextUserIdPreview({ role, userId: data.userId });
+          setCreateFieldErrors((currentErrors) => ({ ...currentErrors, role: undefined }));
+        } else {
+          setNextUserIdPreview(null);
+          setCreateFieldErrors((currentErrors) => ({
+            ...currentErrors,
+            role: data?.error ?? 'Unable to generate a User ID for this role.',
+          }));
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+
+        setNextUserIdPreview(null);
+      });
+
+    return () => controller.abort();
+  }, [isCreateUserOpen, createForm.role, session?.accessToken]);
+
   async function submitCreateUserDetails() {
     if (!session?.accessToken) {
       setCreateFormError('Please sign in again to create users.');
       return;
     }
 
-    const employeeId = createForm.employeeId.trim();
     const firstName = createForm.firstName.trim();
     const lastName = createForm.lastName.trim();
     const email = createForm.email.trim();
@@ -1279,13 +1507,36 @@ export function UserManagementPage() {
     const fingerprintId = createForm.fingerprintId.trim();
 
     const fieldErrors: UserFormFieldErrors = {
-      employeeId: employeeId ? undefined : 'Employee ID is required.',
       firstName: validateNamePart('First name', firstName),
       lastName: validateNamePart('Last name', lastName),
     };
+    const formErrors: CreateUserErrors = {
+      email: validateCreateUserField('email', email),
+      phone: validateCreateUserField('phone', phone),
+    };
 
-    if (fieldErrors.employeeId || fieldErrors.firstName || fieldErrors.lastName) {
-      setCreateFieldErrors(fieldErrors);
+    if (!role) {
+      fieldErrors.role =
+        activeRoles.length === 0 ? 'No active roles available.' : 'Role is required.';
+    } else if (!activeRoles.includes(role)) {
+      fieldErrors.role = 'Selected role is inactive or unavailable.';
+    }
+
+    if (department && !activeDepartments.includes(department)) {
+      fieldErrors.department = 'Selected department is inactive or unavailable.';
+    }
+
+    setCreateFieldErrors(fieldErrors);
+    setCreateErrors(formErrors);
+
+    if (
+      formErrors.email ||
+      formErrors.phone ||
+      fieldErrors.firstName ||
+      fieldErrors.lastName ||
+      fieldErrors.role ||
+      fieldErrors.department
+    ) {
       setCreateFormError('');
       return;
     }
@@ -1303,14 +1554,12 @@ export function UserManagementPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          employeeId,
-
           firstName,
           lastName,
           email,
           phone: `+63${phone}`,
           department: department || null,
-          role: role || 'Employee',
+          role,
           rfidUid: rfidUid || null,
           fingerprintId: fingerprintId || null,
           isActive: true,
@@ -1326,7 +1575,10 @@ export function UserManagementPage() {
         !response.ok &&
         data &&
         'errors' in data &&
-        (data.errors?.employeeId || data.errors?.firstName || data.errors?.lastName)
+        (data.errors?.department ||
+          data.errors?.role ||
+          data.errors?.firstName ||
+          data.errors?.lastName)
       ) {
         setCreateFieldErrors(data.errors);
         return;
@@ -1342,18 +1594,20 @@ export function UserManagementPage() {
 
       setUsers((currentUsers) => [data as UserRecord, ...currentUsers]);
       setIsCreateUserOpen(false);
+      setNextUserIdPreview(null);
       setCreateForm({
-        employeeId: '',
         firstName: '',
         lastName: '',
         email: '',
         phone: '',
         department: '',
-        role: 'Employee',
+        role: activeRoles.includes('Employee') ? 'Employee' : activeRoles[0] || '',
         rfidUid: '',
         fingerprintId: '',
       });
       setCreateErrors({});
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      window.dispatchEvent(new CustomEvent('roles:changed'));
       window.alert('User created successfully.');
     } catch (error) {
       setCreateFormError(error instanceof Error ? error.message : 'Unable to create user.');
@@ -1373,23 +1627,21 @@ export function UserManagementPage() {
     await submitEditUserDetails();
   }
 
-  const roleOptions = USER_ROLE_OPTIONS;
-  const departmentOptions = USER_DEPARTMENT_OPTIONS;
+  const activeDepartments = departments.filter((dept) => dept.is_active).map((dept) => dept.name);
+
+  const activeRoles = roles.filter((role) => role.is_active).map((role) => role.name);
+
+  const roleSet = new Set<string>();
+  roles.forEach((r) => roleSet.add(r.name));
+  users.forEach((u) => {
+    if (u.role) roleSet.add(u.role);
+  });
+  const tableRoleFilterOptions = Array.from(roleSet).sort((a, b) => a.localeCompare(b));
 
   function validateCreateUserField(
     fieldName: keyof CreateUserErrors,
     value: string,
   ): string | undefined {
-    if (fieldName === 'employeeId') {
-      if (!value.trim()) return 'Employee / User ID is required.';
-    }
-
-    if (fieldName === 'fullName') {
-      if (!value.trim()) return 'Full name is required.';
-      if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?: [A-Za-zÀ-ÖØ-öø-ÿ]+)+$/.test(value.trim()))
-        return 'Enter a valid full name.';
-    }
-
     if (fieldName === 'email') {
       if (!value.trim()) return 'Email address is required.';
       if (
@@ -1413,23 +1665,26 @@ export function UserManagementPage() {
   const filteredUsers = useMemo(() => {
     const normalizedSearch = userSearch.trim().toLowerCase();
 
-    return users.filter((user) => {
-      if (user.is_archived) {
-        return false;
-      }
+    return users
+      .filter((user) => {
+        if (user.is_archived) {
+          return false;
+        }
 
-      const matchesSearch =
-        !normalizedSearch ||
-        user.full_name.toLowerCase().includes(normalizedSearch) ||
-        user.employee_id.toLowerCase().includes(normalizedSearch) ||
-        (user.role || '').toLowerCase().includes(normalizedSearch);
-      const matchesDepartment = departmentFilter === 'All Roles' || user.role === departmentFilter;
-      const matchesStatus =
-        statusFilter === 'All Status' ||
-        (statusFilter === 'Active' ? user.is_active : !user.is_active);
+        const matchesSearch =
+          !normalizedSearch ||
+          user.full_name.toLowerCase().includes(normalizedSearch) ||
+          user.employee_id.toLowerCase().includes(normalizedSearch) ||
+          (user.role || '').toLowerCase().includes(normalizedSearch);
+        const matchesDepartment =
+          departmentFilter === 'All Roles' || user.role === departmentFilter;
+        const matchesStatus =
+          statusFilter === 'All Status' ||
+          (statusFilter === 'Active' ? user.is_active : !user.is_active);
 
-      return matchesSearch && matchesDepartment && matchesStatus;
-    });
+        return matchesSearch && matchesDepartment && matchesStatus;
+      })
+      .sort(compareUsersBySurname);
   }, [departmentFilter, statusFilter, userSearch, users]);
 
   const userFilterKey = `${departmentFilter}|${statusFilter}|${userSearch}`;
@@ -1563,18 +1818,22 @@ export function UserManagementPage() {
               className="primary-action-button"
               type="button"
               onClick={() => {
+                void refreshOrganizationOptions();
                 setIsCreateUserOpen(true);
                 setCreateFormError('');
                 setCreateFieldErrors({});
                 setCreateErrors({});
+                setNextUserIdPreview(null);
+                const defaultRole = activeRoles.includes('Employee')
+                  ? 'Employee'
+                  : activeRoles[0] || '';
                 setCreateForm({
-                  employeeId: '',
                   firstName: '',
                   lastName: '',
                   email: '',
                   phone: '',
                   department: '',
-                  role: 'Employee',
+                  role: defaultRole,
                   rfidUid: '',
                   fingerprintId: '',
                 });
@@ -1638,7 +1897,7 @@ export function UserManagementPage() {
             value={departmentFilter}
           >
             <option>All Roles</option>
-            {roleOptions.map((role) => (
+            {tableRoleFilterOptions.map((role) => (
               <option key={role}>{role}</option>
             ))}
           </select>
@@ -1701,9 +1960,6 @@ export function UserManagementPage() {
                             <strong>{user.name}</strong>
                             <small>
                               {user.employeeId}
-                              {user.needsReview ? (
-                                <span className="name-review-badge">{' · '}Needs review</span>
-                              ) : null}
                               {countdown ? (
                                 <span
                                   className={`expiry-badge${countdown.isExpired ? ' expired' : ''}`}
@@ -1884,12 +2140,18 @@ export function UserManagementPage() {
                   <input
                     aria-invalid={Boolean(editFieldErrors.firstName)}
                     autoFocus
+                    onBlur={() =>
+                      setEditFieldErrors((current) => ({
+                        ...current,
+                        firstName: validateNamePart('First name', editForm.firstName.trim()),
+                      }))
+                    }
                     onChange={(event) => {
                       const firstName = stripNonLetters(event.target.value);
                       setEditForm((currentForm) => ({ ...currentForm, firstName }));
-                      setEditFieldErrors((currentErrors) => ({
-                        ...currentErrors,
-                        firstName: undefined,
+                      setEditFieldErrors((current) => ({
+                        ...current,
+                        firstName: validateNamePart('First name', firstName.trim()),
                       }));
                     }}
                     value={editForm.firstName}
@@ -1903,12 +2165,18 @@ export function UserManagementPage() {
                   <span>Last Name *</span>
                   <input
                     aria-invalid={Boolean(editFieldErrors.lastName)}
+                    onBlur={() =>
+                      setEditFieldErrors((current) => ({
+                        ...current,
+                        lastName: validateNamePart('Last name', editForm.lastName.trim()),
+                      }))
+                    }
                     onChange={(event) => {
                       const lastName = stripNonLetters(event.target.value);
                       setEditForm((currentForm) => ({ ...currentForm, lastName }));
-                      setEditFieldErrors((currentErrors) => ({
-                        ...currentErrors,
-                        lastName: undefined,
+                      setEditFieldErrors((current) => ({
+                        ...current,
+                        lastName: validateNamePart('Last name', lastName.trim()),
                       }));
                     }}
                     value={editForm.lastName}
@@ -1918,24 +2186,83 @@ export function UserManagementPage() {
                   ) : null}
                 </label>
 
-                {editingUser.name_needs_review ? (
-                  <p className="field-error">
-                    Name needs review — original: {editingUser.full_name}
-                  </p>
-                ) : null}
-
                 <label className="user-edit-field">
                   <span>Role *</span>
                   <select
-                    onChange={(event) =>
-                      setEditForm((currentForm) => ({ ...currentForm, role: event.target.value }))
-                    }
+                    aria-invalid={Boolean(editFieldErrors.role)}
+                    onChange={(event) => {
+                      const role = event.target.value;
+                      setEditForm((currentForm) => ({ ...currentForm, role }));
+                      setEditFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        role: undefined,
+                      }));
+                    }}
                     value={editForm.role}
                   >
-                    {roleOptions.map((role) => (
-                      <option key={role}>{role}</option>
-                    ))}
+                    {editingUser.role && !activeRoles.includes(editingUser.role) ? (
+                      <option disabled value={editingUser.role}>
+                        {editingUser.role} (Inactive)
+                      </option>
+                    ) : null}
+                    {activeRoles.length === 0 &&
+                    (!editingUser.role || activeRoles.includes(editingUser.role)) ? (
+                      <option disabled value="">
+                        No active roles available
+                      </option>
+                    ) : (
+                      activeRoles.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))
+                    )}
                   </select>
+                  {editFieldErrors.role ? (
+                    <small className="field-error">{editFieldErrors.role}</small>
+                  ) : null}
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Department</span>
+                  <select
+                    aria-invalid={Boolean(editFieldErrors.department)}
+                    onChange={(event) => {
+                      const department = event.target.value;
+                      setEditForm((currentForm) => ({ ...currentForm, department }));
+                      setEditFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        department: undefined,
+                      }));
+                    }}
+                    value={editForm.department}
+                  >
+                    {editingUser.department &&
+                    !activeDepartments.includes(editingUser.department) ? (
+                      <option disabled value={editingUser.department}>
+                        {editingUser.department} (Inactive)
+                      </option>
+                    ) : null}
+                    {activeDepartments.length === 0 &&
+                    (!editingUser.department ||
+                      activeDepartments.includes(editingUser.department)) ? (
+                      <option disabled value="">
+                        No active departments available
+                      </option>
+                    ) : (
+                      <>
+                        <option value="">Choose department</option>
+                        {activeDepartments.map((department) => (
+                          <option key={department} value={department}>
+                            {department}
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                  {editFieldErrors.department ? (
+                    <small className="field-error">{editFieldErrors.department}</small>
+                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
@@ -2044,7 +2371,13 @@ export function UserManagementPage() {
                 <div>
                   <span>
                     Department
-                    <small>{editingUser.department || '-'}</small>
+                    <small>
+                      {editForm.department
+                        ? !activeDepartments.includes(editForm.department)
+                          ? `${editForm.department} (Inactive)`
+                          : editForm.department
+                        : '-'}
+                    </small>
                   </span>
                 </div>
                 <div>
@@ -2131,44 +2464,33 @@ export function UserManagementPage() {
               </h3>
               <div className="user-edit-grid two-columns">
                 <label className="user-edit-field">
-                  <span>Employee / User ID *</span>
+                  <span>User ID</span>
                   <input
-                    aria-describedby={
-                      createErrors.employeeId ? 'create-employee-id-error' : undefined
+                    readOnly
+                    placeholder={createForm.role ? '' : 'Assigned automatically'}
+                    value={
+                      nextUserIdPreview?.role === createForm.role ? nextUserIdPreview.userId : ''
                     }
-                    aria-invalid={Boolean(createErrors.employeeId)}
-                    autoFocus
-                    onBlur={() =>
-                      setCreateErrors((prev) => ({
-                        ...prev,
-                        employeeId: validateCreateUserField('employeeId', createForm.employeeId),
-                      }))
-                    }
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setCreateForm((currentForm) => ({ ...currentForm, employeeId: value }));
-                      setCreateErrors((prev) => ({
-                        ...prev,
-                        employeeId: validateCreateUserField('employeeId', value),
-                      }));
-                    }}
-                    value={createForm.employeeId}
                   />
-                  {createFieldErrors.employeeId ? (
-                    <small className="field-error">{createFieldErrors.employeeId}</small>
-                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
                   <span>First Name *</span>
                   <input
                     aria-invalid={Boolean(createFieldErrors.firstName)}
+                    autoFocus
+                    onBlur={() =>
+                      setCreateFieldErrors((current) => ({
+                        ...current,
+                        firstName: validateNamePart('First name', createForm.firstName.trim()),
+                      }))
+                    }
                     onChange={(event) => {
                       const firstName = stripNonLetters(event.target.value);
                       setCreateForm((currentForm) => ({ ...currentForm, firstName }));
-                      setCreateFieldErrors((currentErrors) => ({
-                        ...currentErrors,
-                        firstName: undefined,
+                      setCreateFieldErrors((current) => ({
+                        ...current,
+                        firstName: validateNamePart('First name', firstName.trim()),
                       }));
                     }}
                     value={createForm.firstName}
@@ -2181,12 +2503,18 @@ export function UserManagementPage() {
                   <span>Last Name *</span>
                   <input
                     aria-invalid={Boolean(createFieldErrors.lastName)}
+                    onBlur={() =>
+                      setCreateFieldErrors((current) => ({
+                        ...current,
+                        lastName: validateNamePart('Last name', createForm.lastName.trim()),
+                      }))
+                    }
                     onChange={(event) => {
                       const lastName = stripNonLetters(event.target.value);
                       setCreateForm((currentForm) => ({ ...currentForm, lastName }));
-                      setCreateFieldErrors((currentErrors) => ({
-                        ...currentErrors,
-                        lastName: undefined,
+                      setCreateFieldErrors((current) => ({
+                        ...current,
+                        lastName: validateNamePart('Last name', lastName.trim()),
                       }));
                     }}
                     value={createForm.lastName}
@@ -2258,38 +2586,69 @@ export function UserManagementPage() {
                 <label className="user-edit-field">
                   <span>Role *</span>
                   <select
-                    onChange={(event) =>
+                    aria-invalid={Boolean(createFieldErrors.role)}
+                    onChange={(event) => {
+                      const role = event.target.value;
                       setCreateForm((currentForm) => ({
                         ...currentForm,
-                        role: event.target.value,
-                      }))
-                    }
+                        role,
+                      }));
+                      setCreateFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        role: undefined,
+                      }));
+                    }}
                     value={createForm.role}
                   >
-                    {roleOptions.map((role) => (
-                      <option key={role}>{role}</option>
-                    ))}
+                    {activeRoles.length === 0 ? (
+                      <option disabled value="">
+                        No active roles available
+                      </option>
+                    ) : (
+                      activeRoles.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))
+                    )}
                   </select>
+                  {createFieldErrors.role ? (
+                    <small className="field-error">{createFieldErrors.role}</small>
+                  ) : null}
                 </label>
 
                 <label className="user-edit-field">
                   <span>Department</span>
                   <select
-                    onChange={(event) =>
-                      setCreateForm((currentForm) => ({
-                        ...currentForm,
-                        department: event.target.value,
-                      }))
-                    }
+                    aria-invalid={Boolean(createFieldErrors.department)}
+                    onChange={(event) => {
+                      const department = event.target.value;
+                      setCreateForm((currentForm) => ({ ...currentForm, department }));
+                      setCreateFieldErrors((currentErrors) => ({
+                        ...currentErrors,
+                        department: undefined,
+                      }));
+                    }}
                     value={createForm.department}
                   >
-                    <option value="">Choose department</option>
-                    {departmentOptions.map((department) => (
-                      <option key={department} value={department}>
-                        {department}
+                    {activeDepartments.length === 0 ? (
+                      <option disabled value="">
+                        No active departments available
                       </option>
-                    ))}
+                    ) : (
+                      <>
+                        <option value="">Choose department</option>
+                        {activeDepartments.map((department) => (
+                          <option key={department} value={department}>
+                            {department}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
+                  {createFieldErrors.department ? (
+                    <small className="field-error">{createFieldErrors.department}</small>
+                  ) : null}
                 </label>
               </div>
             </section>
@@ -3342,6 +3701,61 @@ function ReportPreviewModal({
   );
 }
 
+type ReportFieldErrors = {
+  search?: string;
+  date?: string;
+};
+
+function validateReportSearchField(value: string): string | undefined {
+  if (!value) return undefined;
+  if (!value.trim()) {
+    return 'Search cannot contain only spaces.';
+  }
+
+  if (/\d/.test(value)) {
+    return /^[A-Z]{3}\d{4}$/.test(value)
+      ? undefined
+      : 'Invalid ID or name format. (e.g. "EMP1234" or "John Doe").';
+  }
+
+  if (!/^[\p{L} ]+$/u.test(value)) {
+    return 'Name may contain letters and spaces only.';
+  }
+
+  return undefined;
+}
+
+function validateReportDateField(value: string): string | undefined {
+  if (!value) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return 'Please enter a valid date in YYYY-MM-DD format.';
+  }
+  const [yearStr, monthStr, dayStr] = value.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return 'Please enter a valid date.';
+  }
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return 'Please enter a valid date.';
+  }
+  const today = new Date();
+  const todayYear = today.getFullYear();
+  const todayMonth = today.getMonth() + 1;
+  const todayDay = today.getDate();
+  const todayFormatted = `${todayYear}-${String(todayMonth).padStart(2, '0')}-${String(todayDay).padStart(2, '0')}`;
+  if (value > todayFormatted) {
+    return 'Date cannot be in the future.';
+  }
+  return undefined;
+}
+
 export function ReportsPage() {
   const { session } = useAuth();
   const dateTimeSettings = useDateTimeSettings();
@@ -3352,6 +3766,9 @@ export function ReportsPage() {
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<ReportFieldErrors>({});
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [appliedReportFilters, setAppliedReportFilters] = useState({
     date: '',
     department: '',
@@ -3444,7 +3861,92 @@ export function ReportsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.accessToken, reportsCurrentPage, appliedReportFilters]);
 
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current);
+    };
+  }, []);
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    setSearchFilter(value);
+
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+
+    const immediateError = validateReportSearchField(value);
+    if (!immediateError) {
+      setFieldErrors((prev) => ({ ...prev, search: undefined }));
+    } else {
+      searchDebounceRef.current = setTimeout(() => {
+        setFieldErrors((prev) => ({ ...prev, search: immediateError }));
+      }, 400);
+    }
+  };
+
+  const handleSearchBlur = () => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    const error = validateReportSearchField(searchFilter);
+    setFieldErrors((prev) => ({ ...prev, search: error }));
+  };
+
+  const handleDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    const isBadInput = event.target.validity?.badInput;
+    setDateFilter(value);
+
+    if (dateDebounceRef.current) {
+      clearTimeout(dateDebounceRef.current);
+    }
+
+    const immediateError = isBadInput
+      ? 'Please enter a valid date.'
+      : validateReportDateField(value);
+    if (!immediateError) {
+      setFieldErrors((prev) => ({ ...prev, date: undefined }));
+    } else {
+      dateDebounceRef.current = setTimeout(() => {
+        setFieldErrors((prev) => ({ ...prev, date: immediateError }));
+      }, 400);
+    }
+  };
+
+  const handleDateBlur = (event: React.FocusEvent<HTMLInputElement>) => {
+    if (dateDebounceRef.current) {
+      clearTimeout(dateDebounceRef.current);
+    }
+    const isBadInput = event.target.validity?.badInput;
+    const error = isBadInput ? 'Please enter a valid date.' : validateReportDateField(dateFilter);
+    setFieldErrors((prev) => ({ ...prev, date: error }));
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      onFilterReports();
+    }
+  };
+
   const onFilterReports = () => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current);
+
+    const searchError = validateReportSearchField(searchFilter);
+    const dateError = validateReportDateField(dateFilter);
+
+    setFieldErrors({
+      search: searchError,
+      date: dateError,
+    });
+
+    if (searchError || dateError) {
+      return;
+    }
+
     setAppliedReportFilters({
       date: dateFilter,
       department: departmentFilter,
@@ -3467,6 +3969,20 @@ export function ReportsPage() {
 
   const onGenerateReport = async () => {
     if (!session?.accessToken) return;
+
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current);
+
+    const searchError = validateReportSearchField(searchFilter);
+    const dateError = validateReportDateField(dateFilter);
+
+    if (searchError || dateError) {
+      setFieldErrors({
+        search: searchError,
+        date: dateError,
+      });
+      return;
+    }
 
     setIsGenerating(true);
     setGenerateError('');
@@ -3559,7 +4075,8 @@ export function ReportsPage() {
     if (!session?.accessToken) return;
 
     const controller = new AbortController();
-    const params = dateFilter ? `?date=${dateFilter}` : '';
+    const isValidDate = !validateReportDateField(dateFilter);
+    const params = dateFilter && isValidDate ? `?date=${dateFilter}` : '';
 
     void fetch(`${API_BASE_URL}/reports/summary${params}`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
@@ -3621,57 +4138,101 @@ export function ReportsPage() {
       {activeTab === 'reports' ? (
         <>
           <div className="module-filter-row report-filter-row">
-            <select
-              aria-label="Report Type"
-              onChange={(event) => {
-                setReportType(event.target.value as ReportType);
-                setStatusFilter('');
-              }}
-              value={reportType}
-            >
-              {REPORT_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label="Date"
-              onChange={(event) => setDateFilter(event.target.value)}
-              type="date"
-              value={dateFilter}
-            />
-            <select
-              aria-label="Department"
-              onChange={(event) => setDepartmentFilter(event.target.value)}
-              value={departmentFilter}
-            >
-              <option value="">All Departments</option>
-              {departmentOptions.map((department) => (
-                <option key={department} value={department}>
-                  {department}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Status"
-              disabled={REPORT_STATUS_OPTIONS[reportType].length === 0}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              value={statusFilter}
-            >
-              <option value="">All Status</option>
-              {REPORT_STATUS_OPTIONS[reportType].map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label="Search"
-              onChange={(event) => setSearchFilter(event.target.value)}
-              placeholder="Search by name or ID..."
-              value={searchFilter}
-            />
+            <div className="report-filter-field">
+              <select
+                aria-label="Report Type"
+                id="report-type-filter"
+                onChange={(event) => {
+                  setReportType(event.target.value as ReportType);
+                  setStatusFilter('');
+                }}
+                value={reportType}
+              >
+                {REPORT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="report-filter-field">
+              <input
+                aria-describedby={fieldErrors.date ? 'report-date-error' : undefined}
+                aria-invalid={Boolean(fieldErrors.date)}
+                aria-label="Date"
+                id="report-date-filter"
+                onBlur={handleDateBlur}
+                onChange={handleDateChange}
+                onKeyDown={handleKeyDown}
+                type="date"
+                value={dateFilter}
+              />
+              {fieldErrors.date ? (
+                <span
+                  className="field-error"
+                  id="report-date-error"
+                  role="alert"
+                  title={fieldErrors.date}
+                >
+                  {fieldErrors.date}
+                </span>
+              ) : null}
+            </div>
+            <div className="report-filter-field">
+              <select
+                aria-label="Department"
+                id="report-department-filter"
+                onChange={(event) => setDepartmentFilter(event.target.value)}
+                value={departmentFilter}
+              >
+                <option value="">All Departments</option>
+                {departmentOptions.map((department) => (
+                  <option key={department} value={department}>
+                    {department}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="report-filter-field">
+              <select
+                aria-label="Status"
+                disabled={REPORT_STATUS_OPTIONS[reportType].length === 0}
+                id="report-status-filter"
+                onChange={(event) => setStatusFilter(event.target.value)}
+                value={statusFilter}
+              >
+                <option value="">All Status</option>
+                {REPORT_STATUS_OPTIONS[reportType].map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="report-filter-field">
+              <input
+                aria-describedby={fieldErrors.search ? 'report-search-error' : undefined}
+                aria-invalid={Boolean(fieldErrors.search)}
+                aria-label="Search by name or ID"
+                id="report-search-filter"
+                onBlur={handleSearchBlur}
+                onChange={handleSearchChange}
+                onKeyDown={handleKeyDown}
+                placeholder="Name or ID (e.g., EMP1234)..."
+                type="search"
+                value={searchFilter}
+              />
+              {fieldErrors.search ? (
+                <span
+                  className="field-error"
+                  id="report-search-error"
+                  role="alert"
+                  title={fieldErrors.search}
+                >
+                  {fieldErrors.search}
+                </span>
+              ) : null}
+            </div>
             <button className="filter-button" onClick={onFilterReports} type="button">
               Filter
               <Filter size={16} />
@@ -4110,9 +4671,85 @@ export function AuditLogsPage({ embedded = false }: { embedded?: boolean }) {
   );
 }
 
+const MAX_DEPARTMENT_NAME_LENGTH = 120;
+const MAX_ROLE_NAME_LENGTH = 120;
+
+function validateDepartmentName(
+  rawName: string,
+  departments: Department[],
+  ignoreId?: string,
+): string | undefined {
+  const name = rawName.trim().replace(/\s+/g, ' ');
+
+  if (!name) return 'Department name is required.';
+  if (name.length > MAX_DEPARTMENT_NAME_LENGTH) {
+    return `Department name must be ${MAX_DEPARTMENT_NAME_LENGTH} characters or fewer.`;
+  }
+  if (
+    departments.some(
+      (department) =>
+        department.id !== ignoreId && department.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return 'That department already exists.';
+  }
+
+  return undefined;
+}
+
+function sortDepartments(departments: Department[]) {
+  return [...departments].sort((departmentA, departmentB) =>
+    departmentA.name.localeCompare(departmentB.name, undefined, { sensitivity: 'base' }),
+  );
+}
+
+function validateRoleName(rawName: string, roles: Role[], ignoreId?: string): string | undefined {
+  const name = rawName.trim().replace(/\s+/g, ' ');
+
+  if (!name) return 'Role name is required.';
+  if (name.length > MAX_ROLE_NAME_LENGTH) {
+    return `Role name must be ${MAX_ROLE_NAME_LENGTH} characters or fewer.`;
+  }
+  if (
+    roles.some((role) => role.id !== ignoreId && role.name.toLowerCase() === name.toLowerCase())
+  ) {
+    return 'That role already exists.';
+  }
+
+  return undefined;
+}
+
+function validateUserIdPrefix(
+  rawPrefix: string,
+  roles: Role[],
+  ignoreId?: string,
+): string | undefined {
+  const prefix = rawPrefix.trim();
+
+  if (!prefix) return 'User ID prefix is required.';
+  if (!/^[A-Za-z]{3}$/.test(prefix)) {
+    return 'User ID prefix must be exactly 3 letters (A-Z), with no spaces, numbers or symbols.';
+  }
+  if (
+    roles.some(
+      (role) => role.id !== ignoreId && role.user_id_prefix?.toUpperCase() === prefix.toUpperCase(),
+    )
+  ) {
+    return 'That User ID prefix is already used by another role.';
+  }
+
+  return undefined;
+}
+
+function sortRoles(roles: Role[]) {
+  return [...roles].sort((roleA, roleB) =>
+    roleA.name.localeCompare(roleB.name, undefined, { sensitivity: 'base' }),
+  );
+}
+
 export function SettingsPage() {
   const { session } = useAuth();
-  const [activeTab, setActiveTab] = useState<'general' | 'security'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'security' | 'organization'>('general');
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
   const [lastSavedSettings, setLastSavedSettings] =
     useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
@@ -4136,6 +4773,36 @@ export function SettingsPage() {
   const [changeRfidInput, setChangeRfidInput] = useState('');
   const [changeRfidError, setChangeRfidError] = useState('');
   const [isChangingRfid, setIsChangingRfid] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [newDepartment, setNewDepartment] = useState('');
+  const [departmentSearch, setDepartmentSearch] = useState('');
+  const [departmentStatusFilter, setDepartmentStatusFilter] = useState<
+    'All' | 'Active' | 'Inactive'
+  >('All');
+  const [editingDepartmentId, setEditingDepartmentId] = useState<string | null>(null);
+  const [editingDepartmentName, setEditingDepartmentName] = useState('');
+  const [departmentError, setDepartmentError] = useState('');
+  const [departmentMessage, setDepartmentMessage] = useState('');
+  const [pendingDepartmentAction, setPendingDepartmentAction] = useState<DepartmentAction | null>(
+    null,
+  );
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
+  const [assignedUsersSearch, setAssignedUsersSearch] = useState('');
+  const [newRole, setNewRole] = useState('');
+  const [newRolePrefix, setNewRolePrefix] = useState('');
+  const [editingRolePrefix, setEditingRolePrefix] = useState('');
+  const [roleSearch, setRoleSearch] = useState('');
+  const [roleStatusFilter, setRoleStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
+  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
+  const [editingRoleName, setEditingRoleName] = useState('');
+  const [roleError, setRoleError] = useState('');
+  const [roleMessage, setRoleMessage] = useState('');
+  const [pendingRoleAction, setPendingRoleAction] = useState<RoleAction | null>(null);
+  const [verifyTarget, setVerifyTarget] = useState<
+    'profile' | 'organization' | 'department' | 'role'
+  >('profile');
 
   useEffect(() => {
     if (verifyRfidStep !== 'success') return;
@@ -4178,11 +4845,20 @@ export function SettingsPage() {
 
         if (settingsResponse.ok && settingsData) {
           const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settingsData };
+          merged.max_failed_attempts = Number(merged.max_failed_attempts) || 5;
+          merged.lockout_duration_minutes = Number(merged.lockout_duration_minutes) || 30;
+          merged.reset_failed_attempts_after_minutes =
+            Number(merged.reset_failed_attempts_after_minutes) || 15;
+          merged.auto_deactivation_duration_days =
+            Number(merged.auto_deactivation_duration_days) || 7;
+          merged.session_timeout_minutes = Number(merged.session_timeout_minutes) || 30;
+          merged.idle_timeout_warning_minutes = Number(merged.idle_timeout_warning_minutes) || 5;
           setSettings(merged);
           setLastSavedSettings(merged);
         }
         if (profileResponse.ok && profileData) setProfile(profileData);
         if (usersResponse.ok && Array.isArray(usersData)) {
+          setUsers(usersData);
           setTotalUsers(usersData.filter((user) => !user.is_archived).length);
         }
       })
@@ -4197,8 +4873,181 @@ export function SettingsPage() {
     return () => controller.abort();
   }, [session?.accessToken]);
 
+  const refreshOrganizationUsersAndRoles = useCallback(async () => {
+    if (!session?.accessToken) return;
+
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
+    try {
+      const [rolesRes, usersRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/roles`, { headers }),
+        fetch(`${API_BASE_URL}/users`, { headers }),
+      ]);
+
+      if (rolesRes.ok) {
+        const rolesData = (await rolesRes.json().catch(() => null)) as Role[] | null;
+        if (Array.isArray(rolesData)) {
+          setRoles(rolesData);
+        }
+      }
+
+      if (usersRes.ok) {
+        const usersData = (await usersRes.json().catch(() => null)) as UserRecord[] | null;
+        if (Array.isArray(usersData)) {
+          setUsers(usersData);
+          setTotalUsers(usersData.filter((user) => !user.is_archived).length);
+        }
+      }
+    } catch {
+      // Ignore background refresh errors
+    }
+  }, [session]);
+
+  useEffect(() => {
+    if (activeTab !== 'organization' || !session?.accessToken) return;
+
+    const controller = new AbortController();
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
+
+    void Promise.all([
+      fetch(`${API_BASE_URL}/departments`, { headers, signal: controller.signal }),
+      fetch(`${API_BASE_URL}/roles`, { headers, signal: controller.signal }),
+      fetch(`${API_BASE_URL}/users`, { headers, signal: controller.signal }),
+    ])
+      .then(async ([deptResponse, rolesResponse, usersResponse]) => {
+        const deptData = (await deptResponse.json().catch(() => null)) as Department[] | null;
+        const rolesData = (await rolesResponse.json().catch(() => null)) as Role[] | null;
+        const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
+
+        if (deptResponse.ok && Array.isArray(deptData)) {
+          setDepartments(deptData);
+        } else {
+          setDepartmentError('Unable to load departments.');
+        }
+
+        if (rolesResponse.ok && Array.isArray(rolesData)) {
+          setRoles(rolesData);
+        } else {
+          setRoleError('Unable to load roles.');
+        }
+
+        if (usersResponse.ok && Array.isArray(usersData)) {
+          setUsers(usersData);
+          setTotalUsers(usersData.filter((user) => !user.is_archived).length);
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+
+        setDepartmentError('Unable to load departments.');
+        setRoleError('Unable to load roles.');
+      });
+
+    const intervalId = window.setInterval(() => {
+      void refreshOrganizationUsersAndRoles();
+    }, 2500);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [activeTab, session?.accessToken, refreshOrganizationUsersAndRoles]);
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+
+    let socket: WebSocket | null = null;
+    let shouldReconnect = true;
+    let reconnectTimeoutId: number | null = null;
+
+    function handleRealtimeUpdate() {
+      void refreshOrganizationUsersAndRoles();
+    }
+
+    function connectSocket() {
+      socket = new WebSocket(WS_BASE_URL);
+
+      socket.addEventListener('message', (event) => {
+        try {
+          const message = JSON.parse(event.data as string) as { type?: string };
+          if (
+            message.type === 'users:changed' ||
+            message.type === 'roles:changed' ||
+            message.type === 'activity:event' ||
+            message.type === 'notification:created' ||
+            message.type === 'enrollment:reviewed'
+          ) {
+            handleRealtimeUpdate();
+          }
+        } catch {
+          // Ignore non-json
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        if (!shouldReconnect) return;
+        reconnectTimeoutId = window.setTimeout(connectSocket, 2000);
+      });
+    }
+
+    connectSocket();
+
+    window.addEventListener('users:changed', handleRealtimeUpdate);
+    window.addEventListener('roles:changed', handleRealtimeUpdate);
+
+    return () => {
+      shouldReconnect = false;
+      if (reconnectTimeoutId) window.clearTimeout(reconnectTimeoutId);
+      socket?.close();
+      window.removeEventListener('users:changed', handleRealtimeUpdate);
+      window.removeEventListener('roles:changed', handleRealtimeUpdate);
+    };
+  }, [session?.accessToken, refreshOrganizationUsersAndRoles]);
+
   const updateSetting = <K extends keyof SystemSettings>(key: K, value: SystemSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }));
+  };
+
+  const handleNumericSettingChange = (
+    key: keyof SystemSettings,
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const raw = event.target.value;
+    const cleaned = raw.replace(/^0+/, '');
+    event.target.value = cleaned;
+    if (cleaned === '') {
+      updateSetting(key, '' as unknown as SystemSettings[typeof key]);
+      return;
+    }
+    updateSetting(key, Number(cleaned) as unknown as SystemSettings[typeof key]);
+  };
+
+  const handleNumericSettingKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === '0') {
+      const input = event.currentTarget;
+      if (
+        input.value === '' ||
+        (input.selectionStart === 0 && input.selectionEnd === input.value.length)
+      ) {
+        event.preventDefault();
+      }
+    }
+  };
+
+  const handleNumericSettingBlur = (key: keyof SystemSettings, min = 1) => {
+    const current = Number(settings[key]);
+    if (!current || current < min) {
+      updateSetting(key, min as unknown as SystemSettings[typeof key]);
+    } else {
+      updateSetting(key, Math.floor(current) as unknown as SystemSettings[typeof key]);
+    }
+  };
+
+  const getNumericDisplayValue = (val: number | string | undefined): string | number => {
+    if (val === undefined || val === null || val === '') return '';
+    const str = String(val).replace(/^0+/, '');
+    if (str === '') return '';
+    const num = Number(str);
+    return Number.isNaN(num) ? '' : num;
   };
 
   const toggleApplicableRole = (role: string, checked: boolean) => {
@@ -4261,6 +5110,13 @@ export function SettingsPage() {
         lifecycleRun?: { ran: boolean; deactivatedCount: number } | null;
       };
       const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settingsData };
+      merged.max_failed_attempts = Number(merged.max_failed_attempts) || 5;
+      merged.lockout_duration_minutes = Number(merged.lockout_duration_minutes) || 30;
+      merged.reset_failed_attempts_after_minutes =
+        Number(merged.reset_failed_attempts_after_minutes) || 15;
+      merged.auto_deactivation_duration_days = Number(merged.auto_deactivation_duration_days) || 7;
+      merged.session_timeout_minutes = Number(merged.session_timeout_minutes) || 30;
+      merged.idle_timeout_warning_minutes = Number(merged.idle_timeout_warning_minutes) || 5;
       setSettings(merged);
       setLastSavedSettings(merged);
       setDateTimeSettings(merged);
@@ -4284,12 +5140,14 @@ export function SettingsPage() {
     setIsEditingProfile(true);
   }
 
-  function openVerifyRfidModal() {
-    if (!editedName.trim()) {
+  function openVerifyRfidModal(
+    target: 'profile' | 'organization' | 'department' | 'role' = 'profile',
+  ) {
+    if (target === 'profile' && !editedName.trim()) {
       setProfileError('Admin name is required.');
       return;
     }
-    setProfileError('');
+    setVerifyTarget(target);
     setVerifyRfidInput('');
     setVerifyRfidError('');
     setVerifyRfidStep('idle');
@@ -4353,6 +5211,211 @@ export function SettingsPage() {
     }
   }
 
+  async function submitDepartmentChange() {
+    if (!session?.accessToken || !pendingDepartmentAction) return;
+
+    if (!verifyRfidInput.trim()) {
+      setVerifyRfidError('Please scan or enter your RFID card.');
+      return;
+    }
+    setVerifyRfidStep('saving');
+    setVerifyRfidError('');
+
+    const action = pendingDepartmentAction;
+    const headers = {
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      const verifyResponse = await fetch(`${API_BASE_URL}/auth/me/verify-rfid`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ rfidCode: verifyRfidInput.trim() }),
+      });
+      const verifyData = (await verifyResponse.json().catch(() => null)) as {
+        verified?: boolean;
+        error?: string;
+      } | null;
+
+      if (!verifyResponse.ok || !verifyData?.verified) {
+        throw new Error(verifyData?.error ?? 'RFID verification failed.');
+      }
+
+      const response =
+        action.kind === 'add'
+          ? await fetch(`${API_BASE_URL}/departments`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ name: action.name }),
+            })
+          : await fetch(`${API_BASE_URL}/departments/${action.id}`, {
+              method: 'PATCH',
+              headers,
+              body: JSON.stringify(
+                action.kind === 'rename'
+                  ? { name: action.name }
+                  : { isActive: action.isActive, confirm: action.confirm },
+              ),
+            });
+      const data = (await response.json().catch(() => null)) as
+        | (Department & { error?: string })
+        | { error?: string; requiresConfirmation?: boolean }
+        | null;
+
+      if (!response.ok || !data || !('id' in data)) {
+        if (
+          action.kind === 'status' &&
+          data &&
+          'requiresConfirmation' in data &&
+          data.requiresConfirmation
+        ) {
+          setPendingDepartmentAction({ ...action, confirm: true });
+        }
+
+        throw new Error(
+          data && 'error' in data && data.error ? data.error : 'Unable to save department.',
+        );
+      }
+
+      const saved = data as Department;
+
+      setDepartments((current) =>
+        sortDepartments(
+          action.kind === 'add'
+            ? [...current, saved]
+            : current.map((department) => (department.id === saved.id ? saved : department)),
+        ),
+      );
+      setNewDepartment('');
+      setEditingDepartmentId(null);
+      setEditingDepartmentName('');
+      setDepartmentError('');
+      setDepartmentMessage(
+        action.kind === 'add'
+          ? 'Department added.'
+          : action.kind === 'rename'
+            ? 'Department renamed.'
+            : saved.is_active
+              ? 'Department activated.'
+              : 'Department deactivated.',
+      );
+      setPendingDepartmentAction(null);
+      setVerifySuccessCountdown(5);
+      setVerifyRfidStep('success');
+    } catch (error) {
+      setVerifyRfidError(error instanceof Error ? error.message : 'Unable to save department.');
+      setVerifyRfidStep('error');
+    }
+  }
+
+  async function submitRoleChange() {
+    if (!session?.accessToken || !pendingRoleAction) return;
+
+    if (!verifyRfidInput.trim()) {
+      setVerifyRfidError('Please scan or enter your RFID card.');
+      return;
+    }
+    setVerifyRfidStep('saving');
+    setVerifyRfidError('');
+
+    const action = pendingRoleAction;
+    const headers = {
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      const verifyResponse = await fetch(`${API_BASE_URL}/auth/me/verify-rfid`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ rfidCode: verifyRfidInput.trim() }),
+      });
+      const verifyData = (await verifyResponse.json().catch(() => null)) as {
+        verified?: boolean;
+        error?: string;
+      } | null;
+
+      if (!verifyResponse.ok || !verifyData?.verified) {
+        throw new Error(verifyData?.error ?? 'RFID verification failed.');
+      }
+
+      const response =
+        action.kind === 'add'
+          ? await fetch(`${API_BASE_URL}/roles`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ name: action.name, userIdPrefix: action.userIdPrefix }),
+            })
+          : await fetch(`${API_BASE_URL}/roles/${action.id}`, {
+              method: 'PATCH',
+              headers,
+              body: JSON.stringify(
+                action.kind === 'rename'
+                  ? { name: action.name, userIdPrefix: action.userIdPrefix }
+                  : { isActive: action.isActive, confirm: action.confirm },
+              ),
+            });
+      const data = (await response.json().catch(() => null)) as
+        | (Role & { error?: string })
+        | { error?: string; requiresConfirmation?: boolean }
+        | null;
+
+      if (!response.ok || !data || !('id' in data)) {
+        if (
+          action.kind === 'status' &&
+          data &&
+          'requiresConfirmation' in data &&
+          data.requiresConfirmation
+        ) {
+          setPendingRoleAction({ ...action, confirm: true });
+        }
+
+        throw new Error(
+          data && 'error' in data && data.error ? data.error : 'Unable to save role.',
+        );
+      }
+
+      const saved = data as Role;
+
+      setRoles((current) =>
+        sortRoles(
+          action.kind === 'add'
+            ? [...current, saved]
+            : current.map((role) => (role.id === saved.id ? saved : role)),
+        ),
+      );
+      setNewRole('');
+      setNewRolePrefix('');
+      setEditingRoleId(null);
+      setEditingRoleName('');
+      setEditingRolePrefix('');
+      setRoleError('');
+      setRoleMessage(
+        action.kind === 'add'
+          ? 'Role added.'
+          : action.kind === 'rename'
+            ? 'Role updated.'
+            : saved.is_active
+              ? 'Role activated.'
+              : 'Role deactivated.',
+      );
+      setPendingRoleAction(null);
+      setVerifySuccessCountdown(5);
+      setVerifyRfidStep('success');
+    } catch (error) {
+      setVerifyRfidError(error instanceof Error ? error.message : 'Unable to save role.');
+      setVerifyRfidStep('error');
+    }
+  }
+
+  function submitVerifiedChange() {
+    if (verifyTarget === 'department') return submitDepartmentChange();
+    if (verifyTarget === 'role') return submitRoleChange();
+
+    return submitProfileNameChange();
+  }
+
   function openChangeRfidModal() {
     setChangeRfidInput('');
     setChangeRfidError('');
@@ -4401,6 +5464,216 @@ export function SettingsPage() {
     }
   }
 
+  function startDepartmentAction(action: DepartmentAction) {
+    setDepartmentError('');
+    setDepartmentMessage('');
+    setPendingDepartmentAction(action);
+    openVerifyRfidModal('department');
+  }
+
+  function addDepartment() {
+    const error = validateDepartmentName(newDepartment, departments);
+
+    if (error) {
+      setDepartmentError(error);
+      return;
+    }
+
+    startDepartmentAction({ kind: 'add', name: newDepartment.trim().replace(/\s+/g, ' ') });
+  }
+
+  function startRenamingDepartment(department: Department) {
+    setEditingDepartmentId(department.id);
+    setEditingDepartmentName(department.name);
+    setDepartmentError('');
+    setDepartmentMessage('');
+  }
+
+  function cancelRenamingDepartment() {
+    setEditingDepartmentId(null);
+    setEditingDepartmentName('');
+    setDepartmentError('');
+  }
+
+  function saveDepartmentRename(department: Department) {
+    const name = editingDepartmentName.trim().replace(/\s+/g, ' ');
+
+    if (name === department.name) {
+      cancelRenamingDepartment();
+      return;
+    }
+
+    const error = validateDepartmentName(name, departments, department.id);
+
+    if (error) {
+      setDepartmentError(error);
+      return;
+    }
+
+    startDepartmentAction({ kind: 'rename', id: department.id, name });
+  }
+
+  function toggleDepartmentStatus(department: Department) {
+    if (
+      department.is_active &&
+      department.user_count > 0 &&
+      !window.confirm(
+        `${department.user_count} user(s) are assigned to ${department.name}. They will keep this department, but no new users can be assigned to it once it is inactive. Deactivate it?`,
+      )
+    ) {
+      return;
+    }
+
+    startDepartmentAction({
+      kind: 'status',
+      id: department.id,
+      isActive: !department.is_active,
+      confirm: department.is_active,
+    });
+  }
+
+  const visibleDepartments = departments.filter((department) => {
+    const matchesSearch =
+      !departmentSearch.trim() ||
+      department.name.toLowerCase().includes(departmentSearch.trim().toLowerCase());
+    const matchesStatus =
+      departmentStatusFilter === 'All' ||
+      (departmentStatusFilter === 'Active' ? department.is_active : !department.is_active);
+
+    return matchesSearch && matchesStatus;
+  });
+
+  function startRoleAction(action: RoleAction) {
+    setRoleError('');
+    setRoleMessage('');
+    setPendingRoleAction(action);
+    openVerifyRfidModal('role');
+  }
+
+  function addRole() {
+    const error = validateRoleName(newRole, roles) ?? validateUserIdPrefix(newRolePrefix, roles);
+
+    if (error) {
+      setRoleError(error);
+      return;
+    }
+
+    startRoleAction({
+      kind: 'add',
+      name: newRole.trim().replace(/\s+/g, ' '),
+      userIdPrefix: newRolePrefix.trim().toUpperCase(),
+    });
+  }
+
+  function startRenamingRole(role: Role) {
+    setEditingRoleId(role.id);
+    setEditingRoleName(role.name);
+    setEditingRolePrefix(role.user_id_prefix ?? '');
+    setRoleError('');
+    setRoleMessage('');
+  }
+
+  function cancelRenamingRole() {
+    setEditingRoleId(null);
+    setEditingRoleName('');
+    setEditingRolePrefix('');
+    setRoleError('');
+  }
+
+  function saveRoleRename(role: Role) {
+    const name = editingRoleName.trim().replace(/\s+/g, ' ');
+    const userIdPrefix = editingRolePrefix.trim().toUpperCase();
+
+    if (name === role.name && userIdPrefix === (role.user_id_prefix ?? '')) {
+      cancelRenamingRole();
+      return;
+    }
+
+    const error =
+      validateRoleName(name, roles, role.id) ?? validateUserIdPrefix(userIdPrefix, roles, role.id);
+
+    if (error) {
+      setRoleError(error);
+      return;
+    }
+
+    startRoleAction({ kind: 'rename', id: role.id, name, userIdPrefix });
+  }
+
+  function toggleRoleStatus(role: Role) {
+    if (
+      role.is_active &&
+      role.user_count > 0 &&
+      !window.confirm(
+        `${role.user_count} user(s) are assigned to ${role.name}. They will keep this role, but no new users can be assigned to it once it is inactive. Deactivate it?`,
+      )
+    ) {
+      return;
+    }
+
+    startRoleAction({
+      kind: 'status',
+      id: role.id,
+      isActive: !role.is_active,
+      confirm: role.is_active,
+    });
+  }
+
+  const visibleRoles = roles.filter((role) => {
+    const matchesSearch =
+      !roleSearch.trim() || role.name.toLowerCase().includes(roleSearch.trim().toLowerCase());
+    const matchesStatus =
+      roleStatusFilter === 'All' ||
+      (roleStatusFilter === 'Active' ? role.is_active : !role.is_active);
+
+    return matchesSearch && matchesStatus;
+  });
+
+  const selectedRole = roles.find((role) => String(role.id) === String(selectedRoleId)) ?? null;
+
+  const assignedUsersForSelectedRole = useMemo(() => {
+    if (!selectedRole) return [];
+    const targetRole = selectedRole.name.trim().toLowerCase();
+    return users.filter(
+      (user) => !user.is_archived && (user.role || '').trim().toLowerCase() === targetRole,
+    );
+  }, [users, selectedRole]);
+
+  const filteredAssignedUsers = useMemo(() => {
+    if (!assignedUsersSearch.trim()) return assignedUsersForSelectedRole;
+    const term = assignedUsersSearch.trim().toLowerCase();
+    return assignedUsersForSelectedRole.filter((user) => {
+      const name = (
+        user.last_name && user.first_name
+          ? `${user.last_name}, ${user.first_name}`
+          : user.full_name || ''
+      ).toLowerCase();
+      const empId = (user.employee_id || '').toLowerCase();
+      const email = (user.email || '').toLowerCase();
+      const dept = (user.department || '').toLowerCase();
+      return (
+        name.includes(term) || empId.includes(term) || email.includes(term) || dept.includes(term)
+      );
+    });
+  }, [assignedUsersForSelectedRole, assignedUsersSearch]);
+
+  function handleSelectRole(role: Role) {
+    if (editingRoleId === role.id) return;
+    if (selectedRoleId === role.id) {
+      setSelectedRoleId(null);
+      setAssignedUsersSearch('');
+      return;
+    }
+    setSelectedRoleId(role.id);
+    setAssignedUsersSearch('');
+    setTimeout(() => {
+      const el = document.getElementById('role-assigned-users');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 60);
+  }
+
   return (
     <section className="module-page">
       <PageHeader title="Settings" description="Configure system preferences and parameters." />
@@ -4421,9 +5694,17 @@ export function SettingsPage() {
         >
           System &amp; Security
         </button>
+        <button
+          className={activeTab === 'organization' ? 'active' : ''}
+          onClick={() => setActiveTab('organization')}
+          role="tab"
+          type="button"
+        >
+          Organization Settings
+        </button>
       </div>
 
-      {activeTab === 'general' ? (
+      {activeTab === 'general' && (
         <div className="general-settings-grid">
           <section className="module-panel settings-card admin-profile-card">
             <h2>Admin Profile</h2>
@@ -4473,7 +5754,9 @@ export function SettingsPage() {
               <button
                 className="admin-profile-edit-button"
                 disabled={isSavingProfile}
-                onClick={() => (isEditingProfile ? openVerifyRfidModal() : startEditingProfile())}
+                onClick={() =>
+                  isEditingProfile ? openVerifyRfidModal('profile') : startEditingProfile()
+                }
                 type="button"
               >
                 {isEditingProfile ? 'Save Changes' : 'Edit'}
@@ -4508,12 +5791,14 @@ export function SettingsPage() {
             </dl>
           </section>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'security' && (
         <div className="security-settings-stack">
           <section className="module-panel settings-card">
             <h2>Date &amp; Time Settings</h2>
             <p>Configure how dates and times are displayed across the system.</p>
-            <div className="security-fields four-columns">
+            <div className="security-fields date-time-fields">
               <label>
                 Date Format
                 <select
@@ -4571,10 +5856,10 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.max_failed_attempts}
-                  onChange={(event) =>
-                    updateSetting('max_failed_attempts', Number(event.target.value))
-                  }
+                  value={getNumericDisplayValue(settings.max_failed_attempts)}
+                  onChange={(event) => handleNumericSettingChange('max_failed_attempts', event)}
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('max_failed_attempts', 1)}
                 />
               </label>
               <label>
@@ -4582,10 +5867,12 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.lockout_duration_minutes}
+                  value={getNumericDisplayValue(settings.lockout_duration_minutes)}
                   onChange={(event) =>
-                    updateSetting('lockout_duration_minutes', Number(event.target.value))
+                    handleNumericSettingChange('lockout_duration_minutes', event)
                   }
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('lockout_duration_minutes', 1)}
                 />
               </label>
               <label>
@@ -4593,10 +5880,12 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.reset_failed_attempts_after_minutes}
+                  value={getNumericDisplayValue(settings.reset_failed_attempts_after_minutes)}
                   onChange={(event) =>
-                    updateSetting('reset_failed_attempts_after_minutes', Number(event.target.value))
+                    handleNumericSettingChange('reset_failed_attempts_after_minutes', event)
                   }
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('reset_failed_attempts_after_minutes', 1)}
                 />
               </label>
               <label className="toggle-setting">
@@ -4638,10 +5927,12 @@ export function SettingsPage() {
                     disabled={!settings.auto_deactivation_enabled}
                     min="1"
                     type="number"
-                    value={settings.auto_deactivation_duration_days}
+                    value={getNumericDisplayValue(settings.auto_deactivation_duration_days)}
                     onChange={(event) =>
-                      updateSetting('auto_deactivation_duration_days', Number(event.target.value))
+                      handleNumericSettingChange('auto_deactivation_duration_days', event)
                     }
+                    onKeyDown={handleNumericSettingKeyDown}
+                    onBlur={() => handleNumericSettingBlur('auto_deactivation_duration_days', 1)}
                   />
                   <span>Days</span>
                 </div>
@@ -4673,10 +5964,10 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.session_timeout_minutes}
-                  onChange={(event) =>
-                    updateSetting('session_timeout_minutes', Number(event.target.value))
-                  }
+                  value={getNumericDisplayValue(settings.session_timeout_minutes)}
+                  onChange={(event) => handleNumericSettingChange('session_timeout_minutes', event)}
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('session_timeout_minutes', 1)}
                 />
               </label>
               <label>
@@ -4684,10 +5975,12 @@ export function SettingsPage() {
                 <input
                   min="1"
                   type="number"
-                  value={settings.idle_timeout_warning_minutes}
+                  value={getNumericDisplayValue(settings.idle_timeout_warning_minutes)}
                   onChange={(event) =>
-                    updateSetting('idle_timeout_warning_minutes', Number(event.target.value))
+                    handleNumericSettingChange('idle_timeout_warning_minutes', event)
                   }
+                  onKeyDown={handleNumericSettingKeyDown}
+                  onBlur={() => handleNumericSettingBlur('idle_timeout_warning_minutes', 1)}
                 />
               </label>
               <label className="toggle-setting">
@@ -4739,6 +6032,496 @@ export function SettingsPage() {
           </section>
         </div>
       )}
+
+      {activeTab === 'organization' && (
+        <div className="organization-stack">
+          <section className="module-panel settings-card">
+            <h2>Department Management</h2>
+            <div className="organization-input-row">
+              <label> Add Department </label>
+              <input
+                onChange={(e) => setNewDepartment(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addDepartment();
+                  }
+                }}
+                placeholder="e.g. Human Resources"
+                value={newDepartment}
+              />
+
+              <button className="organization-edit-button" onClick={addDepartment} type="button">
+                Add
+              </button>
+            </div>
+
+            <div className="enrollment-search-row">
+              <input
+                aria-label="Search departments"
+                onChange={(e) => setDepartmentSearch(e.target.value)}
+                placeholder="Search departments..."
+                type="search"
+                value={departmentSearch}
+              />
+              <select
+                aria-label="Filter departments by status"
+                onChange={(e) =>
+                  setDepartmentStatusFilter(e.target.value as 'All' | 'Active' | 'Inactive')
+                }
+                value={departmentStatusFilter}
+              >
+                <option value="All">All Status</option>
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+
+            {departmentError ? (
+              <p className="module-table-message error" role="alert">
+                {departmentError}
+              </p>
+            ) : null}
+            {departmentMessage ? <p className="module-table-message">{departmentMessage}</p> : null}
+
+            <div className="user-table-wrap">
+              <table className="managed-table user-management-table">
+                <thead>
+                  <tr>
+                    <th>Department</th>
+                    <th>Users</th>
+                    <th>Access Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {visibleDepartments.length === 0 ? (
+                    <tr>
+                      <td colSpan={4}>
+                        {departments.length === 0
+                          ? 'No departments yet.'
+                          : 'No departments match your search.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleDepartments.map((dept) => (
+                      <tr key={dept.id}>
+                        <td>
+                          {editingDepartmentId === dept.id ? (
+                            <input
+                              aria-label={`Rename ${dept.name}`}
+                              autoFocus
+                              onChange={(e) => setEditingDepartmentName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  saveDepartmentRename(dept);
+                                } else if (e.key === 'Escape') {
+                                  cancelRenamingDepartment();
+                                }
+                              }}
+                              value={editingDepartmentName}
+                            />
+                          ) : (
+                            dept.name
+                          )}
+                        </td>
+                        <td>{dept.user_count}</td>
+                        <td>{dept.is_active ? 'Active' : 'Inactive'}</td>
+                        <td>
+                          <div className="user-row-actions">
+                            {editingDepartmentId === dept.id ? (
+                              <>
+                                <button
+                                  aria-label="Save department name"
+                                  className="activate"
+                                  onClick={() => saveDepartmentRename(dept)}
+                                  title="Save"
+                                  type="button"
+                                >
+                                  <Check size={16} />
+                                </button>
+                                <button
+                                  aria-label="Cancel renaming"
+                                  className="archive"
+                                  onClick={cancelRenamingDepartment}
+                                  title="Cancel"
+                                  type="button"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  aria-label={`Rename ${dept.name}`}
+                                  className="edit"
+                                  onClick={() => startRenamingDepartment(dept)}
+                                  title="Rename"
+                                  type="button"
+                                >
+                                  <Pencil size={16} />
+                                </button>
+                                <button
+                                  aria-label={
+                                    dept.is_active ? 'Deactivate department' : 'Activate department'
+                                  }
+                                  className={dept.is_active ? 'deactivate' : 'activate'}
+                                  onClick={() => toggleDepartmentStatus(dept)}
+                                  title={dept.is_active ? 'Deactivate' : 'Activate'}
+                                  type="button"
+                                >
+                                  <Power size={16} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="module-panel settings-card">
+            <h2>Role Management</h2>
+            <div className="organization-input-row">
+              <label> Add Role </label>
+              <input
+                onChange={(e) => setNewRole(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addRole();
+                  }
+                }}
+                placeholder="e.g. Employee"
+                value={newRole}
+              />
+              <input
+                aria-label="User ID prefix"
+                maxLength={10}
+                onChange={(e) => setNewRolePrefix(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addRole();
+                  }
+                }}
+                placeholder="User ID prefix, e.g. EMP"
+                value={newRolePrefix}
+              />
+
+              <button className="organization-edit-button" onClick={addRole} type="button">
+                Add
+              </button>
+            </div>
+
+            <div className="enrollment-search-row">
+              <input
+                aria-label="Search roles"
+                onChange={(e) => setRoleSearch(e.target.value)}
+                placeholder="Search roles..."
+                type="search"
+                value={roleSearch}
+              />
+              <select
+                aria-label="Filter roles by status"
+                onChange={(e) =>
+                  setRoleStatusFilter(e.target.value as 'All' | 'Active' | 'Inactive')
+                }
+                value={roleStatusFilter}
+              >
+                <option value="All">All Status</option>
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+
+            {roleError ? (
+              <p className="module-table-message error" role="alert">
+                {roleError}
+              </p>
+            ) : null}
+            {roleMessage ? <p className="module-table-message">{roleMessage}</p> : null}
+
+            <div className="user-table-wrap">
+              <table className="managed-table user-management-table role-management-table">
+                <thead>
+                  <tr>
+                    <th>Role</th>
+                    <th>User ID Prefix</th>
+                    <th>Users</th>
+                    <th>Access Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {visibleRoles.length === 0 ? (
+                    <tr>
+                      <td colSpan={5}>
+                        {roles.length === 0 ? 'No roles yet.' : 'No roles match your search.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleRoles.map((role) => {
+                      const isSelected = selectedRole?.id === role.id;
+                      return (
+                        <tr
+                          key={role.id}
+                          className={`role-row ${isSelected ? 'selected-role-row' : ''}`}
+                          data-testid={`role-row-${role.name.toLowerCase().replace(/\s+/g, '-')}`}
+                          onClick={() => handleSelectRole(role)}
+                        >
+                          <td>
+                            {editingRoleId === role.id ? (
+                              <input
+                                aria-label={`Rename ${role.name}`}
+                                autoFocus
+                                onChange={(e) => setEditingRoleName(e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    saveRoleRename(role);
+                                  } else if (e.key === 'Escape') {
+                                    cancelRenamingRole();
+                                  }
+                                }}
+                                value={editingRoleName}
+                              />
+                            ) : (
+                              role.name
+                            )}
+                          </td>
+                          <td>
+                            {editingRoleId === role.id ? (
+                              <input
+                                aria-label={`User ID prefix for ${role.name}`}
+                                maxLength={10}
+                                onChange={(e) => setEditingRolePrefix(e.target.value.toUpperCase())}
+                                onClick={(e) => e.stopPropagation()}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    saveRoleRename(role);
+                                  } else if (e.key === 'Escape') {
+                                    cancelRenamingRole();
+                                  }
+                                }}
+                                placeholder="e.g. EMP"
+                                value={editingRolePrefix}
+                              />
+                            ) : (
+                              (role.user_id_prefix ?? 'Not set')
+                            )}
+                          </td>
+                          <td>{role.user_count}</td>
+                          <td>{role.is_active ? 'Active' : 'Inactive'}</td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <div className="user-row-actions">
+                              {editingRoleId === role.id ? (
+                                <>
+                                  <button
+                                    aria-label="Save role"
+                                    className="activate"
+                                    onClick={() => saveRoleRename(role)}
+                                    title="Save"
+                                    type="button"
+                                  >
+                                    <Check size={16} />
+                                  </button>
+                                  <button
+                                    aria-label="Cancel renaming"
+                                    className="archive"
+                                    onClick={cancelRenamingRole}
+                                    title="Cancel"
+                                    type="button"
+                                  >
+                                    <X size={16} />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    aria-label={`View users assigned to ${role.name}`}
+                                    className={`view-users ${isSelected ? 'active' : ''}`}
+                                    onClick={() => handleSelectRole(role)}
+                                    title={
+                                      isSelected ? 'Hide Assigned Users' : 'View Assigned Users'
+                                    }
+                                    type="button"
+                                  >
+                                    <Users size={16} />
+                                  </button>
+                                  <button
+                                    aria-label={`Edit ${role.name}`}
+                                    className="edit"
+                                    onClick={() => startRenamingRole(role)}
+                                    title="Edit"
+                                    type="button"
+                                  >
+                                    <Pencil size={16} />
+                                  </button>
+                                  <button
+                                    aria-label={
+                                      role.is_active ? 'Deactivate role' : 'Activate role'
+                                    }
+                                    className={role.is_active ? 'deactivate' : 'activate'}
+                                    onClick={() => toggleRoleStatus(role)}
+                                    title={role.is_active ? 'Deactivate' : 'Activate'}
+                                    type="button"
+                                  >
+                                    <Power size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {selectedRole ? (
+              <div
+                className="role-assigned-users-container"
+                data-testid="role-assigned-users"
+                id="role-assigned-users"
+              >
+                <div className="role-assigned-users-header">
+                  <div>
+                    <div className="role-assigned-title-row">
+                      <h3>
+                        Assigned Users:{' '}
+                        <span className="highlight-role-name">{selectedRole.name}</span>
+                      </h3>
+                      <span
+                        className={`role-assigned-status-badge ${selectedRole.is_active ? 'active' : 'inactive'}`}
+                      >
+                        {selectedRole.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                      <span className="role-assigned-count-badge">
+                        {assignedUsersForSelectedRole.length}{' '}
+                        {assignedUsersForSelectedRole.length === 1 ? 'user' : 'users'}
+                      </span>
+                    </div>
+                    <p className="role-assigned-subtitle">
+                      Accurate real-time record of all users currently assigned to{' '}
+                      <strong>{selectedRole.name}</strong>.
+                    </p>
+                  </div>
+                  <div className="role-assigned-controls">
+                    <input
+                      aria-label="Filter assigned users"
+                      className="role-assigned-search"
+                      onChange={(e) => setAssignedUsersSearch(e.target.value)}
+                      placeholder="Filter assigned users..."
+                      type="search"
+                      value={assignedUsersSearch}
+                    />
+                    <button
+                      aria-label="Close assigned users view"
+                      className="close-assigned-button"
+                      onClick={() => setSelectedRoleId(null)}
+                      type="button"
+                    >
+                      <X size={16} /> Close
+                    </button>
+                  </div>
+                </div>
+
+                <div className="user-table-wrap">
+                  <table className="managed-table user-management-table assigned-users-table">
+                    <thead>
+                      <tr>
+                        <th>User</th>
+                        <th>User ID</th>
+                        <th>Department</th>
+                        <th>Access Status</th>
+                        <th>Biometric Status</th>
+                        <th>RFID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAssignedUsers.length === 0 ? (
+                        <tr>
+                          <td className="module-table-message" colSpan={6}>
+                            {assignedUsersForSelectedRole.length === 0
+                              ? `No users are currently assigned to the "${selectedRole.name}" role.`
+                              : 'No assigned users match your filter.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredAssignedUsers.map((user, idx) => (
+                          <tr key={user.id}>
+                            <td>
+                              <span className="managed-user-cell">
+                                <span className={`managed-avatar ${getAvatarTone(idx)}`}>
+                                  {getInitials(
+                                    user.full_name ||
+                                      `${user.first_name ?? ''} ${user.last_name ?? ''}`,
+                                  )}
+                                </span>
+                                <span>
+                                  <strong>
+                                    {user.last_name && user.first_name
+                                      ? `${user.last_name}, ${user.first_name}`
+                                      : user.full_name}
+                                  </strong>
+                                  <small>{user.email || '—'}</small>
+                                </span>
+                              </span>
+                            </td>
+                            <td>
+                              <span className="user-id-code">{user.employee_id}</span>
+                            </td>
+                            <td>{user.department || '—'}</td>
+                            <td>
+                              <span
+                                className={`user-status-pill ${user.is_active ? 'success' : 'danger'}`}
+                              >
+                                {attendanceStatusIcon(user.is_active ? 'Active' : 'Disabled')}
+                                {user.is_active ? 'Active' : 'Disabled'}
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className={`user-status-pill ${user.fingerprint_id ? 'success' : 'danger'}`}
+                              >
+                                {attendanceStatusIcon(
+                                  user.fingerprint_id ? 'Registered' : 'Missing',
+                                )}
+                                {user.fingerprint_id ? 'Registered' : 'Missing'}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="rfid-code">{user.rfid_uid || '—'}</span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="role-selection-prompt">
+                <Users size={18} />
+                <span>Select a role above to view all currently assigned users in real time.</span>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
       {activeTab === 'security' ? (
         <div className="settings-save-row">
           <span>{message || (isDirty && !isSaving ? 'You have unsaved changes.' : '')}</span>
@@ -4786,7 +6569,7 @@ export function SettingsPage() {
                   </span>
                 </div>
                 <h2 id="verify-rfid-title">Saving changes...</h2>
-                <p>Please wait while we save your profile changes.</p>
+                <p>Please wait while we save your changes.</p>
               </>
             ) : verifyRfidStep === 'success' ? (
               <>
@@ -4846,7 +6629,7 @@ export function SettingsPage() {
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         event.preventDefault();
-                        void submitProfileNameChange();
+                        void submitVerifiedChange();
                       }
                     }}
                     placeholder="Tap card or enter RFID"
@@ -4855,7 +6638,7 @@ export function SettingsPage() {
                 </label>
                 <button
                   className="rfid-scan-capture-button"
-                  onClick={() => void submitProfileNameChange()}
+                  onClick={() => void submitVerifiedChange()}
                   type="button"
                 >
                   Confirm Changes

@@ -217,13 +217,32 @@ authRouter.post('/login', async (req, res) => {
 
     const admin = adminResult.rows[0];
     const now = Date.now();
+    const lockedUntilMs = admin.locked_until ? new Date(admin.locked_until).getTime() : null;
 
-    if (lockoutEnabled && admin.locked_until && new Date(admin.locked_until).getTime() > now) {
-      const minutesLeft = Math.ceil((new Date(admin.locked_until).getTime() - now) / 60_000);
+    // Still locked: tell the client exactly when the lock ends
+    if (lockoutEnabled && lockedUntilMs && lockedUntilMs > now) {
+      const retryAfterSeconds = Math.ceil((lockedUntilMs - now) / 1000);
+      const minutesLeft = Math.ceil(retryAfterSeconds / 60);
 
+      res.set('Retry-After', String(retryAfterSeconds));
       return res.status(423).json({
         error: `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute(s).`,
+        lockedUntil: lockedUntilMs,
+        retryAfterSeconds,
       });
+    }
+
+    // Lock has expired: clear the stale lock and counters so the user starts fresh
+    if (lockedUntilMs && lockedUntilMs <= now) {
+      await query(
+        `UPDATE admins
+        SET failed_login_attempts = 0, last_failed_login_at = NULL, locked_until = NULL
+        WHERE id = $1`,
+        [admin.id],
+      );
+      admin.failed_login_attempts = 0;
+      admin.last_failed_login_at = null;
+      admin.locked_until = null;
     }
 
     const passwordMatch = await bcrypt.compare(password, admin.password_hash);
@@ -256,23 +275,23 @@ authRouter.post('/login', async (req, res) => {
           now - new Date(admin.last_failed_login_at).getTime() > resetFailedAttemptsAfterMinutes * 60_000;
         const nextAttempts = (resetWindowElapsed ? 0 : admin.failed_login_attempts) + 1;
         const isNowLocked = nextAttempts >= maxFailedAttempts;
+        const lockedUntil = now + lockoutDurationMinutes * 60_000;
 
         await query(
           `UPDATE admins
-           SET failed_login_attempts = $1,
-             last_failed_login_at = NOW(),
-             locked_until = $2
-           WHERE id = $3`,
-          [
-            nextAttempts,
-            isNowLocked ? new Date(now + lockoutDurationMinutes * 60_000) : null,
-            admin.id,
-          ],
+          SET failed_login_attempts = $1,
+            last_failed_login_at = NOW(),
+            locked_until = $2
+          WHERE id = $3`,
+          [nextAttempts, isNowLocked ? new Date(lockedUntil) : null, admin.id],
         );
 
         if (isNowLocked) {
+          res.set('Retry-After', String(lockoutDurationMinutes * 60));
           return res.status(423).json({
             error: `Account locked due to too many failed attempts. Try again in ${lockoutDurationMinutes} minute(s).`,
+            lockedUntil,
+            retryAfterSeconds: lockoutDurationMinutes * 60,
           });
         }
       }
@@ -460,6 +479,12 @@ authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
       [admin.id, 'RFID Changed', 'Settings', `Admin RFID card was changed`, req.ip],
     );
 
+    await createNotification(
+      'RFID Card Updated',
+      `Admin RFID card for ${admin.username} was updated successfully.`,
+      'success',
+    );
+
     return res.json({
       name: updatedAdmin.username,
       email: updatedAdmin.email,
@@ -471,6 +496,43 @@ authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
       return res.status(409).json({ error: 'This RFID card is already assigned to another admin.' });
     }
 
+    next(error);
+  }
+});
+
+authRouter.post('/me/verify-rfid', authMiddleware, async (req, res, next) => {
+  const rfidCode = String(req.body.rfidCode || '').trim();
+
+  if (!rfidCode) {
+    return res.status(400).json({ error: 'RFID verification is required' });
+  }
+
+  try {
+    const result = await query(
+      `SELECT id, username, rfid_uid
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const admin = result.rows[0];
+
+    if (admin.rfid_uid !== rfidCode) {
+      await createNotification(
+        'RFID Verification Failed',
+        `RFID verification failed for ${admin.username}. The scanned card did not match the assigned admin RFID.`,
+        'error',
+      );
+      return res.status(403).json({ error: 'RFID verification failed. Please tap your admin card.' });
+    }
+
+    return res.json({ verified: true });
+  } catch (error) {
     next(error);
   }
 });
@@ -646,18 +708,64 @@ authRouter.post('/reset-password', async (req, res) => {
   }
 });
 
+authRouter.post('/validate-current-password', authMiddleware, async (req, res) => {
+  const currentPassword = String(req.body.currentPassword || '');
+
+  if (!currentPassword) {
+    return res.status(400).json({
+      errors: { currentPassword: 'Current password is required.' },
+    });
+  }
+
+  try {
+    const adminResult = await query(
+      `SELECT password_hash
+       FROM admins
+       WHERE id = $1 AND is_active = TRUE
+       LIMIT 1`,
+      [req.user.adminId],
+    );
+
+    if (adminResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Administrator account not found' });
+    }
+
+    const passwordMatch = await bcrypt.compare(currentPassword, adminResult.rows[0].password_hash);
+
+    if (!passwordMatch) {
+      return res.status(400).json({
+        errors: { currentPassword: 'Current password is incorrect.' },
+      });
+    }
+
+    return res.json({ valid: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Unable to validate current password' });
+  }
+});
+
 authRouter.post('/change-password', authMiddleware, async (req, res) => {
   const currentPassword = String(req.body.currentPassword || '');
   const newPassword = String(req.body.newPassword || '');
+  const confirmPassword = String(req.body.confirmPassword || '');
+  const validationErrors = {};
 
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({ error: 'Current password and new password are required' });
+  if (!currentPassword) {
+    validationErrors.currentPassword = 'Current password is required.';
   }
-
-  const passwordPolicyError = validatePasswordPolicy(newPassword);
-
-  if (passwordPolicyError) {
-    return res.status(400).json({ error: passwordPolicyError });
+  if (!newPassword) {
+    validationErrors.newPassword = 'New password is required.';
+  } else {
+    const passwordPolicyError = validatePasswordPolicy(newPassword);
+    if (passwordPolicyError) {
+      validationErrors.newPassword = passwordPolicyError;
+    }
+  }
+  if (!confirmPassword) {
+    validationErrors.confirmPassword = 'Please confirm your new password.';
+  } else if (newPassword !== confirmPassword) {
+    validationErrors.confirmPassword = 'Passwords do not match.';
   }
 
   try {
@@ -674,16 +782,21 @@ authRouter.post('/change-password', authMiddleware, async (req, res) => {
     }
 
     const admin = adminResult.rows[0];
-    const passwordMatch = await bcrypt.compare(currentPassword, admin.password_hash);
+    if (currentPassword) {
+      const passwordMatch = await bcrypt.compare(currentPassword, admin.password_hash);
 
-    if (!passwordMatch) {
-      return res.status(401).json({ error: 'Current password is incorrect' });
+      if (!passwordMatch) {
+        validationErrors.currentPassword = 'Current password is incorrect.';
+      } else if (currentPassword === newPassword) {
+        validationErrors.newPassword = 'New password must be different from the current password.';
+      }
     }
 
-    if (currentPassword === newPassword) {
-      return res
-        .status(400)
-        .json({ error: 'New password must be different from the current password' });
+    if (Object.keys(validationErrors).length > 0) {
+      return res.status(400).json({
+        error: 'Please correct the highlighted fields.',
+        errors: validationErrors,
+      });
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 12);

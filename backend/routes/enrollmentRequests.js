@@ -12,23 +12,11 @@ import { getDuplicateUserMessage } from './users.js';
 import { getDefaultExpirationForRole } from '../lib/userExpiration.js';
 import { createNotification } from '../lib/notifications.js';
 import { composeFullName, fullNameSql, validateNameParts } from '../lib/personName.js';
+import { checkDepartmentAssignable } from '../lib/departments.js';
+import { checkRoleAssignable } from '../lib/roles.js';
+import { generateUserId } from '../lib/userIds.js';
 
 export const enrollmentRequestsRouter = express.Router();
-
-async function getNextEmployeeId(client) {
-  const result = await client.query(
-    `SELECT COALESCE(MAX(employee_number), 0) + 1 AS next_number
-     FROM (
-       SELECT NULLIF(REGEXP_REPLACE(employee_id, '^EMP', ''), '')::INTEGER AS employee_number
-       FROM enrollment_requests
-       WHERE employee_id ~ '^EMP[0-9]+$'
-     ) employee_ids`,
-  );
-
-  const nextNumber = Number(result.rows[0]?.next_number ?? 1);
-
-  return `EMP${String(nextNumber).padStart(3, '0')}`;
-}
 
 // Collapses common Philippine phone formats to +63XXXXXXXXXX so "0917 123 4567", "9171234567"
 // and "+63 917 123 4567" are recognised as the same number for duplicate-checking, and so the
@@ -83,15 +71,26 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
   const client = await pool.connect();
 
   try {
-    const { department, email, phone } = req.body;
+    const { role, email, phone } = req.body;
     const { firstName, lastName, errors } = validateNameParts(req.body);
 
-    if (!department) errors.department = 'Department is required.';
+    if (!role) errors.role = 'Role is required.';
     if (!email) errors.email = 'Email is required.';
     if (!phone) errors.phone = 'Phone number is required.';
 
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({ error: Object.values(errors).join(' '), errors });
+    }
+
+    const roleCheck = await checkRoleAssignable(role);
+
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+    }
+
+    if (!roleCheck.userIdPrefix) {
+      const message = `Role "${roleCheck.name}" has no User ID prefix yet. Please contact an administrator.`;
+      return res.status(400).json({ error: message, errors: { role: message } });
     }
 
     const fullName = composeFullName(firstName, lastName);
@@ -184,7 +183,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       });
     }
 
-    const employeeId = await getNextEmployeeId(client);
+    const employeeId = await generateUserId(client, roleCheck.userIdPrefix);
     await resetEnrollmentSequencesIfEmpty(client);
 
     const result = await client.query(
@@ -196,7 +195,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
         employeeId,
         firstName,
         lastName,
-        department.trim(),
+        roleCheck.name,
         'New Enrollment',
         email.trim(),
         normalizedPhone,
@@ -273,6 +272,17 @@ enrollmentRequestsRouter.post('/', async (req, res, next) => {
       return res.status(400).json({ error: Object.values(errors).join(' '), errors });
     }
 
+    const departmentCheck = await checkDepartmentAssignable(department, { strict: false });
+    const roleCheck = await checkRoleAssignable(role, { strict: false });
+
+    if (departmentCheck.error) {
+      return res.status(400).json({ error: departmentCheck.error, errors: { department: departmentCheck.error } });
+    }
+
+    if (roleCheck.error) {
+      return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
+    }
+
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock($1)', [20260617]);
     await resetEnrollmentSequencesIfEmpty(client);
@@ -344,6 +354,19 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
       if (!rfidUid) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'RFID UID is required before approving enrollment.' });
+      }
+
+      const departmentCheck = await checkDepartmentAssignable(request.department, { strict: false });
+      const roleCheck = await checkRoleAssignable(request.department, { strict: false });
+
+      if (departmentCheck.error) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: departmentCheck.error });
+      }
+
+      if (roleCheck.error) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: roleCheck.error });
       }
 
       const expirationDate = getDefaultExpirationForRole(request.department);
@@ -419,6 +442,16 @@ enrollmentRequestsRouter.patch('/:id/status', async (req, res, next) => {
         status,
       },
     });
+    if (status === 'Approved') {
+      broadcastMessage({
+        type: 'users:changed',
+        payload: { action: 'enrolled', employeeId: request.employee_id },
+      });
+      broadcastMessage({
+        type: 'roles:changed',
+        payload: { action: 'user_enrolled' },
+      });
+    }
     res.json(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});

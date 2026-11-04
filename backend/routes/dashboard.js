@@ -1,34 +1,52 @@
-import express from 'express';
+import express from "express";
 
-import { query } from '../db.js';
-import { authMiddleware } from '../middleware/auth.js';
-import { fullNameSql } from '../lib/personName.js';
+import { query } from "../db.js";
+import { authMiddleware } from "../middleware/auth.js";
+import { fullNameSql } from "../lib/personName.js";
+import { getSystemTimeZone } from "../lib/timezone.js";
 
 export const dashboardRouter = express.Router();
 dashboardRouter.use(authMiddleware);
 
-dashboardRouter.get('/', async (req, res, next) => {
+dashboardRouter.get("/", async (req, res, next) => {
   try {
-    const [metrics, recentEvents, devices, attendanceTrend, attendanceRecords] = await Promise.all([
-      query(
-        `SELECT
-          (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE) AS total_users,
-          (SELECT COUNT(DISTINCT user_id)::int FROM attendance_records WHERE attendance_date = CURRENT_DATE AND status <> 'Absent') AS todays_attendance,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE) AS total_access,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Granted') AS successful_attempts,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE AND result = 'Denied') AS failed_attempts,
-          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online') AS active_devices,
-          (SELECT COUNT(*)::int FROM users WHERE created_at < CURRENT_DATE AND (is_active = TRUE OR deactivated_at >= CURRENT_DATE)) AS total_users_yesterday,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE - 1) AS total_access_yesterday,
-          (SELECT COUNT(*)::int FROM access_logs WHERE access_time::date = CURRENT_DATE - 1 AND result = 'Denied') AS failed_attempts_yesterday,
-          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online' AND created_at < CURRENT_DATE) AS active_devices_yesterday`,
-      ),
-      query(
-        `SELECT *
+    const rawDate =
+      typeof req.query.date === "string" ? req.query.date.trim() : null;
+    const isValidDate =
+      rawDate &&
+      /^\d{4}-\d{2}-\d{2}$/.test(rawDate) &&
+      !Number.isNaN(new Date(rawDate).getTime());
+    const targetDate = isValidDate ? rawDate : null;
+    const timeZone = await getSystemTimeZone();
+
+    const [metrics, recentEvents, devices, attendanceTrend, attendanceRecords] =
+      await Promise.all([
+        query(
+          `SELECT
+          CASE 
+            WHEN COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) = (NOW() AT TIME ZONE $2)::date THEN (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE)
+            ELSE (SELECT COUNT(*)::int FROM users WHERE (created_at AT TIME ZONE $2)::date <= $1::date AND (is_active = TRUE OR (deactivated_at IS NOT NULL AND (deactivated_at AT TIME ZONE $2)::date > $1::date)))
+          END AS total_users,
+          (SELECT COUNT(DISTINCT user_id)::int FROM attendance_records WHERE attendance_date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) AND status <> 'Absent') AS todays_attendance,
+          (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date)) AS total_access,
+          (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) AND result = 'Granted') AS successful_attempts,
+          (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) AND result = 'Denied') AS failed_attempts,
+          CASE
+            WHEN COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) = (NOW() AT TIME ZONE $2)::date THEN (SELECT COUNT(*)::int FROM devices WHERE status = 'Online')
+            ELSE (SELECT COUNT(*)::int FROM devices WHERE status = 'Online' AND (created_at AT TIME ZONE $2)::date <= $1::date)
+          END AS active_devices,
+          (SELECT COUNT(*)::int FROM users WHERE (created_at AT TIME ZONE $2)::date <= (COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) - 1) AND (is_active = TRUE OR (deactivated_at IS NOT NULL AND (deactivated_at AT TIME ZONE $2)::date >= COALESCE($1::date, (NOW() AT TIME ZONE $2)::date)))) AS total_users_yesterday,
+          (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = (COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) - 1)) AS total_access_yesterday,
+          (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = (COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) - 1) AND result = 'Denied') AS failed_attempts_yesterday,
+          (SELECT COUNT(*)::int FROM devices WHERE status = 'Online' AND (created_at AT TIME ZONE $2)::date <= (COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) - 1)) AS active_devices_yesterday`,
+          [targetDate, timeZone],
+        ),
+        query(
+          `SELECT *
          FROM (
            SELECT
              'access-' || al.id AS id,
-             ${fullNameSql('u')} AS user_name,
+             ${fullNameSql("u")} AS user_name,
              u.employee_id,
              CASE WHEN al.result = 'Granted' THEN 'Access Granted' ELSE 'Access Denied' END AS event,
              al.result::text AS result,
@@ -46,7 +64,10 @@ dashboardRouter.get('/', async (req, res, next) => {
              COALESCE(a.username, 'System') AS user_name,
              NULL AS employee_id,
              l.action AS event,
-             CASE WHEN l.action = 'Failed Login Attempt' THEN 'Failed' ELSE 'Info' END AS event,
+             CASE 
+              WHEN l.action = 'Failed Login Attempt' THEN 'Failed' 
+              WHEN l.action = 'Login' THEN 'Success' 
+              ELSE 'Info' END AS event,
              l.module AS area,
              'Admin Portal' AS device_name,
              l.created_at AS event_time
@@ -55,41 +76,46 @@ dashboardRouter.get('/', async (req, res, next) => {
          ) recent_activity
          ORDER BY event_time DESC
          LIMIT 8`,
-      ),
-      query(
-        `SELECT id, device_name, device_type, location, ip_address, status, last_seen
+        ),
+        query(
+          `SELECT id, device_name, device_type, location, ip_address, status, last_seen
          FROM devices
          ORDER BY device_name
          LIMIT 8`,
-      ),
-      query(
-        `SELECT attendance_date,
+        ),
+        query(
+          `SELECT attendance_date::text AS attendance_date,
           COUNT(DISTINCT user_id) FILTER (WHERE check_in_at IS NOT NULL)::int AS check_ins,
           COUNT(DISTINCT user_id) FILTER (WHERE check_out_at IS NOT NULL)::int AS check_outs,
           COUNT(DISTINCT user_id)::int AS total
          FROM attendance_records
-         WHERE attendance_date >= CURRENT_DATE - INTERVAL '6 days'
+         WHERE attendance_date >= COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) - INTERVAL '6 days'
+           AND attendance_date <= COALESCE($1::date, (NOW() AT TIME ZONE $2)::date)
          GROUP BY attendance_date
          ORDER BY attendance_date`,
-      ),
-      query(
-        `SELECT u.employee_id,
-          ${fullNameSql('u')} AS name,
+          [targetDate, timeZone],
+        ),
+        query(
+          `SELECT u.employee_id,
+          ${fullNameSql("u")} AS name,
           u.department,
           u.role,
+          ar.attendance_date::text AS attendance_date,
           ar.check_in_at,
           ar.check_out_at,
           COALESCE(ar.status::text, 'Present') AS status,
           COALESCE(ar.location, 'Office') AS location
          FROM attendance_records ar
          JOIN users u ON u.id = ar.user_id
-         WHERE ar.attendance_date = CURRENT_DATE
-         ORDER BY ar.check_in_at DESC NULLS LAST, ${fullNameSql('u')}
+         WHERE ar.attendance_date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date)
+         ORDER BY ar.check_in_at DESC NULLS LAST, ${fullNameSql("u")}
          LIMIT 10`,
-      ),
-    ]);
+          [targetDate, timeZone],
+        ),
+      ]);
 
     res.json({
+      selectedDate: targetDate,
       metrics: metrics.rows[0],
       recentEvents: recentEvents.rows,
       devices: devices.rows,

@@ -56,6 +56,18 @@ function validateLoginForm(
   return errors;
 }
 
+function getLockedUntil(error: unknown, message: string): number | null {
+  // Preferred: exact timestamp from the server
+  const fromServer = (error as { lockedUntil?: number } | null)?.lockedUntil;
+  if (typeof fromServer === 'number') {
+    return fromServer;
+  }
+
+  // Fallback: parse "Try again in N minute(s)" from the message
+  const match = /try again in (\d+) minute/i.exec(message);
+  return match ? Date.now() + Number(match[1]) * 60_000 : null;
+}
+
 export function LoginPage() {
   const { isAuthenticated, signIn } = useAuth();
   const location = useLocation();
@@ -67,6 +79,7 @@ export function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rfidRequired, setRfidRequired] = useState(true);
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -85,6 +98,27 @@ export function LoginPage() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    if (lockedUntil === null) {
+      return;
+    }
+
+    const clearLockMessage = () => {
+      setErrors((current) => (current.form ? { ...current, form: undefined } : current));
+      setLockedUntil(null);
+    };
+
+    const remaining = lockedUntil - Date.now();
+
+    if (remaining <= 0) {
+      clearLockMessage();
+      return;
+    }
+
+    const timer = window.setTimeout(clearLockMessage, remaining);
+    return () => window.clearTimeout(timer);
+  }, [lockedUntil]);
+
   const redirectTo =
     (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/dashboard';
 
@@ -99,14 +133,16 @@ export function LoginPage() {
     }
 
     setIsSubmitting(true);
+    setLockedUntil(null); // reset any previous lock timer
 
     try {
       await signIn({ usernameOrEmail, password, rfidCode });
       navigate(redirectTo, { replace: true });
     } catch (error) {
-      setErrors({
-        form: error instanceof Error ? error.message : 'Authentication failed.',
-      });
+      const message = error instanceof Error ? error.message : 'Authentication failed.';
+
+      setErrors({ form: message });
+      setLockedUntil(getLockedUntil(error, message));
     } finally {
       setIsSubmitting(false);
     }

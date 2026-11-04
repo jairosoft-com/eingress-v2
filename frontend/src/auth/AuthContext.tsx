@@ -26,6 +26,16 @@ type LoginResponse = {
   sessionTimeoutMinutes: number;
 };
 
+export class AuthError extends Error {
+  lockedUntil?: number;
+
+  constructor(message: string, lockedUntil?: number) {
+    super(message);
+    this.name = 'AuthError';
+    this.lockedUntil = lockedUntil;
+  }
+}
+
 function decodeAccessTokenAdminId(accessToken: string): string | null {
   try {
     const payloadSegment = accessToken.split('.')[1];
@@ -225,11 +235,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         const data = (await response.json().catch(() => null)) as
-          | (Partial<LoginResponse> & { error?: string })
+          | (Partial<LoginResponse> & { error?: string; lockedUntil?: number })
           | null;
 
         if (!response.ok || !data?.accessToken) {
-          throw new Error(data?.error || 'Authentication failed.');
+          throw new AuthError(data?.error || 'Authentication failed.', data?.lockedUntil);
         }
 
         // Seed the security settings store from the login response itself,

@@ -72,6 +72,43 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS departments (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS departments_name_lower_idx ON departments (LOWER(name));
+
+INSERT INTO departments (name) VALUES
+  ('IT Department'), ('HR Department'), ('Operations'), ('Admin'), ('Engineering')
+ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS roles (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS roles_name_idx ON roles (name);
+
+ALTER TABLE roles ADD COLUMN IF NOT EXISTS user_id_prefix VARCHAR(3);
+CREATE UNIQUE INDEX IF NOT EXISTS roles_user_id_prefix_idx ON roles (UPPER(user_id_prefix)) WHERE user_id_prefix IS NOT NULL;
+
+INSERT INTO roles (name) VALUES
+  ('Intern'), ('Student'), ('Employee')
+ON CONFLICT DO NOTHING;
+
+SET user_id_prefix = d.prefix
+FROM (VALUES ('Employee', 'EMP'), ('Intern', 'INT'), ('Staff', 'STA'), ('Student', 'STU')) AS d(name, prefix)
+WHERE LOWER(r.name) = LOWER(d.name)
+  AND r.user_id_prefix IS NULL
+  AND NOT EXISTS (SELECT 1 FROM roles o WHERE UPPER(o.user_id_prefix) = d.prefix);
+
 CREATE TABLE IF NOT EXISTS devices (
   id BIGSERIAL PRIMARY KEY,
   device_code VARCHAR(50) NOT NULL UNIQUE,
@@ -207,7 +244,6 @@ INSERT INTO system_settings (id)
 VALUES (1)
 ON CONFLICT (id) DO NOTHING;
 
--- Password is "admin123". Change it immediately after first login.
 INSERT INTO admins (username, email, password_hash, rfid_uid)
 VALUES (
   'JairosoftAdmin',
