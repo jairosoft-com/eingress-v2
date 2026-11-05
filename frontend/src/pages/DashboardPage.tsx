@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
+import { formatWorkedMinutes } from '../lib/attendanceFormat';
 import {
   formatDate,
   formatTime,
@@ -62,6 +63,7 @@ type DashboardAttendanceRecord = {
   check_out_at?: string | null;
   status?: string | null;
   location?: string | null;
+  total_minutes?: number | null;
 };
 
 type DashboardAttendanceTrendPoint = {
@@ -131,17 +133,6 @@ function formatTrendLabel(value: string | null | undefined, settings: DateTimeSe
   }
 
   return formatWeekdayShort(value, settings);
-}
-
-function hasCheckedOut(checkInAt?: string | null, checkOutAt?: string | null) {
-  if (!checkInAt || !checkOutAt) {
-    return false;
-  }
-
-  const checkInTime = new Date(checkInAt).getTime();
-  const checkOutTime = new Date(checkOutAt).getTime();
-
-  return !Number.isNaN(checkInTime) && !Number.isNaN(checkOutTime) && checkOutTime !== checkInTime;
 }
 
 function getChangeBadge(
@@ -554,6 +545,7 @@ export function DashboardPage() {
                 <th>Time In</th>
                 <th>Time Out</th>
                 <th>Status</th>
+                <th>Total Hours</th>
                 <th>Location</th>
               </tr>
             </thead>
@@ -565,24 +557,21 @@ export function DashboardPage() {
                     <td>{record.name ?? 'Unknown user'}</td>
                     <td>{record.department ?? '—'}</td>
                     <td>{formatAttendanceTime(record.check_in_at, dateTimeSettings) || '—'}</td>
-                    <td>
-                      {hasCheckedOut(record.check_in_at, record.check_out_at)
-                        ? formatAttendanceTime(record.check_out_at, dateTimeSettings)
-                        : '—'}
-                    </td>
+                    <td>{formatAttendanceTime(record.check_out_at, dateTimeSettings) || '—'}</td>
                     <td>
                       <span
-                        className={`attendance-status ${record.status?.toLowerCase() ?? 'present'}`}
+                        className={`attendance-status ${(record.status ?? 'present').toLowerCase().replace(/\s+/g, '-')}`}
                       >
                         {record.status ?? 'Present'}
                       </span>
                     </td>
+                    <td>{formatWorkedMinutes(record.total_minutes)}</td>
                     <td>{record.location ?? 'Office'}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="empty-state-row">
+                  <td colSpan={8} className="empty-state-row">
                     {isToday
                       ? 'No attendance records are available for today yet.'
                       : `No attendance records are available for ${selectedDateLabel}.`}

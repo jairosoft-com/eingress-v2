@@ -27,6 +27,7 @@ import { Link } from 'react-router-dom';
 
 import { API_BASE_URL } from '../lib/api';
 import { useAuth } from '../auth/useAuth';
+import { formatWorkedMinutes } from '../lib/attendanceFormat';
 import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
 import { setSecuritySettings } from '../lib/securitySettingsStore';
 import {
@@ -83,10 +84,13 @@ type AttendanceRecord = {
   location: string | null;
   role: string | null;
   status: string;
+  total_minutes?: number | null;
 };
 
 type AttendanceSummary = {
   absent: number;
+  attended?: number;
+  clocked_out?: number;
   late: number;
   present: number;
   total_records: number;
@@ -621,6 +625,10 @@ function statusTone(status: string) {
     return 'warning';
   }
 
+  if (status === 'Clocked Out') {
+    return 'neutral';
+  }
+
   return 'danger';
 }
 
@@ -659,36 +667,6 @@ function formatClockTime(value: string | null, settings: DateTimeSettings) {
   }
 
   return formatTime(value, settings) || '-';
-}
-
-function hasCheckedOut(checkInAt: string | null, checkOutAt: string | null) {
-  if (!checkInAt || !checkOutAt) {
-    return false;
-  }
-
-  const checkInTime = new Date(checkInAt).getTime();
-  const checkOutTime = new Date(checkOutAt).getTime();
-
-  return !Number.isNaN(checkInTime) && !Number.isNaN(checkOutTime) && checkOutTime !== checkInTime;
-}
-
-function formatTotalHours(checkInAt: string | null, checkOutAt: string | null) {
-  if (!hasCheckedOut(checkInAt, checkOutAt)) {
-    return '-';
-  }
-
-  const checkInTime = new Date(checkInAt as string).getTime();
-  const checkOutTime = new Date(checkOutAt as string).getTime();
-
-  if (checkOutTime < checkInTime) {
-    return '-';
-  }
-
-  const totalMinutes = Math.round((checkOutTime - checkInTime) / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  return `${hours} hrs ${minutes} mins`;
 }
 
 function toDateInputValue(value: string) {
@@ -2963,11 +2941,9 @@ export function AttendanceManagementPage() {
         record.full_name,
         record.role || '-',
         formatClockTime(record.check_in_at, dateTimeSettings),
-        hasCheckedOut(record.check_in_at, record.check_out_at)
-          ? formatClockTime(record.check_out_at, dateTimeSettings)
-          : '-',
+        formatClockTime(record.check_out_at, dateTimeSettings),
         record.status,
-        formatTotalHours(record.check_in_at, record.check_out_at),
+        formatWorkedMinutes(record.total_minutes),
       ]),
     [records, dateTimeSettings],
   );
@@ -2981,7 +2957,7 @@ export function AttendanceManagementPage() {
     },
     {
       label: "Today's Attendance",
-      value: summary ? summary.present + summary.late : null,
+      value: summary ? (summary.attended ?? summary.present + summary.late) : null,
       Icon: Fingerprint,
       tone: 'blue',
     },
@@ -3526,7 +3502,7 @@ const REPORT_TYPES = [
 type ReportType = (typeof REPORT_TYPES)[number];
 
 const REPORT_STATUS_OPTIONS: Record<ReportType, string[]> = {
-  'Attendance Summary': ['Present', 'Late', 'Absent'],
+  'Attendance Summary': ['Present', 'Late', 'Clocked Out', 'Absent'],
   'Access Request Summary': ['Pending', 'Approved', 'Rejected'],
   'User Summary': ['Active', 'Disabled'],
   'Auto-Deactivated Accounts': [],

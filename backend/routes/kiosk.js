@@ -7,9 +7,14 @@ import { broadcastActivityEvent } from "../activityEvents.js";
 import { createNotification } from "../lib/notifications.js";
 import { fullNameSql } from "../lib/personName.js";
 import { getSystemTimeZone } from "../lib/timezone.js";
+import { CLOCK_OUT_MIN_GAP_MINUTES, ensureAttendanceStatus } from "../lib/attendance.js";
 import { emitDoorUnlock } from "../socketio.js";
 
 export const kioskRouter = express.Router();
+
+void ensureAttendanceStatus().catch((error) => {
+  console.error("Unable to ensure attendance status exists", error);
+});
 
 async function getTodaysAccessMetrics(timeZone) {
   const resolvedTimeZone = timeZone || (await getSystemTimeZone());
@@ -144,14 +149,16 @@ async function processKioskScanUnsafe(req, res) {
   let timeType = null;
 
   if (result === "Granted" && method === "Fingerprint") {
+    await ensureAttendanceStatus();
     const attendanceResult = await query(
       `INSERT INTO attendance_records
          (user_id, attendance_date, check_in_at, check_out_at, status, location, employee_id, full_name, department, role)
        SELECT $1,
          (NOW() AT TIME ZONE $6)::date,
          MIN(access_time),
-         MAX(access_time),
+         CASE WHEN MAX(access_time) - MIN(access_time) >= make_interval(mins => $7) THEN MAX(access_time) END,
          (CASE
+           WHEN MAX(access_time) - MIN(access_time) >= make_interval(mins => $7) THEN 'Clocked Out'
            WHEN (MIN(access_time) AT TIME ZONE $6)::time > TIME '08:00:00' THEN 'Late'
            ELSE 'Present'
          END)::attendance_status,
@@ -165,9 +172,13 @@ async function processKioskScanUnsafe(req, res) {
        DO UPDATE SET
          check_in_at = LEAST(attendance_records.check_in_at, EXCLUDED.check_in_at),
          check_out_at = GREATEST(attendance_records.check_out_at, EXCLUDED.check_out_at),
-         status = EXCLUDED.status,
+         status = CASE
+           WHEN attendance_records.status = 'Clocked Out' OR EXCLUDED.status = 'Clocked Out'
+             THEN 'Clocked Out'::attendance_status
+           ELSE EXCLUDED.status
+         END,
          updated_at = NOW()
-       RETURNING (xmax = 0) AS just_checked_in`,
+       RETURNING check_out_at`,
       [
         user.id,
         user.employee_id,
@@ -175,9 +186,11 @@ async function processKioskScanUnsafe(req, res) {
         user.department,
         user.role,
         timeZone,
+        CLOCK_OUT_MIN_GAP_MINUTES,
       ],
     );
-    timeType = attendanceResult.rows[0].just_checked_in ? "in" : "out";
+    // A tap inside the minimum gap after the first one is not a clock-out, so the user is still just clocked in.
+    timeType = attendanceResult.rows[0].check_out_at ? "out" : "in";
 
     broadcastMessage({
       type: "attendance:changed",

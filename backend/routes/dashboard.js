@@ -4,6 +4,7 @@ import { query } from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { fullNameSql } from "../lib/personName.js";
 import { getSystemTimeZone } from "../lib/timezone.js";
+import { workedMinutesSql } from "../lib/attendance.js";
 
 export const dashboardRouter = express.Router();
 dashboardRouter.use(authMiddleware);
@@ -103,6 +104,7 @@ dashboardRouter.get("/", async (req, res, next) => {
           ar.attendance_date::text AS attendance_date,
           ar.check_in_at,
           ar.check_out_at,
+          ${workedMinutesSql("$2")} AS total_minutes,
           COALESCE(ar.status::text, 'Present') AS status,
           COALESCE(ar.location, 'Office') AS location
          FROM attendance_records ar
