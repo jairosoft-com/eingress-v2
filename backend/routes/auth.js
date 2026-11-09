@@ -426,6 +426,11 @@ authRouter.patch('/me', authMiddleware, async (req, res, next) => {
       'success',
     );
 
+    broadcastMessage({
+      type: 'auth:profile-updated',
+      payload: { adminId: admin.id, name: updatedAdmin.username },
+    });
+
     return res.json({
       name: updatedAdmin.username,
       email: updatedAdmin.email,
