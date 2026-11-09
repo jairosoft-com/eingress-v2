@@ -4756,7 +4756,7 @@ function sortRoles(roles: Role[]) {
 }
 
 export function SettingsPage() {
-  const { session } = useAuth();
+  const { session, updateAdminName } = useAuth();
   const [activeTab, setActiveTab] = useState<'general' | 'security' | 'organization'>('general');
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
   const [lastSavedSettings, setLastSavedSettings] =
@@ -5209,6 +5209,7 @@ export function SettingsPage() {
       }
 
       setProfile(data);
+      updateAdminName(data.name);
       setIsEditingProfile(false);
       setProfileMessage('Admin name updated successfully.');
       setVerifySuccessCountdown(5);

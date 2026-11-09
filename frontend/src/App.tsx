@@ -40,7 +40,7 @@ type EnrollmentRequest = {
 
 type RealtimeMessage = {
   type?: string;
-  payload?: { adminId?: string | number };
+  payload?: { adminId?: string | number; name?: string };
 };
 
 type AdminProfile = {
@@ -212,6 +212,18 @@ export function App() {
           }
 
           if (
+            message.type === 'auth:profile-updated' &&
+            currentAdminId != null &&
+            message.payload?.adminId != null &&
+            String(message.payload.adminId) === currentAdminId &&
+            message.payload.name
+          ) {
+            setProfile((prev) =>
+              prev ? { ...prev, name: message.payload?.name as string } : null,
+            );
+          }
+
+          if (
             message.type === 'auth:password-changed' &&
             currentAdminId != null &&
             message.payload?.adminId != null &&
@@ -249,6 +261,31 @@ export function App() {
       socket?.close();
     };
   }, [loadNotifications, session?.accessToken, signOut]);
+
+  useEffect(() => {
+    if (!session?.accessToken) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as AdminProfile | null;
+
+        if (response.ok && data) {
+          setProfile(data);
+        }
+      })
+      .catch(() => {
+        // Retain the session details when the profile request is unavailable.
+      });
+
+    return () => controller.abort();
+  }, [session?.accessToken]);
 
   useEffect(() => {
     if (!isProfileOpen || !session?.accessToken) {
