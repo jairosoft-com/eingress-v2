@@ -2540,10 +2540,18 @@ td small {
   background: #fff7f8;
 }
 
-.user-row-actions button.archive {
+.user-row-actions button.archive,
+.user-row-actions button.delete {
   color: #ef4444;
   border-color: #fecaca;
   background: #fff1f2;
+}
+
+.user-row-actions button.archive:hover,
+.user-row-actions button.delete:hover {
+  color: #dc2626;
+  border-color: #fca5a5;
+  background: #fee2e2;
 }
 
 .user-row-actions button.edit {
@@ -2559,11 +2567,13 @@ td small {
   cursor: pointer;
   transition: all 0.15s ease;
 }
+
 .user-row-actions button.view-users:hover {
   color: #1d4ed8;
   border-color: #bfdbfe;
   background: #eff6ff;
 }
+
 .user-row-actions button.view-users.active {
   color: #ffffff;
   border-color: #2563eb;
@@ -3757,10 +3767,12 @@ td small {
   color: #087b45;
   background: #eafaf1;
 }
+
 .request-status.warning {
   color: #9a6200;
   background: #fff5db;
 }
+
 .request-status.danger {
   color: #c91e36;
   background: #fff0f2;
@@ -3802,6 +3814,7 @@ td small {
 .request-registration-grid > div:nth-child(2n) {
   border-right: 0;
 }
+
 .request-registration-grid > div:nth-last-child(-n + 2) {
   border-bottom: 0;
 }
@@ -3814,6 +3827,7 @@ td small {
 .request-registration-grid strong {
   font-size: 0.7rem;
 }
+
 .request-registration-grid small {
   margin-top: 6px;
   color: #169b5a;
@@ -3848,11 +3862,13 @@ td small {
   color: #e32947;
   border-color: #e32947;
 }
+
 .request-drawer-actions .approve-request-button {
   color: #ffffff;
   border-color: #e32947;
   background: #e32947;
 }
+
 .request-drawer-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.52;
@@ -4290,15 +4306,18 @@ td small {
 .settings-card {
   padding: 30px 28px;
 }
+
 .settings-card h2 {
   margin: 0 0 18px;
   font-size: 1rem;
 }
+
 .settings-card > p {
   margin: -11px 0 16px;
   color: #667089;
   font-size: 0.76rem;
 }
+
 .admin-profile-card,
 .system-info-card {
   min-height: 620px;
@@ -4314,6 +4333,7 @@ td small {
 .settings-fields {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
 .settings-fields label:nth-child(-n + 2) {
   grid-column: 1 / -1;
 }
@@ -4415,6 +4435,7 @@ td small {
   max-width: 998px;
   margin: 8px auto 0;
 }
+
 .organization-edit-button {
   min-height: 40px;
   width: 25%;
@@ -4441,22 +4462,27 @@ td small {
 .role-management-table {
   min-width: 900px;
 }
+
 .role-management-table th:nth-child(1),
 .role-management-table td:nth-child(1) {
   width: 26%;
 }
+
 .role-management-table th:nth-child(2),
 .role-management-table td:nth-child(2) {
   width: 20%;
 }
+
 .role-management-table th:nth-child(3),
 .role-management-table td:nth-child(3) {
   width: 15%;
 }
+
 .role-management-table th:nth-child(4),
 .role-management-table td:nth-child(4) {
   width: 17%;
 }
+
 .role-management-table th:nth-child(5),
 .role-management-table td:nth-child(5) {
   width: 22%;
@@ -4466,12 +4492,15 @@ td small {
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
+
 .role-row:hover {
   background-color: #f8fafc;
 }
+
 .role-row.selected-role-row td {
   background-color: #f1f5f9 !important;
 }
+
 .role-row.selected-role-row td:first-child {
   box-shadow: inset 4px 0 0 #2563eb;
 }
@@ -4484,11 +4513,13 @@ td small {
   font-weight: 700;
   border-radius: 999px;
 }
+
 .role-assigned-status-badge.active {
   background: #f0fdf4;
   color: #15803d;
   border: 1px solid #bbf7d0;
 }
+
 .role-assigned-status-badge.inactive {
   background: #fef2f2;
   color: #b91c1c;
@@ -4587,6 +4618,7 @@ td small {
   cursor: pointer;
   transition: all 0.15s ease;
 }
+
 .close-assigned-button:hover {
   background: #e2e8f0;
   color: #0f172a;
@@ -4596,30 +4628,37 @@ td small {
   min-width: 900px;
   width: 100%;
 }
+
 .assigned-users-table th,
 .assigned-users-table td {
   padding: 10px 14px;
 }
+
 .assigned-users-table th:nth-child(1),
 .assigned-users-table td:nth-child(1) {
   width: 26%;
 }
+
 .assigned-users-table th:nth-child(2),
 .assigned-users-table td:nth-child(2) {
   width: 13%;
 }
+
 .assigned-users-table th:nth-child(3),
 .assigned-users-table td:nth-child(3) {
   width: 16%;
 }
+
 .assigned-users-table th:nth-child(4),
 .assigned-users-table td:nth-child(4) {
   width: 16%;
 }
+
 .assigned-users-table th:nth-child(5),
 .assigned-users-table td:nth-child(5) {
   width: 16%;
 }
+
 .assigned-users-table th:nth-child(6),
 .assigned-users-table td:nth-child(6) {
   width: 13%;
@@ -4660,20 +4699,24 @@ td small {
   gap: 42px;
   margin: 50px 0 0;
 }
+
 .system-info-card dl div {
   display: grid;
   grid-template-columns: 1fr max-content;
   gap: 14px;
 }
+
 .system-info-card dt {
   color: #17223f;
   font-size: 0.78rem;
 }
+
 .system-info-card dd {
   margin: 0;
   font-size: 0.78rem;
   font-weight: 800;
 }
+
 .system-info-card .healthy {
   color: #16ad61;
 }
@@ -4692,17 +4735,21 @@ td small {
 .security-settings-stack .settings-card {
   padding: 20px 88px;
 }
+
 .date-time-fields {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
 .lockout-fields {
   grid-template-columns: repeat(3, minmax(0, 1fr)) max-content;
   align-items: end;
 }
+
 .session-fields {
   grid-template-columns: repeat(2, minmax(0, 1fr)) max-content max-content;
   align-items: end;
 }
+
 .lifecycle-fields {
   grid-template-columns: minmax(0, 220px) max-content;
   align-items: start;
@@ -4719,11 +4766,13 @@ td small {
   display: grid;
   gap: 8px;
 }
+
 .lifecycle-toggle-label {
   color: #17223f;
   font-size: 0.82rem;
   font-weight: 800;
 }
+
 .lifecycle-toggle-field .toggle-setting {
   color: #667089;
 }
@@ -4732,16 +4781,19 @@ td small {
   display: grid;
   gap: 7px;
 }
+
 .lifecycle-duration-label {
   color: #17223f;
   font-size: 0.82rem;
   font-weight: 800;
 }
+
 .lifecycle-duration-input-row {
   display: flex;
   align-items: center;
   gap: 10px;
 }
+
 .lifecycle-duration-input-row input {
   min-height: 32px;
   padding: 0 10px;
@@ -4750,6 +4802,7 @@ td small {
   border-radius: 4px;
   background: #f8fbff;
 }
+
 .lifecycle-duration-input-row span {
   color: #27344e;
   font-size: 0.82rem;
@@ -4759,11 +4812,13 @@ td small {
   display: grid;
   gap: 7px;
 }
+
 .applicable-roles-label {
   color: #17223f;
   font-size: 0.82rem;
   font-weight: 800;
 }
+
 .applicable-roles-options {
   display: flex;
   align-items: center;
@@ -4779,12 +4834,14 @@ td small {
   font-size: 0.78rem;
   cursor: pointer;
 }
+
 .role-checkbox input {
   width: 18px;
   height: 18px;
   accent-color: #e32947;
   cursor: pointer;
 }
+
 .role-checkbox input:disabled {
   cursor: not-allowed;
   opacity: 0.6;
@@ -4805,6 +4862,7 @@ td small {
   height: 1px;
   opacity: 0;
 }
+
 .toggle-setting span {
   position: relative;
   width: 27px;
@@ -4812,6 +4870,7 @@ td small {
   border-radius: 999px;
   background: #9aabc2;
 }
+
 .toggle-setting span::after {
   position: absolute;
   top: 3px;
@@ -4823,9 +4882,11 @@ td small {
   background: #ffffff;
   transition: transform 150ms ease;
 }
+
 .toggle-setting input:checked + span {
   background: #e32947;
 }
+
 .toggle-setting input:checked + span::after {
   transform: translateX(12px);
 }
@@ -5074,6 +5135,7 @@ td small {
   .change-password-grid {
     grid-template-columns: 1fr;
   }
+
   .password-requirements ul {
     grid-template-columns: 1fr;
   }
@@ -5083,11 +5145,13 @@ td small {
   .general-settings-grid {
     grid-template-columns: 1fr;
   }
+
   .date-time-fields,
   .lockout-fields,
   .session-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
   .security-settings-stack .settings-card {
     padding: 20px 24px;
   }
@@ -5097,19 +5161,23 @@ td small {
   .settings-tabs {
     width: 100%;
   }
+
   .settings-fields,
   .date-time-fields,
   .lockout-fields,
   .session-fields {
     grid-template-columns: 1fr;
   }
+
   .settings-fields label:nth-child(-n + 2) {
     grid-column: auto;
   }
+
   .settings-save-row {
     align-items: stretch;
     flex-direction: column;
   }
+
   .save-settings-button {
     align-self: stretch;
   }
@@ -5951,4 +6019,144 @@ td small {
   .stat-delta {
     grid-column: 2;
   }
+}
+
+/* ==========================================================================
+   Delete Confirmation Dialog (Organization Settings)
+   ========================================================================== */
+
+.delete-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(6 20 53 / 62%);
+  backdrop-filter: blur(2px);
+}
+
+.delete-confirm-dialog {
+  position: relative;
+  width: min(100%, 480px);
+  padding: 32px 30px 28px;
+  text-align: center;
+  color: #071435;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgb(6 20 53 / 28%);
+  animation: deleteModalAppear 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes deleteModalAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.delete-confirm-icon-wrap {
+  display: inline-grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  color: #e01835;
+  background: #fff1f2;
+  border: 1px solid #fecaca;
+  border-radius: 50%;
+}
+
+.delete-confirm-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #071435;
+}
+
+.delete-confirm-warning {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: #1e293b;
+  line-height: 1.45;
+}
+
+.delete-confirm-warning strong {
+  color: #071435;
+  font-weight: 700;
+}
+
+.delete-confirm-subtext {
+  margin: 0 0 16px;
+  font-size: 0.88rem;
+  color: #e01835;
+  font-weight: 700;
+}
+
+.delete-confirm-user-notice {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: #854d0e;
+  background: #fefce8;
+  border: 1px solid #fef08a;
+  border-radius: 8px;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.delete-modal-error {
+  margin: 0 0 16px;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.delete-confirm-cancel,
+.delete-confirm-submit {
+  min-height: 44px;
+  padding: 0 24px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.delete-confirm-cancel {
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+}
+
+.delete-confirm-cancel:hover:not(:disabled) {
+  color: #1e293b;
+  border-color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.delete-confirm-submit {
+  color: #ffffff;
+  border: 1px solid #dc2626;
+  background: #dc2626;
+}
+
+.delete-confirm-submit:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.delete-confirm-cancel:disabled,
+.delete-confirm-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }

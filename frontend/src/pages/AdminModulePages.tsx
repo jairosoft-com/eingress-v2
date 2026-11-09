@@ -16,6 +16,7 @@ import {
   Pencil,
   Power,
   Search,
+  Trash2,
   TrendingUp,
   Users,
   UsersRound,
@@ -924,7 +925,7 @@ export function UserManagementPage() {
     };
   }, [session?.accessToken]);
 
-  async function refreshOrganizationOptions() {
+  const refreshOrganizationOptions = useCallback(async () => {
     try {
       const headers = session?.accessToken
         ? { Authorization: `Bearer ${session.accessToken}` }
@@ -977,7 +978,7 @@ export function UserManagementPage() {
     } catch {
       // Leave existing options if fetch fails
     }
-  }
+  }, [session]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1047,6 +1048,20 @@ export function UserManagementPage() {
       controller.abort();
     };
   }, [session?.accessToken]);
+
+  useEffect(() => {
+    function handleOrgUpdate() {
+      void refreshOrganizationOptions();
+    }
+
+    window.addEventListener('roles:changed', handleOrgUpdate);
+    window.addEventListener('departments:changed', handleOrgUpdate);
+
+    return () => {
+      window.removeEventListener('roles:changed', handleOrgUpdate);
+      window.removeEventListener('departments:changed', handleOrgUpdate);
+    };
+  }, [refreshOrganizationOptions]);
 
   useEffect(() => {
     if (!isRfidScannerOpen) {
@@ -2210,7 +2225,13 @@ export function UserManagementPage() {
                   >
                     {editingUser.role && !activeRoles.includes(editingUser.role) ? (
                       <option disabled value={editingUser.role}>
-                        {editingUser.role} (Inactive)
+                        {editingUser.role} (
+                        {roles.some(
+                          (r) => r.name.toLowerCase() === (editingUser.role ?? '').toLowerCase(),
+                        )
+                          ? 'Inactive'
+                          : 'Deleted'}
+                        )
                       </option>
                     ) : null}
                     {activeRoles.length === 0 &&
@@ -2248,7 +2269,14 @@ export function UserManagementPage() {
                     {editingUser.department &&
                     !activeDepartments.includes(editingUser.department) ? (
                       <option disabled value={editingUser.department}>
-                        {editingUser.department} (Inactive)
+                        {editingUser.department} (
+                        {departments.some(
+                          (d) =>
+                            d.name.toLowerCase() === (editingUser.department ?? '').toLowerCase(),
+                        )
+                          ? 'Inactive'
+                          : 'Deleted'}
+                        )
                       </option>
                     ) : null}
                     {activeDepartments.length === 0 &&
@@ -2382,7 +2410,7 @@ export function UserManagementPage() {
                     <small>
                       {editForm.department
                         ? !activeDepartments.includes(editForm.department)
-                          ? `${editForm.department} (Inactive)`
+                          ? `${editForm.department} (${departments.some((d) => d.name.toLowerCase() === editForm.department.toLowerCase()) ? 'Inactive' : 'Deleted'})`
                           : editForm.department
                         : '-'}
                     </small>
@@ -4808,6 +4836,14 @@ export function SettingsPage() {
   const [roleError, setRoleError] = useState('');
   const [roleMessage, setRoleMessage] = useState('');
   const [pendingRoleAction, setPendingRoleAction] = useState<RoleAction | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'department' | 'role';
+    id: number;
+    name: string;
+    userCount?: number;
+  } | null>(null);
+  const [isDeletingTarget, setIsDeletingTarget] = useState(false);
+  const [deleteModalError, setDeleteModalError] = useState('');
   const [verifyTarget, setVerifyTarget] = useState<
     'profile' | 'organization' | 'department' | 'role'
   >('profile');
@@ -4886,10 +4922,18 @@ export function SettingsPage() {
 
     const headers = { Authorization: `Bearer ${session.accessToken}` };
     try {
-      const [rolesRes, usersRes] = await Promise.all([
+      const [deptRes, rolesRes, usersRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/departments`, { headers }),
         fetch(`${API_BASE_URL}/roles`, { headers }),
         fetch(`${API_BASE_URL}/users`, { headers }),
       ]);
+
+      if (deptRes.ok) {
+        const deptData = (await deptRes.json().catch(() => null)) as Department[] | null;
+        if (Array.isArray(deptData)) {
+          setDepartments(deptData);
+        }
+      }
 
       if (rolesRes.ok) {
         const rolesData = (await rolesRes.json().catch(() => null)) as Role[] | null;
@@ -4980,6 +5024,7 @@ export function SettingsPage() {
           if (
             message.type === 'users:changed' ||
             message.type === 'roles:changed' ||
+            message.type === 'departments:changed' ||
             message.type === 'activity:event' ||
             message.type === 'notification:created' ||
             message.type === 'enrollment:reviewed'
@@ -5001,6 +5046,7 @@ export function SettingsPage() {
 
     window.addEventListener('users:changed', handleRealtimeUpdate);
     window.addEventListener('roles:changed', handleRealtimeUpdate);
+    window.addEventListener('departments:changed', handleRealtimeUpdate);
 
     return () => {
       shouldReconnect = false;
@@ -5008,6 +5054,7 @@ export function SettingsPage() {
       socket?.close();
       window.removeEventListener('users:changed', handleRealtimeUpdate);
       window.removeEventListener('roles:changed', handleRealtimeUpdate);
+      window.removeEventListener('departments:changed', handleRealtimeUpdate);
     };
   }, [session?.accessToken, refreshOrganizationUsersAndRoles]);
 
@@ -5628,6 +5675,90 @@ export function SettingsPage() {
     });
   }
 
+  function promptDeleteDepartment(department: Department) {
+    cancelRenamingDepartment();
+    setDeleteModalError('');
+    setDeleteTarget({
+      type: 'department',
+      id: Number(department.id),
+      name: department.name,
+      userCount: department.user_count,
+    });
+  }
+
+  function promptDeleteRole(role: Role) {
+    cancelRenamingRole();
+    setDeleteModalError('');
+    setDeleteTarget({
+      type: 'role',
+      id: Number(role.id),
+      name: role.name,
+      userCount: role.user_count,
+    });
+  }
+
+  function closeDeleteModal() {
+    if (isDeletingTarget) return;
+    setDeleteTarget(null);
+    setDeleteModalError('');
+  }
+
+  async function confirmDeleteTarget() {
+    if (!deleteTarget || !session?.accessToken || isDeletingTarget) return;
+
+    setIsDeletingTarget(true);
+    setDeleteModalError('');
+
+    const headers = {
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      const endpoint =
+        deleteTarget.type === 'department'
+          ? `${API_BASE_URL}/departments/${deleteTarget.id}`
+          : `${API_BASE_URL}/roles/${deleteTarget.id}`;
+
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+        headers,
+      });
+
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(data?.error || `Failed to delete ${deleteTarget.type}.`);
+      }
+
+      if (deleteTarget.type === 'department') {
+        setDepartments((current) => current.filter((dept) => Number(dept.id) !== deleteTarget.id));
+        setDepartmentError('');
+        setDepartmentMessage(`Department "${deleteTarget.name}" was permanently deleted.`);
+        window.dispatchEvent(new CustomEvent('departments:changed'));
+      } else {
+        setRoles((current) => current.filter((r) => Number(r.id) !== deleteTarget.id));
+        if (selectedRoleId && Number(selectedRoleId) === deleteTarget.id) {
+          setSelectedRoleId(null);
+        }
+        setRoleError('');
+        setRoleMessage(`Role "${deleteTarget.name}" was permanently deleted.`);
+        window.dispatchEvent(new CustomEvent('roles:changed'));
+      }
+
+      setDeleteTarget(null);
+    } catch (error) {
+      setDeleteModalError(
+        error instanceof Error ? error.message : `Failed to delete ${deleteTarget.type}.`,
+      );
+    } finally {
+      setIsDeletingTarget(false);
+    }
+  }
+
   const visibleRoles = roles.filter((role) => {
     const matchesSearch =
       !roleSearch.trim() || role.name.toLowerCase().includes(roleSearch.trim().toLowerCase());
@@ -6166,6 +6297,7 @@ export function SettingsPage() {
                                 <button
                                   aria-label={`Rename ${dept.name}`}
                                   className="edit"
+                                  data-tooltip="Rename"
                                   onClick={() => startRenamingDepartment(dept)}
                                   title="Rename"
                                   type="button"
@@ -6177,11 +6309,22 @@ export function SettingsPage() {
                                     dept.is_active ? 'Deactivate department' : 'Activate department'
                                   }
                                   className={dept.is_active ? 'deactivate' : 'activate'}
+                                  data-tooltip={dept.is_active ? 'Deactivate' : 'Activate'}
                                   onClick={() => toggleDepartmentStatus(dept)}
                                   title={dept.is_active ? 'Deactivate' : 'Activate'}
                                   type="button"
                                 >
                                   <Power size={16} />
+                                </button>
+                                <button
+                                  aria-label={`Delete ${dept.name}`}
+                                  className="delete"
+                                  data-tooltip="Delete"
+                                  onClick={() => promptDeleteDepartment(dept)}
+                                  title="Delete"
+                                  type="button"
+                                >
+                                  <Trash2 size={16} />
                                 </button>
                               </>
                             )}
@@ -6359,6 +6502,9 @@ export function SettingsPage() {
                                   <button
                                     aria-label={`View users assigned to ${role.name}`}
                                     className={`view-users ${isSelected ? 'active' : ''}`}
+                                    data-tooltip={
+                                      isSelected ? 'Hide Assigned Users' : 'View Assigned Users'
+                                    }
                                     onClick={() => handleSelectRole(role)}
                                     title={
                                       isSelected ? 'Hide Assigned Users' : 'View Assigned Users'
@@ -6370,6 +6516,7 @@ export function SettingsPage() {
                                   <button
                                     aria-label={`Edit ${role.name}`}
                                     className="edit"
+                                    data-tooltip="Edit"
                                     onClick={() => startRenamingRole(role)}
                                     title="Edit"
                                     type="button"
@@ -6381,11 +6528,22 @@ export function SettingsPage() {
                                       role.is_active ? 'Deactivate role' : 'Activate role'
                                     }
                                     className={role.is_active ? 'deactivate' : 'activate'}
+                                    data-tooltip={role.is_active ? 'Deactivate' : 'Activate'}
                                     onClick={() => toggleRoleStatus(role)}
                                     title={role.is_active ? 'Deactivate' : 'Activate'}
                                     type="button"
                                   >
                                     <Power size={16} />
+                                  </button>
+                                  <button
+                                    aria-label={`Delete ${role.name}`}
+                                    className="delete"
+                                    data-tooltip="Delete"
+                                    onClick={() => promptDeleteRole(role)}
+                                    title="Delete"
+                                    type="button"
+                                  >
+                                    <Trash2 size={16} />
                                   </button>
                                 </>
                               )}
@@ -6722,6 +6880,60 @@ export function SettingsPage() {
               </p>
             ) : null}
             <div className="rfid-scan-dots" aria-hidden="true" />
+          </section>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div className="delete-confirm-backdrop" onClick={closeDeleteModal} role="presentation">
+          <section
+            aria-describedby="delete-confirm-desc"
+            aria-labelledby="delete-confirm-title"
+            aria-modal="true"
+            className="delete-confirm-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="delete-confirm-icon-wrap" aria-hidden="true">
+              <AlertTriangle size={34} />
+            </div>
+            <h2 id="delete-confirm-title">
+              Delete {deleteTarget.type === 'department' ? 'Department' : 'Role'}
+            </h2>
+            <p id="delete-confirm-desc" className="delete-confirm-warning">
+              Are you sure you want to permanently delete <strong>"{deleteTarget.name}"</strong>?
+            </p>
+            <p className="delete-confirm-subtext">This action is permanent and cannot be undone.</p>
+            {deleteTarget.userCount && deleteTarget.userCount > 0 ? (
+              <p className="delete-confirm-user-notice">
+                {deleteTarget.userCount} active user{deleteTarget.userCount === 1 ? '' : 's'}{' '}
+                assigned to this {deleteTarget.type} will safely keep their historical records, but
+                this {deleteTarget.type} will be permanently excluded from future assignments.
+              </p>
+            ) : null}
+            {deleteModalError ? (
+              <p className="module-table-message error delete-modal-error" role="alert">
+                {deleteModalError}
+              </p>
+            ) : null}
+            <div className="delete-confirm-actions">
+              <button
+                className="delete-confirm-cancel"
+                disabled={isDeletingTarget}
+                onClick={closeDeleteModal}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="delete-confirm-submit"
+                disabled={isDeletingTarget}
+                onClick={() => void confirmDeleteTarget()}
+                type="button"
+              >
+                {isDeletingTarget ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
           </section>
         </div>
       ) : null}
