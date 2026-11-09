@@ -23,10 +23,7 @@ dashboardRouter.get("/", async (req, res, next) => {
       await Promise.all([
         query(
           `SELECT
-          CASE 
-            WHEN COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) = (NOW() AT TIME ZONE $2)::date THEN (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE)
-            ELSE (SELECT COUNT(*)::int FROM users WHERE (created_at AT TIME ZONE $2)::date <= $1::date AND (is_active = TRUE OR (deactivated_at IS NOT NULL AND (deactivated_at AT TIME ZONE $2)::date > $1::date)))
-          END AS total_users,
+          (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE AND COALESCE(is_archived, FALSE) = FALSE) AS total_users,
           (SELECT COUNT(DISTINCT user_id)::int FROM attendance_records WHERE attendance_date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) AND status <> 'Absent') AS todays_attendance,
           (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date)) AS total_access,
           (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) AND result = 'Granted') AS successful_attempts,
