@@ -2022,6 +2022,10 @@ export function UserManagementPage() {
                           <button
                             className={user.accessStatus === 'Active' ? 'activate' : 'deactivate'}
                             type="button"
+                            title={user.accessStatus === 'Disabled' ? 'Activate' : 'Deactivate'}
+                            data-tooltip={
+                              user.accessStatus === 'Disabled' ? 'Activate' : 'Deactivate'
+                            }
                             aria-label={
                               user.accessStatus === 'Disabled'
                                 ? `Activate ${user.name}`
@@ -2037,6 +2041,8 @@ export function UserManagementPage() {
                           <button
                             className="archive"
                             type="button"
+                            title="Delete"
+                            data-tooltip="Delete"
                             aria-label={`Archive ${user.name}`}
                             disabled={updatingUserId === user.id}
                             onClick={() => void archiveUser(user.id)}
@@ -2046,6 +2052,8 @@ export function UserManagementPage() {
                           <button
                             className="edit"
                             type="button"
+                            title="Edit"
+                            data-tooltip="Edit"
                             aria-label={`Edit ${user.name}`}
                             disabled={updatingUserId === user.id}
                             onClick={() => openUserEditor(user.id)}
