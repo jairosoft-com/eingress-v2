@@ -4761,6 +4761,16 @@ function validateRoleName(rawName: string, roles: Role[], ignoreId?: string): st
   return undefined;
 }
 
+function validateRfidCode(rawCode: string): string | undefined {
+  const code = rawCode.trim();
+
+  if (!code) return undefined;
+  if (!/^\d+$/.test(code)) return 'Only numeric values are permitted.';
+  if (code.length < 8 || code.length > 14) return 'RFID Code must be between 8 and 14 digits.';
+
+  return undefined;
+}
+
 function validateUserIdPrefix(
   rawPrefix: string,
   roles: Role[],
@@ -5478,6 +5488,8 @@ export function SettingsPage() {
     return submitProfileNameChange();
   }
 
+  const changeRfidValidationError = validateRfidCode(changeRfidInput);
+
   function openChangeRfidModal() {
     setChangeRfidInput('');
     setChangeRfidError('');
@@ -5489,6 +5501,10 @@ export function SettingsPage() {
 
     if (!changeRfidInput.trim()) {
       setChangeRfidError('Please scan or enter the new RFID card.');
+      return;
+    }
+
+    if (changeRfidValidationError) {
       return;
     }
 
@@ -5877,7 +5893,7 @@ export function SettingsPage() {
               </label>
               <div className="admin-profile-rfid-row">
                 <label>
-                  RFID Number
+                  RFID Code
                   <input disabled value={profile?.rfidUid ?? '—'} />
                 </label>
                 <button
@@ -6857,11 +6873,16 @@ export function SettingsPage() {
             <h2 id="change-rfid-title">Place New ID</h2>
             <p>Your new ID is being registered... Please wait.</p>
             <label className="rfid-scan-input">
-              <span>RFID Number</span>
+              <span>RFID Code</span>
               <input
+                aria-describedby={changeRfidValidationError ? 'change-rfid-validation' : undefined}
+                aria-invalid={Boolean(changeRfidValidationError)}
                 autoFocus
                 inputMode="numeric"
-                onChange={(event) => setChangeRfidInput(event.target.value)}
+                onChange={(event) => {
+                  setChangeRfidInput(event.target.value);
+                  setChangeRfidError('');
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault();
@@ -6872,9 +6893,16 @@ export function SettingsPage() {
                 value={changeRfidInput}
               />
             </label>
+            {changeRfidValidationError ? (
+              <p className="module-table-message error" id="change-rfid-validation" role="alert">
+                {changeRfidValidationError}
+              </p>
+            ) : null}
             <button
               className="rfid-scan-capture-button"
-              disabled={isChangingRfid}
+              disabled={
+                isChangingRfid || !changeRfidInput.trim() || Boolean(changeRfidValidationError)
+              }
               onClick={() => void submitRfidChange()}
               type="button"
             >
