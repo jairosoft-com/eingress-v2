@@ -40,6 +40,7 @@ type RecentActivityEvent = {
   area?: string | null;
   device?: string | null;
   device_name?: string | null;
+  details?: string | null;
   employee_id?: string | null;
   employeeId?: string | null;
   event?: string;
@@ -101,6 +102,7 @@ function toAccessEvent(event: RecentActivityEvent) {
     event: event.event ?? (status === 'Granted' ? 'Access Granted' : 'Access Denied'),
     area: event.area ?? 'System',
     device: event.device ?? event.device_name ?? 'EIngress',
+    details: event.details ?? null,
     sortTime: eventTimestamp,
     status:
       status === 'Granted' || status === 'Success'
@@ -519,7 +521,27 @@ export function DashboardPage() {
                     <td>{event.device}</td>
                     <td>{formatTime(event.sortTime, dateTimeSettings)}</td>
                     <td>
-                      <span className={event.status === 'Failed' ? 'status failed' : 'status'}>
+                      <span
+                        className={`status${event.status === 'Failed' ? ' failed' : event.status === 'Info' ? ' info' : ''}`}
+                        title={
+                          event.status === 'Info'
+                            ? [
+                                `Event: ${event.event}`,
+                                `User: ${event.user}${event.id ? ` (${event.id})` : ''}`,
+                                `Module: ${event.area}`,
+                                event.details ? `Details: ${event.details}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join('\n')
+                            : undefined
+                        }
+                        aria-label={
+                          event.status === 'Info'
+                            ? `Info. Event: ${event.event}. User: ${event.user}. Module: ${event.area}.${event.details ? ` Details: ${event.details}` : ''}`
+                            : event.status
+                        }
+                        tabIndex={event.status === 'Info' ? 0 : undefined}
+                      >
                         {event.status}
                       </span>
                     </td>

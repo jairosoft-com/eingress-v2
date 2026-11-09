@@ -8,6 +8,13 @@ import { getSystemTimeZone } from "../lib/timezone.js";
 export const dashboardRouter = express.Router();
 dashboardRouter.use(authMiddleware);
 
+function redactSensitiveDetails(details) {
+  return details.replace(
+    /\b(password|passphrase|passcode|secret|token|credential|rfid(?:_uid)?|fingerprint(?:_id)?)\b(["']?\s*[:=]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^,\r\n;}]+)/gi,
+    "$1$2**********",
+  );
+}
+
 dashboardRouter.get("/", async (req, res, next) => {
   try {
     const rawDate =
@@ -52,7 +59,8 @@ dashboardRouter.get("/", async (req, res, next) => {
              al.result::text AS result,
              al.area,
              COALESCE(d.device_name, 'RFID Reader') AS device_name,
-             al.access_time AS event_time
+             al.access_time AS event_time,
+             NULL::text AS details
            FROM access_logs al
            LEFT JOIN users u ON u.id = al.user_id
            LEFT JOIN devices d ON d.id = al.device_id
@@ -70,7 +78,8 @@ dashboardRouter.get("/", async (req, res, next) => {
               ELSE 'Info' END AS event,
              l.module AS area,
              'Admin Portal' AS device_name,
-             l.created_at AS event_time
+             l.created_at AS event_time,
+             l.details
            FROM audit_logs l
            LEFT JOIN admins a ON a.id = l.admin_id
          ) recent_activity
@@ -117,7 +126,10 @@ dashboardRouter.get("/", async (req, res, next) => {
     res.json({
       selectedDate: targetDate,
       metrics: metrics.rows[0],
-      recentEvents: recentEvents.rows,
+      recentEvents: recentEvents.rows.map((event) => ({
+        ...event,
+        details: typeof event.details === "string" ? redactSensitiveDetails(event.details) : null,
+      })),
       devices: devices.rows,
       attendanceTrend: attendanceTrend.rows,
       attendanceRecords: attendanceRecords.rows,
