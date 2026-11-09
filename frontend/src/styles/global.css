@@ -1811,6 +1811,10 @@ td small {
   background: #fff0f0;
 }
 
+.status.info {
+  cursor: help;
+}
+
 .device-list {
   display: grid;
   gap: 16px;
