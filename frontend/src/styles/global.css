@@ -2540,7 +2540,7 @@ td small {
   background: #fff7f8;
 }
 
-.user-row-actions button.archive {
+.user-row-actions button.delete {
   color: #ef4444;
   border-color: #fecaca;
   background: #fff1f2;

@@ -16,6 +16,7 @@ import {
   Pencil,
   Power,
   Search,
+  Trash2,
   TrendingUp,
   Users,
   UsersRound,
@@ -1195,9 +1196,20 @@ export function UserManagementPage() {
     }
   }
 
-  async function archiveUser(id: number) {
+  async function deleteUser(id: number) {
     if (!session?.accessToken) {
-      setUsersErrorMessage('Please sign in again to update users.');
+      setUsersErrorMessage('Please sign in again to delete users.');
+      return;
+    }
+
+    const user = users.find((currentUser) => currentUser.id === id);
+    const userLabel = user ? `${user.full_name} (${user.employee_id})` : 'this user';
+
+    if (
+      !window.confirm(
+        `Permanently delete ${userLabel}? This also permanently deletes their attendance records, while access logs will be retained without the user association. This action cannot be undone.`,
+      )
+    ) {
       return;
     }
 
@@ -1205,38 +1217,33 @@ export function UserManagementPage() {
       setUpdatingUserId(id);
       setUsersErrorMessage('');
 
-      const response = await fetch(`${API_BASE_URL}/users/${id}/archive`, {
-        method: 'PATCH',
+      const response = await fetch(`${API_BASE_URL}/users/${id}`, {
+        method: 'DELETE',
         headers: {
           Authorization: `Bearer ${session.accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ isArchived: true }),
       });
 
-      const data = (await response.json().catch(() => null)) as
-        | UserRecord
-        | { error?: string }
-        | null;
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+      } | null;
 
-      if (!response.ok || !('id' in (data ?? {}))) {
+      if (!response.ok) {
         throw new Error(
           data && typeof data === 'object' && 'error' in data
             ? data.error
-            : 'Unable to archive user.',
+            : 'Unable to delete user.',
         );
       }
 
-      setUsers((currentUsers) =>
-        currentUsers.map((user) =>
-          user.id === id ? { ...user, is_active: false, is_archived: true } : user,
-        ),
-      );
+      setUsers((currentUsers) => currentUsers.filter((currentUser) => currentUser.id !== id));
       window.dispatchEvent(new CustomEvent('users:changed'));
       window.dispatchEvent(new CustomEvent('roles:changed'));
-      window.alert('User archived successfully.');
+      window.alert('User has been deleted successfully.');
     } catch (error) {
-      setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to archive user.');
+      setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to delete user.');
     } finally {
       setUpdatingUserId(null);
     }
@@ -2039,15 +2046,15 @@ export function UserManagementPage() {
                             <Power size={15} />
                           </button>
                           <button
-                            className="archive"
+                            className="delete"
                             type="button"
                             title="Delete"
                             data-tooltip="Delete"
-                            aria-label={`Archive ${user.name}`}
+                            aria-label={`Delete ${user.name}`}
                             disabled={updatingUserId === user.id}
-                            onClick={() => void archiveUser(user.id)}
+                            onClick={() => void deleteUser(user.id)}
                           >
-                            <Archive size={15} />
+                            <Trash2 size={15} />
                           </button>
                           <button
                             className="edit"

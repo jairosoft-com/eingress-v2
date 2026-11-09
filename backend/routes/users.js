@@ -94,6 +94,76 @@ usersRouter.get('/', async (req, res) => {
   }
 });
 
+usersRouter.delete('/:id', async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Valid user id is required' });
+  }
+
+  let client;
+
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const result = await client.query(
+      `DELETE FROM users
+       WHERE id = $1
+       RETURNING id, employee_id, ${fullNameSql()} AS full_name, role`,
+      [id],
+    );
+
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = result.rows[0];
+    await client.query(
+      `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        req.user.adminId || null,
+        'Deleted User',
+        'User Management',
+        `Permanently deleted ${user.employee_id} (${user.full_name})`,
+        req.ip,
+      ],
+    );
+
+    await client.query('COMMIT');
+
+    broadcastActivityEvent({
+      user: user.full_name,
+      employeeId: user.employee_id,
+      event: 'User Deleted',
+      area: 'User Management',
+      device: 'Admin Portal',
+      status: 'Info',
+      time: new Date().toISOString(),
+    });
+    broadcastMessage({
+      type: 'users:changed',
+      payload: { action: 'deleted', userId: user.id },
+    });
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'user_deleted', role: user.role },
+    });
+
+    res.json({ message: 'User deleted successfully.' });
+  } catch (error) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    client?.release();
+  }
+});
+
 // Preview of the User ID a new user in this role would get (display only; the ID is assigned when the user is saved).
 usersRouter.get('/next-id', async (req, res) => {
   try {
