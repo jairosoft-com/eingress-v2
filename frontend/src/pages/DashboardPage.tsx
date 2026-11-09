@@ -263,6 +263,18 @@ export function DashboardPage() {
             });
         }
 
+        if (message.type === 'users:changed') {
+          void fetchDashboardData(session.accessToken, selectedDateRef.current)
+            .then((data) => {
+              if (data) {
+                setDashboardMetrics(data.metrics ?? null);
+              }
+            })
+            .catch(() => {
+              // Keep the last known metrics if a realtime refresh fails.
+            });
+        }
+
         const activityEvent = message.payload as RecentActivityEvent | undefined;
 
         if (message.type === 'activity:event' && activityEvent) {
@@ -303,18 +315,18 @@ export function DashboardPage() {
     'Failed Attempts': dashboardMetrics?.failed_attempts ?? null,
     "Today's Attendance": dashboardMetrics?.todays_attendance ?? null,
     'Total Access': dashboardMetrics?.total_access ?? null,
-    'Total Users': dashboardMetrics?.total_users ?? null,
+    'ACTIVE USERS': dashboardMetrics?.total_users ?? null,
   };
   const yesterdayValues: Record<string, number | undefined> = {
     'Active Devices': dashboardMetrics?.active_devices_yesterday,
     'Failed Attempts': dashboardMetrics?.failed_attempts_yesterday,
     'Total Access': dashboardMetrics?.total_access_yesterday,
-    'Total Users': dashboardMetrics?.total_users_yesterday,
+    'ACTIVE USERS': dashboardMetrics?.total_users_yesterday,
   };
 
   const metricDefinitions = [
     {
-      label: 'Total Users',
+      label: 'ACTIVE USERS',
       value: '1,248',
       Icon: UsersRound,
       tone: 'red',
