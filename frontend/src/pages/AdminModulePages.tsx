@@ -857,6 +857,11 @@ export function UserManagementPage() {
     role: string;
     userId: string;
   } | null>(null);
+  const [editUserIdPreview, setEditUserIdPreview] = useState<{
+    role: string;
+    userId: string;
+    prefix: string;
+  } | null>(null);
   const [createFieldErrors, setCreateFieldErrors] = useState<UserFormFieldErrors>({});
   const [createErrors, setCreateErrors] = useState<CreateUserErrors>({});
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -1284,6 +1289,7 @@ export function UserManagementPage() {
     setEditFormError('');
     setEditFieldErrors({});
     setEditErrors({});
+    setEditUserIdPreview(null);
     setIsRfidScannerOpen(false);
     setIsFingerprintScannerOpen(false);
     setUsersErrorMessage('');
@@ -1459,20 +1465,70 @@ export function UserManagementPage() {
         );
       }
 
+      const savedUser = data as UserRecord;
+
       setUsers((currentUsers) =>
-        currentUsers.map((user) => (user.id === editingUser.id ? (data as UserRecord) : user)),
+        currentUsers.map((user) => (user.id === editingUser.id ? savedUser : user)),
       );
       setEditingUser(null);
       setEditErrors({});
       window.dispatchEvent(new CustomEvent('users:changed'));
       window.dispatchEvent(new CustomEvent('roles:changed'));
-      window.alert('User details saved successfully.');
+      window.alert(
+        savedUser.employee_id !== editingUser.employee_id
+          ? `User details saved successfully. User ID is now ${savedUser.employee_id}.`
+          : 'User details saved successfully.',
+      );
     } catch (error) {
       setEditFormError(error instanceof Error ? error.message : 'Unable to save user details.');
     } finally {
       setUpdatingUserId(null);
     }
   }
+
+  useEffect(() => {
+    if (
+      !editingUser ||
+      !editForm.role ||
+      editForm.role === (editingUser.role || '').trim() ||
+      !session?.accessToken
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const role = editForm.role;
+
+    void fetch(`${API_BASE_URL}/users/next-id?role=${encodeURIComponent(role)}`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+          prefix?: string;
+          userId?: string;
+        } | null;
+
+        if (response.ok && data?.userId && data.prefix) {
+          setEditUserIdPreview({ role, userId: data.userId, prefix: data.prefix });
+          setEditFieldErrors((currentErrors) => ({ ...currentErrors, role: undefined }));
+        } else {
+          setEditUserIdPreview(null);
+          setEditFieldErrors((currentErrors) => ({
+            ...currentErrors,
+            role: data?.error ?? 'Unable to generate a User ID for this role.',
+          }));
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+
+        setEditUserIdPreview(null);
+      });
+
+    return () => controller.abort();
+  }, [editingUser, editForm.role, session?.accessToken]);
 
   useEffect(() => {
     if (!isCreateUserOpen || !createForm.role || !session?.accessToken) {
@@ -1651,6 +1707,24 @@ export function UserManagementPage() {
   const activeDepartments = departments.filter((dept) => dept.is_active).map((dept) => dept.name);
 
   const activeRoles = roles.filter((role) => role.is_active).map((role) => role.name);
+
+  let editUserIdNote = '';
+
+  if (
+    editingUser &&
+    editUserIdPreview &&
+    editForm.role === editUserIdPreview.role &&
+    editForm.role !== (editingUser.role || '').trim()
+  ) {
+    const currentId = editingUser.employee_id;
+    const keepsId =
+      currentId.toUpperCase().startsWith(editUserIdPreview.prefix.toUpperCase()) &&
+      /^\d+$/.test(currentId.slice(editUserIdPreview.prefix.length));
+
+    editUserIdNote = keepsId
+      ? `User ID stays ${currentId}.`
+      : `User ID will change from ${currentId} to ${editUserIdPreview.userId} when you save (next available number).`;
+  }
 
   const roleSet = new Set<string>();
   roles.forEach((r) => roleSet.add(r.name));
@@ -2256,6 +2330,7 @@ export function UserManagementPage() {
                   {editFieldErrors.role ? (
                     <small className="field-error">{editFieldErrors.role}</small>
                   ) : null}
+                  {editUserIdNote ? <small>{editUserIdNote}</small> : null}
                 </label>
 
                 <label className="user-edit-field">
