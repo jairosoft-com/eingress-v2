@@ -4348,9 +4348,18 @@ td small {
 
 .settings-fields input,
 .settings-fields select,
-.security-fields input,
-.security-fields select {
+.security-fields input {
   width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  color: #17223f;
+  border: 1px solid #aebed3;
+  border-radius: 4px;
+  background: #f8fbff;
+}
+
+.security-fields select {
+  width: 65%;
   min-height: 32px;
   padding: 0 10px;
   color: #17223f;
