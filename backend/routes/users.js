@@ -340,6 +340,11 @@ usersRouter.patch('/:id', async (req, res) => {
       }
     }
 
+    // Ticket 212472: changing the role re-issues the User ID under the new role's prefix (unless it already matches).
+    let issueIdPrefix = null;
+    let oldEmployeeId = null;
+    let newEmployeeId = null;
+
     const roleProvided = req.body.role !== undefined;
     let roleValue = roleProvided ? (role ? String(role).trim() : '') : undefined;
 
@@ -348,7 +353,7 @@ usersRouter.patch('/:id', async (req, res) => {
         return res.status(400).json({ error: 'Role is required.', errors: { role: 'Role is required.' } });
       }
 
-      const currentUser = await query(`SELECT role FROM users WHERE id = $1`, [id]);
+      const currentUser = await query(`SELECT role, employee_id FROM users WHERE id = $1`, [id]);
       const currentRole = String(currentUser.rows[0]?.role ?? '').trim().toLowerCase();
 
       if (currentUser.rowCount > 0 && currentRole !== roleValue.replace(/\s+/g, ' ').toLowerCase()) {
@@ -358,13 +363,41 @@ usersRouter.patch('/:id', async (req, res) => {
           return res.status(400).json({ error: roleCheck.error, errors: { role: roleCheck.error } });
         }
 
+        if (!roleCheck.userIdPrefix) {
+          const message = `Role "${roleCheck.name}" has no User ID prefix. Set one in Role Management first.`;
+          return res.status(400).json({ error: message, errors: { role: message } });
+        }
+
+        oldEmployeeId = currentUser.rows[0].employee_id;
+
+        if (!new RegExp(`^${roleCheck.userIdPrefix}[0-9]+$`).test(oldEmployeeId)) {
+          issueIdPrefix = roleCheck.userIdPrefix;
+        }
+
         roleValue = roleCheck.name;
       } else if (currentUser.rowCount > 0) {
         roleValue = currentUser.rows[0]?.role ?? roleValue;
       }
     }
 
-    const result = await query(
+    const client = await pool.connect();
+    let result;
+
+    try {
+      await client.query('BEGIN');
+
+      if (issueIdPrefix) {
+        await client.query('SELECT pg_advisory_xact_lock($1)', [USER_ID_LOCK_KEY]);
+        newEmployeeId = await generateUserId(client, issueIdPrefix);
+        // The old ID is copied into attendance snapshots and into the user's enrollment request; keep those in step.
+        await client.query(`UPDATE attendance_records SET employee_id = $1 WHERE user_id = $2`, [newEmployeeId, id]);
+        await client.query(`UPDATE enrollment_requests SET employee_id = $1 WHERE employee_id = $2`, [
+          newEmployeeId,
+          oldEmployeeId,
+        ]);
+      }
+
+      result = await client.query(
       `UPDATE users
        SET first_name = COALESCE($1, first_name),
          last_name = COALESCE($2, last_name),
@@ -376,6 +409,7 @@ usersRouter.patch('/:id', async (req, res) => {
          rfid_uid = COALESCE($8, rfid_uid),
          is_active = COALESCE($9, is_active),
          is_archived = COALESCE($10, is_archived),
+         employee_id = COALESCE($14, employee_id),
          updated_at = NOW()
        WHERE id = $13
        RETURNING ${USER_FIELDS}`,
@@ -393,18 +427,29 @@ usersRouter.patch('/:id', async (req, res) => {
         departmentProvided,
         roleProvided,
         id,
+        newEmployeeId,
       ],
-    );
+      );
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'User not found' });
+      if (result.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      await client.query('COMMIT');
+    } catch (updateError) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw updateError;
+    } finally {
+      client.release();
     }
 
     const user = result.rows[0];
+    const idChange = newEmployeeId ? ` (User ID ${oldEmployeeId} -> ${newEmployeeId} for the new role)` : '';
     await query(
       `INSERT INTO audit_logs (admin_id, action, module, details, ip_address)
        VALUES ($1, $2, $3, $4, $5)`,
-      [req.user.adminId || null, 'Updated User', 'User Management', `Updated ${user.employee_id} (${user.full_name})`, req.ip],
+      [req.user.adminId || null, 'Updated User', 'User Management', `Updated ${user.employee_id} (${user.full_name})${idChange}`, req.ip],
     );
     broadcastActivityEvent({
       user: user.full_name,
