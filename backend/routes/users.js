@@ -401,8 +401,8 @@ usersRouter.patch('/:id', async (req, res) => {
       `UPDATE users
        SET first_name = COALESCE($1, first_name),
          last_name = COALESCE($2, last_name),
-         email = COALESCE($3, email),
-         phone = COALESCE($4, phone),
+         email = CASE WHEN BTRIM($3::text) = '' THEN NULL ELSE COALESCE($3, email) END,
+         phone = CASE WHEN BTRIM($4::text) = '' THEN NULL ELSE COALESCE($4, phone) END,
          department = CASE WHEN $11 THEN $5 ELSE department END,
          role = CASE WHEN $12 THEN $6 ELSE role END,
          fingerprint_id = COALESCE($7, fingerprint_id),
