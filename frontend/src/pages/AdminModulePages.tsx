@@ -1612,7 +1612,7 @@ export function UserManagementPage() {
           firstName,
           lastName,
           email,
-          phone: `+63${phone}`,
+          phone: phone ? `+63${phone}` : '',
           department: department || null,
           role,
           rfidUid: rfidUid || null,
@@ -1716,19 +1716,18 @@ export function UserManagementPage() {
     value: string,
   ): string | undefined {
     if (fieldName === 'email') {
-      if (!value.trim()) return 'Email address is required.';
       if (
-        value.trim().length > 254 ||
-        !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/.test(
-          value.trim(),
-        )
+        value.trim() &&
+        (value.trim().length > 254 ||
+          !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/.test(
+            value.trim(),
+          ))
       )
         return 'Enter a valid email address.';
     }
 
     if (fieldName === 'phone') {
-      if (!value.trim()) return 'Phone number is required.';
-      if (!/^9\d{9}$/.test(value.trim()))
+      if (value.trim() && !/^9\d{9}$/.test(value.trim()))
         return 'Enter a valid 10-digit mobile number starting with 9.';
     }
 
@@ -2361,7 +2360,7 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Email *</span>
+                  <span>Email</span>
                   <input
                     aria-describedby={editErrors.email ? 'edit-email-error' : undefined}
                     aria-invalid={Boolean(editErrors.email)}
@@ -2620,7 +2619,7 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Email *</span>
+                  <span>Email</span>
                   <input
                     aria-describedby={createErrors.email ? 'create-email-error' : undefined}
                     aria-invalid={Boolean(createErrors.email)}
@@ -2649,7 +2648,7 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Phone (+63) *</span>
+                  <span>Phone (+63)</span>
                   <input
                     aria-describedby={createErrors.phone ? 'create-phone-error' : undefined}
                     aria-invalid={Boolean(createErrors.phone)}
@@ -3478,7 +3477,7 @@ export function EnrollmentRequestsPage() {
                   </div>
                   <div>
                     <dt>Email</dt>
-                    <dd>{selectedRequest.email || 'Not provided'}</dd>
+                    <dd>{selectedRequest.email || 'N/A'}</dd>
                   </div>
                   <div>
                     <dt>Department</dt>
@@ -3486,7 +3485,7 @@ export function EnrollmentRequestsPage() {
                   </div>
                   <div>
                     <dt>Phone</dt>
-                    <dd>{selectedRequest.phone || 'Not provided'}</dd>
+                    <dd>{selectedRequest.phone || 'N/A'}</dd>
                   </div>
                 </dl>
               </div>
@@ -6716,7 +6715,7 @@ export function SettingsPage() {
                                       ? `${user.last_name}, ${user.first_name}`
                                       : user.full_name}
                                   </strong>
-                                  <small>{user.email || '—'}</small>
+                                  <small>{user.email || 'N/A'}</small>
                                 </span>
                               </span>
                             </td>
