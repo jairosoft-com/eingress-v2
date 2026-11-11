@@ -1,7 +1,10 @@
 import { query } from '../db.js';
 
 // Ticket 212471. A second tap counts as the clock-out only this many minutes after the first one.
-export const CLOCK_OUT_MIN_GAP_MINUTES = 5;
+export const CLOCK_OUT_MIN_GAP_MINUTES = 1;
+
+// A tap by someone already clocked out, before this local time (end of the 8-5 working day), undoes the clock-out.
+export const WORKDAY_END_TIME = '17:00:00';
 
 let attendanceReady;
 

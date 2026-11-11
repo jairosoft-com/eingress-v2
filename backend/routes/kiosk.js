@@ -7,7 +7,7 @@ import { broadcastActivityEvent } from "../activityEvents.js";
 import { createNotification } from "../lib/notifications.js";
 import { fullNameSql } from "../lib/personName.js";
 import { getSystemTimeZone } from "../lib/timezone.js";
-import { CLOCK_OUT_MIN_GAP_MINUTES, ensureAttendanceStatus } from "../lib/attendance.js";
+import { CLOCK_OUT_MIN_GAP_MINUTES, WORKDAY_END_TIME, ensureAttendanceStatus } from "../lib/attendance.js";
 import { emitDoorUnlock } from "../socketio.js";
 
 export const kioskRouter = express.Router();
@@ -150,47 +150,65 @@ async function processKioskScanUnsafe(req, res) {
 
   if (result === "Granted" && method === "Fingerprint") {
     await ensureAttendanceStatus();
-    const attendanceResult = await query(
-      `INSERT INTO attendance_records
-         (user_id, attendance_date, check_in_at, check_out_at, status, location, employee_id, full_name, department, role)
-       SELECT $1,
-         (NOW() AT TIME ZONE $6)::date,
-         MIN(access_time),
-         CASE WHEN MAX(access_time) - MIN(access_time) >= make_interval(mins => $7) THEN MAX(access_time) END,
-         (CASE
-           WHEN MAX(access_time) - MIN(access_time) >= make_interval(mins => $7) THEN 'Clocked Out'
-           WHEN (MIN(access_time) AT TIME ZONE $6)::time > TIME '08:00:00' THEN 'Late'
-           ELSE 'Present'
-         END)::attendance_status,
-         'Kiosk', $2, $3, $4, $5
-       FROM access_logs
-       WHERE user_id = $1
-         AND (access_time AT TIME ZONE $6)::date = (NOW() AT TIME ZONE $6)::date
-         AND result = 'Granted'
-         AND authentication_method = 'Fingerprint'
-       ON CONFLICT (user_id, attendance_date)
-       DO UPDATE SET
-         check_in_at = LEAST(attendance_records.check_in_at, EXCLUDED.check_in_at),
-         check_out_at = GREATEST(attendance_records.check_out_at, EXCLUDED.check_out_at),
-         status = CASE
-           WHEN attendance_records.status = 'Clocked Out' OR EXCLUDED.status = 'Clocked Out'
-             THEN 'Clocked Out'::attendance_status
-           ELSE EXCLUDED.status
-         END,
-         updated_at = NOW()
-       RETURNING check_out_at`,
-      [
-        user.id,
-        user.employee_id,
-        user.full_name,
-        user.department,
-        user.role,
-        timeZone,
-        CLOCK_OUT_MIN_GAP_MINUTES,
-      ],
+    // Where the user stands today, before this tap changes anything. prev_tap is their previous granted tap today.
+    const stateResult = await query(
+      `SELECT ar.status, ar.check_in_at, ar.check_out_at,
+         (SELECT MAX(access_time) FROM access_logs
+           WHERE user_id = $1 AND id <> $2 AND result = 'Granted' AND authentication_method = 'Fingerprint'
+             AND (access_time AT TIME ZONE $3)::date = (NOW() AT TIME ZONE $3)::date) AS prev_tap,
+         ((SELECT access_time FROM access_logs WHERE id = $2) AT TIME ZONE $3)::time::text AS tap_time,
+         (ar.check_in_at AT TIME ZONE $3)::time::text AS check_in_time
+       FROM (SELECT 1) one
+       LEFT JOIN attendance_records ar
+         ON ar.user_id = $1 AND ar.attendance_date = (NOW() AT TIME ZONE $3)::date`,
+      [user.id, logResult.rows[0].id, timeZone],
     );
-    // A tap inside the minimum gap after the first one is not a clock-out, so the user is still just clocked in.
-    timeType = attendanceResult.rows[0].check_out_at ? "out" : "in";
+    const state = stateResult.rows[0];
+    const tapAt = new Date(logResult.rows[0].access_time);
+    const lastTapAt = state.prev_tap || state.check_in_at;
+    const minutesSinceLastTap = lastTapAt ? (tapAt - new Date(lastTapAt)) / 60000 : Infinity;
+
+    // in:     first tap of the day, Present or Late by the time of the tap.
+    // ignore: within the minimum gap of their previous tap (accidental double tap).
+    // revert: already clocked out but still before the end of the working day, so they are back in. Status goes
+    //         back to Present or Late by their original clock-in and the clock-out is cleared.
+    // out:    otherwise, clock out (or move the clock-out to this later tap).
+    let action;
+    if (!state.check_in_at) action = "in";
+    else if (minutesSinceLastTap < CLOCK_OUT_MIN_GAP_MINUTES) action = "ignore";
+    else if (state.status === "Clocked Out" && state.tap_time < WORKDAY_END_TIME) action = "revert";
+    else action = "out";
+
+    if (action === "in") {
+      await query(
+        `INSERT INTO attendance_records
+           (user_id, attendance_date, check_in_at, check_out_at, status, location, employee_id, full_name, department, role)
+         VALUES ($1, (NOW() AT TIME ZONE $6)::date, $7, NULL,
+           (CASE WHEN ($7::timestamptz AT TIME ZONE $6)::time > TIME '08:00:00' THEN 'Late' ELSE 'Present' END)::attendance_status,
+           'Kiosk', $2, $3, $4, $5)
+         ON CONFLICT (user_id, attendance_date)
+         DO UPDATE SET check_in_at = EXCLUDED.check_in_at, check_out_at = NULL, status = EXCLUDED.status, updated_at = NOW()`,
+        [user.id, user.employee_id, user.full_name, user.department, user.role, timeZone, tapAt],
+      );
+    } else if (action === "revert") {
+      await query(
+        `UPDATE attendance_records
+         SET check_out_at = NULL,
+             status = (CASE WHEN (check_in_at AT TIME ZONE $2)::time > TIME '08:00:00' THEN 'Late' ELSE 'Present' END)::attendance_status,
+             updated_at = NOW()
+         WHERE user_id = $1 AND attendance_date = (NOW() AT TIME ZONE $2)::date`,
+        [user.id, timeZone],
+      );
+    } else if (action === "out") {
+      await query(
+        `UPDATE attendance_records
+         SET check_out_at = $3, status = 'Clocked Out', updated_at = NOW()
+         WHERE user_id = $1 AND attendance_date = (NOW() AT TIME ZONE $2)::date`,
+        [user.id, timeZone, tapAt],
+      );
+    }
+
+    timeType = action === "out" || (action === "ignore" && state.check_out_at) ? "out" : "in";
 
     broadcastMessage({
       type: "attendance:changed",
