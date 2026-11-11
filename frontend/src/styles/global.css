@@ -1725,7 +1725,8 @@ button {
   background: #fee2e2;
 }
 
-.attendance-status.info {
+.attendance-status.info,
+.attendance-status.clocked-out {
   color: #0f172a;
   background: #e2e8f0;
 }
@@ -3626,6 +3627,11 @@ td small {
 
 .module-status.danger {
   background: #e0524d;
+}
+
+.module-status.neutral {
+  color: #0f172a;
+  background: #e2e8f0;
 }
 
 .table-actions {
