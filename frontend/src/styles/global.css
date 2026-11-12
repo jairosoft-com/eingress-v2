@@ -894,11 +894,16 @@ button {
 }
 
 .admin-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   flex-direction: column;
   gap: 28px;
   padding: 24px 20px;
+  overflow-y: auto;
   color: #ffffff;
   background: #06142e;
   box-shadow: 16px 0 40px rgb(6 20 46 / 16%);
@@ -1725,8 +1730,7 @@ button {
   background: #fee2e2;
 }
 
-.attendance-status.info,
-.attendance-status.clocked-out {
+.attendance-status.info {
   color: #0f172a;
   background: #e2e8f0;
 }
@@ -3629,11 +3633,6 @@ td small {
   background: #e0524d;
 }
 
-.module-status.neutral {
-  color: #0f172a;
-  background: #e2e8f0;
-}
-
 .table-actions {
   display: inline-flex;
   align-items: center;
@@ -4354,18 +4353,9 @@ td small {
 
 .settings-fields input,
 .settings-fields select,
-.security-fields input {
-  width: 100%;
-  min-height: 32px;
-  padding: 0 10px;
-  color: #17223f;
-  border: 1px solid #aebed3;
-  border-radius: 4px;
-  background: #f8fbff;
-}
-
+.security-fields input,
 .security-fields select {
-  width: 65%;
+  width: 100%;
   min-height: 32px;
   padding: 0 10px;
   color: #17223f;
@@ -5906,7 +5896,10 @@ td small {
   }
 
   .admin-sidebar {
+    position: static;
+    height: auto;
     min-height: auto;
+    overflow-y: visible;
   }
 
   .topbar {
