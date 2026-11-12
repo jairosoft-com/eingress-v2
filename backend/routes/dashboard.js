@@ -4,7 +4,7 @@ import { query } from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { fullNameSql } from "../lib/personName.js";
 import { getSystemTimeZone } from "../lib/timezone.js";
-import { workedMinutesSql } from "../lib/attendance.js";
+import { latestAttendanceTapSql, workedMinutesSql } from "../lib/attendance.js";
 
 export const dashboardRouter = express.Router();
 dashboardRouter.use(authMiddleware);
@@ -116,7 +116,7 @@ dashboardRouter.get("/", async (req, res, next) => {
          FROM attendance_records ar
          JOIN users u ON u.id = ar.user_id
          WHERE ar.attendance_date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date)
-         ORDER BY ar.check_in_at DESC NULLS LAST, ${fullNameSql("u")}
+         ORDER BY ${latestAttendanceTapSql("$2")} DESC NULLS LAST, ar.updated_at DESC, ${fullNameSql("u")}
          LIMIT 10`,
           [targetDate, timeZone],
         ),

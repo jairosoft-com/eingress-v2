@@ -7,7 +7,14 @@ import { broadcastActivityEvent } from "../activityEvents.js";
 import { createNotification } from "../lib/notifications.js";
 import { fullNameSql } from "../lib/personName.js";
 import { getSystemTimeZone } from "../lib/timezone.js";
-import { CLOCK_OUT_MIN_GAP_MINUTES, WORKDAY_END_TIME, ensureAttendanceStatus } from "../lib/attendance.js";
+import {
+  ATTENDANCE_AUTH_METHODS,
+  ATTENDANCE_AUTH_METHODS_SQL,
+  CLOCK_OUT_MIN_GAP_MINUTES,
+  WORKDAY_END_TIME,
+  ensureAttendanceStatus,
+  isLateTapSql,
+} from "../lib/attendance.js";
 import { emitDoorUnlock } from "../socketio.js";
 
 export const kioskRouter = express.Router();
@@ -148,13 +155,13 @@ async function processKioskScanUnsafe(req, res) {
 
   let timeType = null;
 
-  if (result === "Granted" && method === "Fingerprint") {
+  if (result === "Granted" && ATTENDANCE_AUTH_METHODS.includes(method)) {
     await ensureAttendanceStatus();
     // Where the user stands today, before this tap changes anything. prev_tap is their previous granted tap today.
     const stateResult = await query(
       `SELECT ar.status, ar.check_in_at, ar.check_out_at,
          (SELECT MAX(access_time) FROM access_logs
-           WHERE user_id = $1 AND id <> $2 AND result = 'Granted' AND authentication_method = 'Fingerprint'
+           WHERE user_id = $1 AND id <> $2 AND result = 'Granted' AND authentication_method IN (${ATTENDANCE_AUTH_METHODS_SQL})
              AND (access_time AT TIME ZONE $3)::date = (NOW() AT TIME ZONE $3)::date) AS prev_tap,
          ((SELECT access_time FROM access_logs WHERE id = $2) AT TIME ZONE $3)::time::text AS tap_time,
          (ar.check_in_at AT TIME ZONE $3)::time::text AS check_in_time
@@ -184,7 +191,7 @@ async function processKioskScanUnsafe(req, res) {
         `INSERT INTO attendance_records
            (user_id, attendance_date, check_in_at, check_out_at, status, location, employee_id, full_name, department, role)
          VALUES ($1, (NOW() AT TIME ZONE $6)::date, $7, NULL,
-           (CASE WHEN ($7::timestamptz AT TIME ZONE $6)::time > TIME '08:00:00' THEN 'Late' ELSE 'Present' END)::attendance_status,
+           (CASE WHEN ${isLateTapSql("$7::timestamptz", "$6")} THEN 'Late' ELSE 'Present' END)::attendance_status,
            'Kiosk', $2, $3, $4, $5)
          ON CONFLICT (user_id, attendance_date)
          DO UPDATE SET check_in_at = EXCLUDED.check_in_at, check_out_at = NULL, status = EXCLUDED.status, updated_at = NOW()`,
@@ -194,7 +201,7 @@ async function processKioskScanUnsafe(req, res) {
       await query(
         `UPDATE attendance_records
          SET check_out_at = NULL,
-             status = (CASE WHEN (check_in_at AT TIME ZONE $2)::time > TIME '08:00:00' THEN 'Late' ELSE 'Present' END)::attendance_status,
+             status = (CASE WHEN ${isLateTapSql("check_in_at", "$2")} THEN 'Late' ELSE 'Present' END)::attendance_status,
              updated_at = NOW()
          WHERE user_id = $1 AND attendance_date = (NOW() AT TIME ZONE $2)::date`,
         [user.id, timeZone],
