@@ -26,7 +26,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, subscribeRealtimeMessages } from '../lib/api';
 import { useAuth } from '../auth/useAuth';
 import { formatWorkedMinutes } from '../lib/attendanceFormat';
 import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
@@ -2975,6 +2975,39 @@ export function UserManagementPage() {
   );
 }
 
+async function fetchAttendanceSnapshot(accessToken: string, signal?: AbortSignal) {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const [recordsResponse, summaryResponse, usersResponse] = await Promise.all([
+    fetch(`${API_BASE_URL}/attendance`, { headers, signal }),
+    fetch(`${API_BASE_URL}/attendance/summary`, { headers, signal }),
+    fetch(`${API_BASE_URL}/users`, { headers, signal }),
+  ]);
+
+  const recordsData = (await recordsResponse.json().catch(() => null)) as
+    | AttendanceRecord[]
+    | { error?: string }
+    | null;
+
+  if (!recordsResponse.ok || !Array.isArray(recordsData)) {
+    throw new Error(
+      !Array.isArray(recordsData) && recordsData?.error
+        ? recordsData.error
+        : 'Unable to load attendance records.',
+    );
+  }
+
+  const summaryData = (await summaryResponse.json().catch(() => null)) as AttendanceSummary | null;
+  const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
+
+  return {
+    records: recordsData,
+    summary: summaryResponse.ok ? summaryData : null,
+    totalUsers: Array.isArray(usersData)
+      ? usersData.filter((user) => !user.is_archived).length
+      : null,
+  };
+}
+
 export function AttendanceManagementPage() {
   const { session } = useAuth();
   const dateTimeSettings = useDateTimeSettings();
@@ -2985,70 +3018,74 @@ export function AttendanceManagementPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    const controller = new AbortController();
+    const accessToken = session?.accessToken;
+    if (!accessToken) {
+      return;
+    }
 
-    async function loadAttendance() {
-      if (!session?.accessToken) {
-        setErrorMessage('Please sign in again to view attendance records.');
-        setIsLoading(false);
-        return;
-      }
+    const initialController = new AbortController();
+    let refreshController: AbortController | null = null;
+    let latestRequestId = 0;
+
+    async function syncAttendance(silent: boolean, signal: AbortSignal, token: string) {
+      const requestId = ++latestRequestId;
 
       try {
-        setIsLoading(true);
-        setErrorMessage('');
+        const snapshot = await fetchAttendanceSnapshot(token, signal);
 
-        const headers = { Authorization: `Bearer ${session.accessToken}` };
-        const [recordsResponse, summaryResponse, usersResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/attendance`, { headers, signal: controller.signal }),
-          fetch(`${API_BASE_URL}/attendance/summary`, { headers, signal: controller.signal }),
-          fetch(`${API_BASE_URL}/users`, { headers, signal: controller.signal }),
-        ]);
-
-        const recordsData = (await recordsResponse.json().catch(() => null)) as
-          | AttendanceRecord[]
-          | { error?: string }
-          | null;
-
-        if (!recordsResponse.ok || !Array.isArray(recordsData)) {
-          throw new Error(
-            !Array.isArray(recordsData) && recordsData?.error
-              ? recordsData.error
-              : 'Unable to load attendance records.',
-          );
+        if (signal.aborted || requestId !== latestRequestId) {
+          return;
         }
 
-        const summaryData = (await summaryResponse
-          .json()
-          .catch(() => null)) as AttendanceSummary | null;
-        const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
-
-        setRecords(recordsData);
-        setSummary(summaryResponse.ok ? summaryData : null);
-        setTotalUsers(
-          Array.isArray(usersData) ? usersData.filter((user) => !user.is_archived).length : null,
-        );
+        setRecords(snapshot.records);
+        setSummary(snapshot.summary);
+        setTotalUsers(snapshot.totalUsers);
+        setErrorMessage('');
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return;
         }
 
-        setErrorMessage(
-          error instanceof Error ? error.message : 'Unable to load attendance records.',
-        );
+        if (!silent && requestId === latestRequestId) {
+          setErrorMessage(
+            error instanceof Error ? error.message : 'Unable to load attendance records.',
+          );
+        }
       } finally {
-        if (!controller.signal.aborted) {
+        if (!signal.aborted && !silent && requestId === latestRequestId) {
           setIsLoading(false);
         }
       }
     }
 
-    void loadAttendance();
+    void syncAttendance(false, initialController.signal, accessToken);
+
+    const triggerRealtimeRefresh = () => {
+      refreshController?.abort();
+      refreshController = new AbortController();
+      void syncAttendance(true, refreshController.signal, accessToken);
+    };
+
+    const unsubscribe = subscribeRealtimeMessages(
+      (message) => {
+        if (message.type === 'attendance:changed' || message.type === 'users:changed') {
+          triggerRealtimeRefresh();
+        }
+      },
+      { onReconnect: triggerRealtimeRefresh },
+    );
 
     return () => {
-      controller.abort();
+      initialController.abort();
+      refreshController?.abort();
+      unsubscribe();
     };
   }, [session?.accessToken]);
+
+  const effectiveIsLoading = Boolean(session?.accessToken) && isLoading;
+  const effectiveErrorMessage = session?.accessToken
+    ? errorMessage
+    : 'Please sign in again to view attendance records.';
 
   const attendanceRows = useMemo(
     () =>
@@ -3117,8 +3154,8 @@ export function AttendanceManagementPage() {
         title="Today's Attendance"
         columns={['Employee ID', 'Name', 'Role', 'Time In', 'Time Out', 'Status', 'Total Hours']}
         rows={attendanceRows}
-        isLoading={isLoading}
-        errorMessage={errorMessage}
+        isLoading={effectiveIsLoading}
+        errorMessage={effectiveErrorMessage}
         emptyMessage="No attendance records found for today."
       />
     </section>

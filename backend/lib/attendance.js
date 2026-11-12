@@ -9,6 +9,10 @@ export const WORKDAY_END_TIME = '17:00:00';
 // 15-minute grace period after 08:00: arrivals through 08:15:59 remain Present; 08:16:00+ (> 15 mins late) are Late.
 export const LATE_CUTOFF_TIME = '08:16:00';
 
+// Kiosk scan authentication methods that record employee attendance and latest-tap ordering.
+export const ATTENDANCE_AUTH_METHODS = ['Fingerprint', 'RFID'];
+export const ATTENDANCE_AUTH_METHODS_SQL = ATTENDANCE_AUTH_METHODS.map((method) => `'${method}'`).join(', ');
+
 export function isLateTapSql(timestampExpr, timeZoneParam) {
   return `((${timestampExpr} AT TIME ZONE ${timeZoneParam})::time >= TIME '${LATE_CUTOFF_TIME}')`;
 }
@@ -57,7 +61,7 @@ export function workedMinutesSql(timeZoneParam, alias = 'ar') {
       FROM access_logs tap_logs
       WHERE tap_logs.user_id = ${alias}.user_id
         AND tap_logs.result = 'Granted'
-        AND tap_logs.authentication_method = 'Fingerprint'
+        AND tap_logs.authentication_method IN (${ATTENDANCE_AUTH_METHODS_SQL})
         AND (tap_logs.access_time AT TIME ZONE ${timeZoneParam})::date = ${alias}.attendance_date
         AND tap_logs.access_time >= ${alias}.check_in_at
         AND tap_logs.access_time <= ${alias}.check_out_at
@@ -86,4 +90,23 @@ export function workedMinutesSql(timeZoneParam, alias = 'ar') {
 
   return `(CASE WHEN ${alias}.check_in_at IS NULL OR ${alias}.check_out_at IS NULL THEN NULL
     ELSE GREATEST(0, ROUND((${effectiveSeconds(`${alias}.check_in_at`, `${alias}.check_out_at`)} - ${breakSeconds}) / 60))::int END)`;
+}
+
+// Timestamp of an employee's most recent granted kiosk attendance tap on that date (falling back to check-in/out times),
+// so break returns (which clear check_out_at) and clock-outs still sort at the top of realtime lists.
+export function latestAttendanceTapSql(timeZoneParam, alias = 'ar') {
+  return `GREATEST(
+    COALESCE(
+      (SELECT MAX(tap_logs.access_time)
+       FROM access_logs tap_logs
+       WHERE tap_logs.user_id = ${alias}.user_id
+         AND tap_logs.result = 'Granted'
+         AND tap_logs.authentication_method IN (${ATTENDANCE_AUTH_METHODS_SQL})
+         AND (tap_logs.access_time AT TIME ZONE ${timeZoneParam})::date = ${alias}.attendance_date
+         AND (${alias}.check_in_at IS NULL OR tap_logs.access_time >= ${alias}.check_in_at)),
+      ${alias}.check_in_at
+    ),
+    ${alias}.check_in_at,
+    ${alias}.check_out_at
+  )`;
 }
