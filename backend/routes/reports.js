@@ -4,7 +4,7 @@ import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { createNotification } from '../lib/notifications.js';
 import { fullNameSql } from '../lib/personName.js';
-import { ensureAttendanceStatus } from '../lib/attendance.js';
+import { ensureAttendanceStatus, isLateTapSql } from '../lib/attendance.js';
 import { getSystemTimeZone } from '../lib/timezone.js';
 
 export const reportsRouter = express.Router();
@@ -226,10 +226,10 @@ async function buildReportData(reportType, filters) {
   return { columns: [], rows: [] };
 }
 
-// A clocked-out user (status 'Clocked Out') still counts as present, or as late when their first tap was after 08:00.
+// A clocked-out user (status 'Clocked Out') still counts as present, or as late when their first tap was past the grace cutoff (08:16+).
 // timeZoneParam is the placeholder (e.g. '$2') that holds the system time zone in the query.
 const lateSql = (timeZoneParam) =>
-  `(status = 'Late' OR (status = 'Clocked Out' AND (check_in_at AT TIME ZONE ${timeZoneParam})::time > TIME '08:00:00'))`;
+  `(status = 'Late' OR (status = 'Clocked Out' AND ${isLateTapSql('check_in_at', timeZoneParam)}))`;
 const presentSql = (timeZoneParam) =>
   `(status = 'Present' OR (status = 'Clocked Out' AND NOT ${lateSql(timeZoneParam)}))`;
 

@@ -7,7 +7,12 @@ import { broadcastActivityEvent } from "../activityEvents.js";
 import { createNotification } from "../lib/notifications.js";
 import { fullNameSql } from "../lib/personName.js";
 import { getSystemTimeZone } from "../lib/timezone.js";
-import { CLOCK_OUT_MIN_GAP_MINUTES, WORKDAY_END_TIME, ensureAttendanceStatus } from "../lib/attendance.js";
+import {
+  CLOCK_OUT_MIN_GAP_MINUTES,
+  WORKDAY_END_TIME,
+  ensureAttendanceStatus,
+  isLateTapSql,
+} from "../lib/attendance.js";
 import { emitDoorUnlock } from "../socketio.js";
 
 export const kioskRouter = express.Router();
@@ -184,7 +189,7 @@ async function processKioskScanUnsafe(req, res) {
         `INSERT INTO attendance_records
            (user_id, attendance_date, check_in_at, check_out_at, status, location, employee_id, full_name, department, role)
          VALUES ($1, (NOW() AT TIME ZONE $6)::date, $7, NULL,
-           (CASE WHEN ($7::timestamptz AT TIME ZONE $6)::time > TIME '08:00:00' THEN 'Late' ELSE 'Present' END)::attendance_status,
+           (CASE WHEN ${isLateTapSql("$7::timestamptz", "$6")} THEN 'Late' ELSE 'Present' END)::attendance_status,
            'Kiosk', $2, $3, $4, $5)
          ON CONFLICT (user_id, attendance_date)
          DO UPDATE SET check_in_at = EXCLUDED.check_in_at, check_out_at = NULL, status = EXCLUDED.status, updated_at = NOW()`,
@@ -194,7 +199,7 @@ async function processKioskScanUnsafe(req, res) {
       await query(
         `UPDATE attendance_records
          SET check_out_at = NULL,
-             status = (CASE WHEN (check_in_at AT TIME ZONE $2)::time > TIME '08:00:00' THEN 'Late' ELSE 'Present' END)::attendance_status,
+             status = (CASE WHEN ${isLateTapSql("check_in_at", "$2")} THEN 'Late' ELSE 'Present' END)::attendance_status,
              updated_at = NOW()
          WHERE user_id = $1 AND attendance_date = (NOW() AT TIME ZONE $2)::date`,
         [user.id, timeZone],
