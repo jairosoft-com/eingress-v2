@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/useAuth';
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, subscribeRealtimeMessages } from '../lib/api';
 import { formatDateTime } from '../lib/dateTimeFormat';
 import { useDateTimeSettings } from '../lib/systemSettingsStore';
-
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
 type AccessLog = {
   area?: string | null;
@@ -91,26 +89,17 @@ export function AccessLogsPage() {
       return;
     }
 
-    const socket = new WebSocket(WS_BASE_URL);
-
-    socket.addEventListener('message', (event) => {
-      try {
-        const message = JSON.parse(event.data as string) as {
-          payload?: AccessLog;
-          type?: string;
-        };
-
-        if (message.type === 'activity:event' && message.payload) {
-          setAccessLogs((currentLogs) =>
-            sortAccessLogsByTime([message.payload as AccessLog, ...currentLogs]).slice(0, 100),
-          );
-        }
-      } catch {
-        // Ignore realtime messages that are not JSON.
+    return subscribeRealtimeMessages((message) => {
+      if (message.type === 'activity:event' && message.payload) {
+        const incomingLog = message.payload as AccessLog;
+        setAccessLogs((currentLogs) =>
+          sortAccessLogsByTime([
+            incomingLog,
+            ...currentLogs.filter((existing) => existing.id !== incomingLog.id),
+          ]).slice(0, 100),
+        );
       }
     });
-
-    return () => socket.close();
   }, [session?.accessToken]);
 
   return (

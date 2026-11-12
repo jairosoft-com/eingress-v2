@@ -12,7 +12,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, subscribeRealtimeMessages } from '../lib/api';
 import { formatWorkedMinutes } from '../lib/attendanceFormat';
 import {
   formatDate,
@@ -21,8 +21,6 @@ import {
   getLocalDateString,
 } from '../lib/dateTimeFormat';
 import { DateTimeSettings, useDateTimeSettings } from '../lib/systemSettingsStore';
-
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
 type DashboardMetrics = {
   active_devices?: number;
@@ -94,13 +92,26 @@ async function fetchDashboardData(accessToken: string, date?: string, signal?: A
   return response.ok && data ? data : null;
 }
 
+function normalizeAccessEventKey(event: RecentActivityEvent, eventTimestamp: string) {
+  if (typeof event.id === 'number') {
+    return `access-${event.id}`;
+  }
+
+  if (typeof event.id === 'string' && event.id.trim()) {
+    return event.id.trim();
+  }
+
+  return `${event.employeeId ?? event.employee_id ?? event.user ?? event.user_name ?? 'event'}-${eventTimestamp}`;
+}
+
 function toAccessEvent(event: RecentActivityEvent) {
   const status = event.status ?? event.result ?? 'Info';
   const eventTimestamp = event.time ?? event.event_time ?? new Date().toISOString();
 
   return {
+    rowKey: normalizeAccessEventKey(event, eventTimestamp),
     user: event.user ?? event.user_name ?? 'Unknown',
-    id: event.employeeId ?? event.employee_id ?? String(event.id),
+    id: event.employeeId ?? event.employee_id ?? String(event.id ?? ''),
     event: event.event ?? (status === 'Granted' ? 'Access Granted' : 'Access Denied'),
     area: event.area ?? 'System',
     device: event.device ?? event.device_name ?? 'EIngress',
@@ -116,7 +127,16 @@ function toAccessEvent(event: RecentActivityEvent) {
 }
 
 function sortAccessEventsByTime(events: ReturnType<typeof toAccessEvent>[]) {
-  return [...events].sort(
+  const seenKeys = new Set<string>();
+  const uniqueEvents = events.filter((event) => {
+    if (seenKeys.has(event.rowKey)) {
+      return false;
+    }
+    seenKeys.add(event.rowKey);
+    return true;
+  });
+
+  return uniqueEvents.sort(
     (eventA, eventB) => new Date(eventB.sortTime).getTime() - new Date(eventA.sortTime).getTime(),
   );
 }
@@ -194,8 +214,9 @@ export function DashboardPage() {
     }
 
     const controller = new AbortController();
+    const requestDate = customDate ?? undefined;
 
-    void fetchDashboardData(session.accessToken, selectedDate, controller.signal)
+    void fetchDashboardData(session.accessToken, requestDate, controller.signal)
       .then((data) => {
         if (!controller.signal.aborted && data) {
           setDashboardMetrics(data.metrics ?? null);
@@ -209,21 +230,51 @@ export function DashboardPage() {
       });
 
     return () => controller.abort();
-  }, [session?.accessToken, selectedDate]);
+  }, [session?.accessToken, customDate, selectedDate]);
 
   useEffect(() => {
     if (!session?.accessToken) {
       return;
     }
 
-    const socket = new WebSocket(WS_BASE_URL);
-    socket.addEventListener('message', (event) => {
-      try {
-        const message = JSON.parse(event.data as string) as {
-          payload?: DashboardMetrics | RecentActivityEvent;
-          type?: string;
-        };
+    const accessToken = session.accessToken;
+    let refreshController: AbortController | null = null;
+    let latestRefreshId = 0;
 
+    const refreshDashboard = (includeAttendance: boolean) => {
+      const requestId = ++latestRefreshId;
+      refreshController?.abort();
+      const controller = new AbortController();
+      refreshController = controller;
+      const targetDate =
+        selectedDateRef.current === todayStringRef.current ? undefined : selectedDateRef.current;
+
+      void fetchDashboardData(accessToken, targetDate, controller.signal)
+        .then((data) => {
+          if (controller.signal.aborted || requestId !== latestRefreshId || !data) {
+            return;
+          }
+
+          setDashboardMetrics(data.metrics ?? null);
+
+          if (includeAttendance) {
+            setAttendanceRecords(data.attendanceRecords ?? []);
+            setAttendanceTrend(data.attendanceTrend ?? []);
+            if (Array.isArray(data.recentEvents)) {
+              const incomingEvents = data.recentEvents.map(toAccessEvent);
+              setAccessEvents((currentEvents) =>
+                sortAccessEventsByTime([...incomingEvents, ...currentEvents]).slice(0, 8),
+              );
+            }
+          }
+        })
+        .catch(() => {
+          // Keep the last known data if a realtime refresh is aborted or fails.
+        });
+    };
+
+    const unsubscribe = subscribeRealtimeMessages(
+      (message) => {
         if (message.type === 'dashboard:metrics-changed' && message.payload) {
           const metricsPayload = message.payload as DashboardMetrics;
 
@@ -243,29 +294,11 @@ export function DashboardPage() {
         }
 
         if (message.type === 'attendance:changed') {
-          void fetchDashboardData(session.accessToken, selectedDateRef.current)
-            .then((data) => {
-              if (data) {
-                setDashboardMetrics(data.metrics ?? null);
-                setAttendanceRecords(data.attendanceRecords ?? []);
-                setAttendanceTrend(data.attendanceTrend ?? []);
-              }
-            })
-            .catch(() => {
-              // Keep the last known metrics if a realtime refresh fails.
-            });
+          refreshDashboard(true);
         }
 
         if (message.type === 'users:changed') {
-          void fetchDashboardData(session.accessToken, selectedDateRef.current)
-            .then((data) => {
-              if (data) {
-                setDashboardMetrics(data.metrics ?? null);
-              }
-            })
-            .catch(() => {
-              // Keep the last known metrics if a realtime refresh fails.
-            });
+          refreshDashboard(false);
         }
 
         const activityEvent = message.payload as RecentActivityEvent | undefined;
@@ -275,12 +308,16 @@ export function DashboardPage() {
             sortAccessEventsByTime([toAccessEvent(activityEvent), ...currentEvents]).slice(0, 8),
           );
         }
-      } catch {
-        // Ignore realtime messages that are not JSON.
-      }
-    });
+      },
+      {
+        onReconnect: () => refreshDashboard(true),
+      },
+    );
 
-    return () => socket.close();
+    return () => {
+      refreshController?.abort();
+      unsubscribe();
+    };
   }, [session?.accessToken]);
 
   const isToday = selectedDate === todayString;
@@ -505,7 +542,7 @@ export function DashboardPage() {
               </thead>
               <tbody>
                 {accessEvents.map((event) => (
-                  <tr key={event.id}>
+                  <tr key={event.rowKey}>
                     <td>
                       <span className="user-cell">
                         <span className="mini-avatar">{event.user.charAt(0)}</span>
@@ -586,7 +623,13 @@ export function DashboardPage() {
             <tbody>
               {attendanceRecords.length > 0 ? (
                 attendanceRecords.map((record, index) => (
-                  <tr key={`${record.employee_id ?? 'record'}-${index}`}>
+                  <tr
+                    key={
+                      record.employee_id
+                        ? `${record.attendance_date ?? 'today'}-${record.employee_id}`
+                        : `record-${index}`
+                    }
+                  >
                     <td>{record.employee_id ?? '—'}</td>
                     <td>{record.name ?? 'Unknown user'}</td>
                     <td>{record.department ?? '—'}</td>

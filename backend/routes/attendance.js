@@ -4,7 +4,12 @@ import { query } from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { fullNameSql } from "../lib/personName.js";
 import { getDateStringInTimeZone, getSystemTimeZone } from "../lib/timezone.js";
-import { ensureAttendanceStatus, isLateTapSql, workedMinutesSql } from "../lib/attendance.js";
+import {
+  ensureAttendanceStatus,
+  isLateTapSql,
+  latestAttendanceTapSql,
+  workedMinutesSql,
+} from "../lib/attendance.js";
 
 export const attendanceRouter = express.Router();
 attendanceRouter.use(authMiddleware);
@@ -52,7 +57,7 @@ attendanceRouter.get("/", async (req, res, next) => {
        FROM attendance_records ar
        JOIN users u ON u.id = ar.user_id
        WHERE ${where.join(" AND ")}
-       ORDER BY ar.attendance_date DESC, ar.check_in_at DESC NULLS LAST, ${fullNameSql("u")}`,
+       ORDER BY ar.attendance_date DESC, ${latestAttendanceTapSql(timeZoneParam)} DESC NULLS LAST, ar.updated_at DESC, ${fullNameSql("u")}`,
       params,
     );
 
