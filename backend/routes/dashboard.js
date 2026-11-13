@@ -4,9 +4,17 @@ import { query } from "../db.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { fullNameSql } from "../lib/personName.js";
 import { getSystemTimeZone } from "../lib/timezone.js";
+import { latestAttendanceTapSql, workedMinutesSql } from "../lib/attendance.js";
 
 export const dashboardRouter = express.Router();
 dashboardRouter.use(authMiddleware);
+
+function redactSensitiveDetails(details) {
+  return details.replace(
+    /\b(password|passphrase|passcode|secret|token|credential|rfid(?:_uid)?|fingerprint(?:_id)?)\b(["']?\s*[:=]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^,\r\n;}]+)/gi,
+    "$1$2**********",
+  );
+}
 
 dashboardRouter.get("/", async (req, res, next) => {
   try {
@@ -23,10 +31,7 @@ dashboardRouter.get("/", async (req, res, next) => {
       await Promise.all([
         query(
           `SELECT
-          CASE 
-            WHEN COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) = (NOW() AT TIME ZONE $2)::date THEN (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE)
-            ELSE (SELECT COUNT(*)::int FROM users WHERE (created_at AT TIME ZONE $2)::date <= $1::date AND (is_active = TRUE OR (deactivated_at IS NOT NULL AND (deactivated_at AT TIME ZONE $2)::date > $1::date)))
-          END AS total_users,
+          (SELECT COUNT(*)::int FROM users WHERE is_active = TRUE AND COALESCE(is_archived, FALSE) = FALSE) AS total_users,
           (SELECT COUNT(DISTINCT user_id)::int FROM attendance_records WHERE attendance_date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) AND status <> 'Absent') AS todays_attendance,
           (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date)) AS total_access,
           (SELECT COUNT(*)::int FROM access_logs WHERE (access_time AT TIME ZONE $2)::date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date) AND result = 'Granted') AS successful_attempts,
@@ -52,7 +57,8 @@ dashboardRouter.get("/", async (req, res, next) => {
              al.result::text AS result,
              al.area,
              COALESCE(d.device_name, 'RFID Reader') AS device_name,
-             al.access_time AS event_time
+             al.access_time AS event_time,
+             NULL::text AS details
            FROM access_logs al
            LEFT JOIN users u ON u.id = al.user_id
            LEFT JOIN devices d ON d.id = al.device_id
@@ -70,7 +76,8 @@ dashboardRouter.get("/", async (req, res, next) => {
               ELSE 'Info' END AS event,
              l.module AS area,
              'Admin Portal' AS device_name,
-             l.created_at AS event_time
+             l.created_at AS event_time,
+             l.details
            FROM audit_logs l
            LEFT JOIN admins a ON a.id = l.admin_id
          ) recent_activity
@@ -103,12 +110,13 @@ dashboardRouter.get("/", async (req, res, next) => {
           ar.attendance_date::text AS attendance_date,
           ar.check_in_at,
           ar.check_out_at,
+          ${workedMinutesSql("$2")} AS total_minutes,
           COALESCE(ar.status::text, 'Present') AS status,
           COALESCE(ar.location, 'Office') AS location
          FROM attendance_records ar
          JOIN users u ON u.id = ar.user_id
          WHERE ar.attendance_date = COALESCE($1::date, (NOW() AT TIME ZONE $2)::date)
-         ORDER BY ar.check_in_at DESC NULLS LAST, ${fullNameSql("u")}
+         ORDER BY ${latestAttendanceTapSql("$2")} DESC NULLS LAST, ar.updated_at DESC, ${fullNameSql("u")}
          LIMIT 10`,
           [targetDate, timeZone],
         ),
@@ -117,7 +125,10 @@ dashboardRouter.get("/", async (req, res, next) => {
     res.json({
       selectedDate: targetDate,
       metrics: metrics.rows[0],
-      recentEvents: recentEvents.rows,
+      recentEvents: recentEvents.rows.map((event) => ({
+        ...event,
+        details: typeof event.details === "string" ? redactSensitiveDetails(event.details) : null,
+      })),
       devices: devices.rows,
       attendanceTrend: attendanceTrend.rows,
       attendanceRecords: attendanceRecords.rows,

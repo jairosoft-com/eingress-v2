@@ -49,14 +49,15 @@ function validateSingleField(
   if (fieldName === 'lastName') return validateNamePart('Last name', value);
 
   if (fieldName === 'email') {
-    if (!value.trim()) return 'Email address is required.';
-    if (!/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(value))
+    if (
+      value.trim() &&
+      !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(value.trim())
+    )
       return 'Enter a valid email address.';
   }
 
   if (fieldName === 'phoneNumber') {
-    if (!value.trim()) return 'Phone number is required.';
-    if (!/^9\d{9}$/.test(value.trim()))
+    if (value.trim() && !/^9\d{9}$/.test(value.trim()))
       return 'Enter a valid 10-digit mobile number starting with 9.';
   }
 
@@ -86,18 +87,14 @@ function validateRegistrationForm(
     errors.lastName = lastNameError;
   }
 
-  if (!email.trim()) {
-    errors.email = 'Email address is required.';
-  } else if (
-    !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(email)
-  ) {
-    errors.email = 'Enter a valid email address.';
+  const emailError = validateSingleField('email', email);
+  if (emailError) {
+    errors.email = emailError;
   }
 
-  if (!phoneNumber.trim()) {
-    errors.phoneNumber = 'Phone number is required.';
-  } else if (!/^9\d{9}$/.test(phoneNumber.trim())) {
-    errors.phoneNumber = 'Enter a valid 10-digit mobile number starting with 9.';
+  const phoneError = validateSingleField('phoneNumber', phoneNumber);
+  if (phoneError) {
+    errors.phoneNumber = phoneError;
   }
 
   if (!role) {
@@ -204,8 +201,8 @@ export function RegistrationPage() {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
           role,
-          email,
-          phone: `+63${phoneNumber}`,
+          email: email.trim(),
+          phone: phoneNumber.trim() ? `+63${phoneNumber.trim()}` : '',
         }),
       });
 
@@ -391,9 +388,7 @@ export function RegistrationPage() {
           </section>
 
           <section className="question-card">
-            <label htmlFor="registrationEmail">
-              Email <span aria-hidden="true">*</span>
-            </label>
+            <label htmlFor="registrationEmail">Email</label>
             <div className="google-input-shell">
               <Mail size={20} aria-hidden="true" />
               <input
@@ -425,9 +420,7 @@ export function RegistrationPage() {
           </section>
 
           <section className="question-card">
-            <label htmlFor="phoneNumber">
-              Phone Number <span aria-hidden="true">*</span>
-            </label>
+            <label htmlFor="phoneNumber">Phone Number</label>
             <div className="google-input-shell">
               <Phone size={20} aria-hidden="true" />
               <span className="phone-prefix" id="phone-prefix-label">
