@@ -901,7 +901,7 @@ button {
   height: 100vh;
   min-height: 0;
   flex-direction: column;
-  gap: 28px;
+  gap: 24px;
   padding: 24px 20px;
   overflow-y: auto;
   color: #ffffff;
@@ -930,9 +930,9 @@ button {
 
 .admin-nav-link {
   display: flex;
-  min-height: 56px;
+  min-height: 50px;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   padding: 0 18px;
   color: #e2e8f4;
   font-weight: 750;
@@ -971,7 +971,7 @@ button {
 
 .sidebar-promo .compact {
   width: 100%;
-  height: 180px;
+  height: 140px;
   margin-bottom: 18px;
   border-radius: 8px;
 }
