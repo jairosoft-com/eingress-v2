@@ -286,3 +286,43 @@ rolesRouter.patch('/:id', authMiddleware, async (req, res) => {
     client.release();
   }
 });
+
+rolesRouter.delete('/:id', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Valid role id is required' });
+  }
+
+  try {
+    await ensureRolesTable();
+    const existing = await query(`SELECT id, name, user_id_prefix FROM roles WHERE id = $1`, [id]);
+
+    if (existing.rowCount === 0) {
+      return res.status(404).json({ error: 'Role not found' });
+    }
+
+    const role = existing.rows[0];
+
+    await query(`DELETE FROM roles WHERE id = $1`, [id]);
+    await query(
+      `UPDATE system_settings
+       SET auto_deactivation_applicable_roles = array_remove(auto_deactivation_applicable_roles, $1),
+           updated_at = NOW()
+       WHERE id = (SELECT id FROM system_settings ORDER BY id LIMIT 1)`,
+      [role.name],
+    ).catch(() => {});
+
+    await logAudit(req, 'Deleted Role', `Deleted role ${role.name}`);
+    await createNotification('Role Deleted', `Role ${role.name} was permanently deleted.`, 'info');
+
+    broadcastMessage({
+      type: 'roles:changed',
+      payload: { action: 'deleted', id, name: role.name },
+    });
+
+    res.json({ message: 'Role permanently deleted.', id, name: role.name });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});

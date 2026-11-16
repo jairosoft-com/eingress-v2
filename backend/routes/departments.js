@@ -2,6 +2,7 @@ import express from 'express';
 import { pool, query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { createNotification } from '../lib/notifications.js';
+import { broadcastMessage } from '../ws.js';
 import {
   ensureDepartmentsTable,
   MAX_DEPARTMENT_NAME_LENGTH,
@@ -90,6 +91,10 @@ departmentsRouter.post('/', authMiddleware, async (req, res) => {
     await logAudit(req, 'Added Department', `Added department ${name}`);
     await createNotification('Department Added', `Department ${name} was added.`, 'success');
     const result = await query(`${DEPARTMENT_SELECT} WHERE d.id = $1`, [inserted.rows[0].id]);
+    broadcastMessage({
+      type: 'departments:changed',
+      payload: { action: 'created', department: result.rows[0] },
+    });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err?.code === '23505') {
@@ -189,6 +194,10 @@ departmentsRouter.patch('/:id', authMiddleware, async (req, res) => {
     }
 
     const result = await query(`${DEPARTMENT_SELECT} WHERE d.id = $1`, [id]);
+    broadcastMessage({
+      type: 'departments:changed',
+      payload: { action: 'updated', department: result.rows[0] },
+    });
     res.json(result.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -203,5 +212,37 @@ departmentsRouter.patch('/:id', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   } finally {
     client.release();
+  }
+});
+
+departmentsRouter.delete('/:id', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Valid department id is required' });
+  }
+
+  try {
+    await ensureDepartmentsTable();
+    const existing = await query(`SELECT id, name FROM departments WHERE id = $1`, [id]);
+
+    if (existing.rowCount === 0) {
+      return res.status(404).json({ error: 'Department not found' });
+    }
+
+    const dept = existing.rows[0];
+
+    await query(`DELETE FROM departments WHERE id = $1`, [id]);
+    await logAudit(req, 'Deleted Department', `Deleted department ${dept.name}`);
+    await createNotification('Department Deleted', `Department ${dept.name} was permanently deleted.`, 'info');
+
+    broadcastMessage({
+      type: 'departments:changed',
+      payload: { action: 'deleted', id, name: dept.name },
+    });
+
+    res.json({ message: 'Department permanently deleted.', id, name: dept.name });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
   }
 });

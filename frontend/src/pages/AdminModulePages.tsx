@@ -16,6 +16,7 @@ import {
   Pencil,
   Power,
   Search,
+  Trash2,
   TrendingUp,
   Users,
   UsersRound,
@@ -25,8 +26,9 @@ import type { FormEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, subscribeRealtimeMessages } from '../lib/api';
 import { useAuth } from '../auth/useAuth';
+import { formatWorkedMinutes } from '../lib/attendanceFormat';
 import { formatDate, formatDateTime, formatTime } from '../lib/dateTimeFormat';
 import { setSecuritySettings } from '../lib/securitySettingsStore';
 import {
@@ -83,10 +85,13 @@ type AttendanceRecord = {
   location: string | null;
   role: string | null;
   status: string;
+  total_minutes?: number | null;
 };
 
 type AttendanceSummary = {
   absent: number;
+  attended?: number;
+  clocked_out?: number;
   late: number;
   present: number;
   total_records: number;
@@ -621,6 +626,10 @@ function statusTone(status: string) {
     return 'warning';
   }
 
+  if (status === 'Clocked Out') {
+    return 'neutral';
+  }
+
   return 'danger';
 }
 
@@ -659,36 +668,6 @@ function formatClockTime(value: string | null, settings: DateTimeSettings) {
   }
 
   return formatTime(value, settings) || '-';
-}
-
-function hasCheckedOut(checkInAt: string | null, checkOutAt: string | null) {
-  if (!checkInAt || !checkOutAt) {
-    return false;
-  }
-
-  const checkInTime = new Date(checkInAt).getTime();
-  const checkOutTime = new Date(checkOutAt).getTime();
-
-  return !Number.isNaN(checkInTime) && !Number.isNaN(checkOutTime) && checkOutTime !== checkInTime;
-}
-
-function formatTotalHours(checkInAt: string | null, checkOutAt: string | null) {
-  if (!hasCheckedOut(checkInAt, checkOutAt)) {
-    return '-';
-  }
-
-  const checkInTime = new Date(checkInAt as string).getTime();
-  const checkOutTime = new Date(checkOutAt as string).getTime();
-
-  if (checkOutTime < checkInTime) {
-    return '-';
-  }
-
-  const totalMinutes = Math.round((checkOutTime - checkInTime) / 60000);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  return `${hours} hrs ${minutes} mins`;
 }
 
 function toDateInputValue(value: string) {
@@ -856,6 +835,11 @@ export function UserManagementPage() {
     role: string;
     userId: string;
   } | null>(null);
+  const [editUserIdPreview, setEditUserIdPreview] = useState<{
+    role: string;
+    userId: string;
+    prefix: string;
+  } | null>(null);
   const [createFieldErrors, setCreateFieldErrors] = useState<UserFormFieldErrors>({});
   const [createErrors, setCreateErrors] = useState<CreateUserErrors>({});
   const [isCreatingUser, setIsCreatingUser] = useState(false);
@@ -924,7 +908,7 @@ export function UserManagementPage() {
     };
   }, [session?.accessToken]);
 
-  async function refreshOrganizationOptions() {
+  const refreshOrganizationOptions = useCallback(async () => {
     try {
       const headers = session?.accessToken
         ? { Authorization: `Bearer ${session.accessToken}` }
@@ -977,7 +961,7 @@ export function UserManagementPage() {
     } catch {
       // Leave existing options if fetch fails
     }
-  }
+  }, [session]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1047,6 +1031,20 @@ export function UserManagementPage() {
       controller.abort();
     };
   }, [session?.accessToken]);
+
+  useEffect(() => {
+    function handleOrgUpdate() {
+      void refreshOrganizationOptions();
+    }
+
+    window.addEventListener('roles:changed', handleOrgUpdate);
+    window.addEventListener('departments:changed', handleOrgUpdate);
+
+    return () => {
+      window.removeEventListener('roles:changed', handleOrgUpdate);
+      window.removeEventListener('departments:changed', handleOrgUpdate);
+    };
+  }, [refreshOrganizationOptions]);
 
   useEffect(() => {
     if (!isRfidScannerOpen) {
@@ -1195,9 +1193,20 @@ export function UserManagementPage() {
     }
   }
 
-  async function archiveUser(id: number) {
+  async function deleteUser(id: number) {
     if (!session?.accessToken) {
-      setUsersErrorMessage('Please sign in again to update users.');
+      setUsersErrorMessage('Please sign in again to delete users.');
+      return;
+    }
+
+    const user = users.find((currentUser) => currentUser.id === id);
+    const userLabel = user ? `${user.full_name} (${user.employee_id})` : 'this user';
+
+    if (
+      !window.confirm(
+        `Permanently delete ${userLabel}? This also permanently deletes their attendance records, while access logs will be retained without the user association. This action cannot be undone.`,
+      )
+    ) {
       return;
     }
 
@@ -1205,38 +1214,33 @@ export function UserManagementPage() {
       setUpdatingUserId(id);
       setUsersErrorMessage('');
 
-      const response = await fetch(`${API_BASE_URL}/users/${id}/archive`, {
-        method: 'PATCH',
+      const response = await fetch(`${API_BASE_URL}/users/${id}`, {
+        method: 'DELETE',
         headers: {
           Authorization: `Bearer ${session.accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ isArchived: true }),
       });
 
-      const data = (await response.json().catch(() => null)) as
-        | UserRecord
-        | { error?: string }
-        | null;
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+      } | null;
 
-      if (!response.ok || !('id' in (data ?? {}))) {
+      if (!response.ok) {
         throw new Error(
           data && typeof data === 'object' && 'error' in data
             ? data.error
-            : 'Unable to archive user.',
+            : 'Unable to delete user.',
         );
       }
 
-      setUsers((currentUsers) =>
-        currentUsers.map((user) =>
-          user.id === id ? { ...user, is_active: false, is_archived: true } : user,
-        ),
-      );
+      setUsers((currentUsers) => currentUsers.filter((currentUser) => currentUser.id !== id));
       window.dispatchEvent(new CustomEvent('users:changed'));
       window.dispatchEvent(new CustomEvent('roles:changed'));
-      window.alert('User archived successfully.');
+      window.alert('User has been deleted successfully.');
     } catch (error) {
-      setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to archive user.');
+      setUsersErrorMessage(error instanceof Error ? error.message : 'Unable to delete user.');
     } finally {
       setUpdatingUserId(null);
     }
@@ -1263,6 +1267,7 @@ export function UserManagementPage() {
     setEditFormError('');
     setEditFieldErrors({});
     setEditErrors({});
+    setEditUserIdPreview(null);
     setIsRfidScannerOpen(false);
     setIsFingerprintScannerOpen(false);
     setUsersErrorMessage('');
@@ -1438,20 +1443,70 @@ export function UserManagementPage() {
         );
       }
 
+      const savedUser = data as UserRecord;
+
       setUsers((currentUsers) =>
-        currentUsers.map((user) => (user.id === editingUser.id ? (data as UserRecord) : user)),
+        currentUsers.map((user) => (user.id === editingUser.id ? savedUser : user)),
       );
       setEditingUser(null);
       setEditErrors({});
       window.dispatchEvent(new CustomEvent('users:changed'));
       window.dispatchEvent(new CustomEvent('roles:changed'));
-      window.alert('User details saved successfully.');
+      window.alert(
+        savedUser.employee_id !== editingUser.employee_id
+          ? `User details saved successfully. User ID is now ${savedUser.employee_id}.`
+          : 'User details saved successfully.',
+      );
     } catch (error) {
       setEditFormError(error instanceof Error ? error.message : 'Unable to save user details.');
     } finally {
       setUpdatingUserId(null);
     }
   }
+
+  useEffect(() => {
+    if (
+      !editingUser ||
+      !editForm.role ||
+      editForm.role === (editingUser.role || '').trim() ||
+      !session?.accessToken
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const role = editForm.role;
+
+    void fetch(`${API_BASE_URL}/users/next-id?role=${encodeURIComponent(role)}`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+          prefix?: string;
+          userId?: string;
+        } | null;
+
+        if (response.ok && data?.userId && data.prefix) {
+          setEditUserIdPreview({ role, userId: data.userId, prefix: data.prefix });
+          setEditFieldErrors((currentErrors) => ({ ...currentErrors, role: undefined }));
+        } else {
+          setEditUserIdPreview(null);
+          setEditFieldErrors((currentErrors) => ({
+            ...currentErrors,
+            role: data?.error ?? 'Unable to generate a User ID for this role.',
+          }));
+        }
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+
+        setEditUserIdPreview(null);
+      });
+
+    return () => controller.abort();
+  }, [editingUser, editForm.role, session?.accessToken]);
 
   useEffect(() => {
     if (!isCreateUserOpen || !createForm.role || !session?.accessToken) {
@@ -1557,7 +1612,7 @@ export function UserManagementPage() {
           firstName,
           lastName,
           email,
-          phone: `+63${phone}`,
+          phone: phone ? `+63${phone}` : '',
           department: department || null,
           role,
           rfidUid: rfidUid || null,
@@ -1631,6 +1686,24 @@ export function UserManagementPage() {
 
   const activeRoles = roles.filter((role) => role.is_active).map((role) => role.name);
 
+  let editUserIdNote = '';
+
+  if (
+    editingUser &&
+    editUserIdPreview &&
+    editForm.role === editUserIdPreview.role &&
+    editForm.role !== (editingUser.role || '').trim()
+  ) {
+    const currentId = editingUser.employee_id;
+    const keepsId =
+      currentId.toUpperCase().startsWith(editUserIdPreview.prefix.toUpperCase()) &&
+      /^\d+$/.test(currentId.slice(editUserIdPreview.prefix.length));
+
+    editUserIdNote = keepsId
+      ? `User ID stays ${currentId}.`
+      : `User ID will change from ${currentId} to ${editUserIdPreview.userId} when you save (next available number).`;
+  }
+
   const roleSet = new Set<string>();
   roles.forEach((r) => roleSet.add(r.name));
   users.forEach((u) => {
@@ -1643,19 +1716,18 @@ export function UserManagementPage() {
     value: string,
   ): string | undefined {
     if (fieldName === 'email') {
-      if (!value.trim()) return 'Email address is required.';
       if (
-        value.trim().length > 254 ||
-        !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/.test(
-          value.trim(),
-        )
+        value.trim() &&
+        (value.trim().length > 254 ||
+          !/^[A-Za-z0-9]+(?:[._%+-][A-Za-z0-9]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/.test(
+            value.trim(),
+          ))
       )
         return 'Enter a valid email address.';
     }
 
     if (fieldName === 'phone') {
-      if (!value.trim()) return 'Phone number is required.';
-      if (!/^9\d{9}$/.test(value.trim()))
+      if (value.trim() && !/^9\d{9}$/.test(value.trim()))
         return 'Enter a valid 10-digit mobile number starting with 9.';
     }
 
@@ -2022,6 +2094,10 @@ export function UserManagementPage() {
                           <button
                             className={user.accessStatus === 'Active' ? 'activate' : 'deactivate'}
                             type="button"
+                            title={user.accessStatus === 'Disabled' ? 'Activate' : 'Deactivate'}
+                            data-tooltip={
+                              user.accessStatus === 'Disabled' ? 'Activate' : 'Deactivate'
+                            }
                             aria-label={
                               user.accessStatus === 'Disabled'
                                 ? `Activate ${user.name}`
@@ -2035,17 +2111,21 @@ export function UserManagementPage() {
                             <Power size={15} />
                           </button>
                           <button
-                            className="archive"
+                            className="delete"
                             type="button"
-                            aria-label={`Archive ${user.name}`}
+                            title="Delete"
+                            data-tooltip="Delete"
+                            aria-label={`Delete ${user.name}`}
                             disabled={updatingUserId === user.id}
-                            onClick={() => void archiveUser(user.id)}
+                            onClick={() => void deleteUser(user.id)}
                           >
-                            <Archive size={15} />
+                            <Trash2 size={15} />
                           </button>
                           <button
                             className="edit"
                             type="button"
+                            title="Edit"
+                            data-tooltip="Edit"
                             aria-label={`Edit ${user.name}`}
                             disabled={updatingUserId === user.id}
                             onClick={() => openUserEditor(user.id)}
@@ -2202,7 +2282,13 @@ export function UserManagementPage() {
                   >
                     {editingUser.role && !activeRoles.includes(editingUser.role) ? (
                       <option disabled value={editingUser.role}>
-                        {editingUser.role} (Inactive)
+                        {editingUser.role} (
+                        {roles.some(
+                          (r) => r.name.toLowerCase() === (editingUser.role ?? '').toLowerCase(),
+                        )
+                          ? 'Inactive'
+                          : 'Deleted'}
+                        )
                       </option>
                     ) : null}
                     {activeRoles.length === 0 &&
@@ -2221,6 +2307,7 @@ export function UserManagementPage() {
                   {editFieldErrors.role ? (
                     <small className="field-error">{editFieldErrors.role}</small>
                   ) : null}
+                  {editUserIdNote ? <small>{editUserIdNote}</small> : null}
                 </label>
 
                 <label className="user-edit-field">
@@ -2240,7 +2327,14 @@ export function UserManagementPage() {
                     {editingUser.department &&
                     !activeDepartments.includes(editingUser.department) ? (
                       <option disabled value={editingUser.department}>
-                        {editingUser.department} (Inactive)
+                        {editingUser.department} (
+                        {departments.some(
+                          (d) =>
+                            d.name.toLowerCase() === (editingUser.department ?? '').toLowerCase(),
+                        )
+                          ? 'Inactive'
+                          : 'Deleted'}
+                        )
                       </option>
                     ) : null}
                     {activeDepartments.length === 0 &&
@@ -2266,7 +2360,7 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Email *</span>
+                  <span>Email</span>
                   <input
                     aria-describedby={editErrors.email ? 'edit-email-error' : undefined}
                     aria-invalid={Boolean(editErrors.email)}
@@ -2374,7 +2468,7 @@ export function UserManagementPage() {
                     <small>
                       {editForm.department
                         ? !activeDepartments.includes(editForm.department)
-                          ? `${editForm.department} (Inactive)`
+                          ? `${editForm.department} (${departments.some((d) => d.name.toLowerCase() === editForm.department.toLowerCase()) ? 'Inactive' : 'Deleted'})`
                           : editForm.department
                         : '-'}
                     </small>
@@ -2525,7 +2619,7 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Email *</span>
+                  <span>Email</span>
                   <input
                     aria-describedby={createErrors.email ? 'create-email-error' : undefined}
                     aria-invalid={Boolean(createErrors.email)}
@@ -2554,7 +2648,7 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
-                  <span>Phone (+63) *</span>
+                  <span>Phone (+63)</span>
                   <input
                     aria-describedby={createErrors.phone ? 'create-phone-error' : undefined}
                     aria-invalid={Boolean(createErrors.phone)}
@@ -2881,6 +2975,39 @@ export function UserManagementPage() {
   );
 }
 
+async function fetchAttendanceSnapshot(accessToken: string, signal?: AbortSignal) {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const [recordsResponse, summaryResponse, usersResponse] = await Promise.all([
+    fetch(`${API_BASE_URL}/attendance`, { headers, signal }),
+    fetch(`${API_BASE_URL}/attendance/summary`, { headers, signal }),
+    fetch(`${API_BASE_URL}/users`, { headers, signal }),
+  ]);
+
+  const recordsData = (await recordsResponse.json().catch(() => null)) as
+    | AttendanceRecord[]
+    | { error?: string }
+    | null;
+
+  if (!recordsResponse.ok || !Array.isArray(recordsData)) {
+    throw new Error(
+      !Array.isArray(recordsData) && recordsData?.error
+        ? recordsData.error
+        : 'Unable to load attendance records.',
+    );
+  }
+
+  const summaryData = (await summaryResponse.json().catch(() => null)) as AttendanceSummary | null;
+  const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
+
+  return {
+    records: recordsData,
+    summary: summaryResponse.ok ? summaryData : null,
+    totalUsers: Array.isArray(usersData)
+      ? usersData.filter((user) => !user.is_archived).length
+      : null,
+  };
+}
+
 export function AttendanceManagementPage() {
   const { session } = useAuth();
   const dateTimeSettings = useDateTimeSettings();
@@ -2891,70 +3018,74 @@ export function AttendanceManagementPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    const controller = new AbortController();
+    const accessToken = session?.accessToken;
+    if (!accessToken) {
+      return;
+    }
 
-    async function loadAttendance() {
-      if (!session?.accessToken) {
-        setErrorMessage('Please sign in again to view attendance records.');
-        setIsLoading(false);
-        return;
-      }
+    const initialController = new AbortController();
+    let refreshController: AbortController | null = null;
+    let latestRequestId = 0;
+
+    async function syncAttendance(silent: boolean, signal: AbortSignal, token: string) {
+      const requestId = ++latestRequestId;
 
       try {
-        setIsLoading(true);
-        setErrorMessage('');
+        const snapshot = await fetchAttendanceSnapshot(token, signal);
 
-        const headers = { Authorization: `Bearer ${session.accessToken}` };
-        const [recordsResponse, summaryResponse, usersResponse] = await Promise.all([
-          fetch(`${API_BASE_URL}/attendance`, { headers, signal: controller.signal }),
-          fetch(`${API_BASE_URL}/attendance/summary`, { headers, signal: controller.signal }),
-          fetch(`${API_BASE_URL}/users`, { headers, signal: controller.signal }),
-        ]);
-
-        const recordsData = (await recordsResponse.json().catch(() => null)) as
-          | AttendanceRecord[]
-          | { error?: string }
-          | null;
-
-        if (!recordsResponse.ok || !Array.isArray(recordsData)) {
-          throw new Error(
-            !Array.isArray(recordsData) && recordsData?.error
-              ? recordsData.error
-              : 'Unable to load attendance records.',
-          );
+        if (signal.aborted || requestId !== latestRequestId) {
+          return;
         }
 
-        const summaryData = (await summaryResponse
-          .json()
-          .catch(() => null)) as AttendanceSummary | null;
-        const usersData = (await usersResponse.json().catch(() => null)) as UserRecord[] | null;
-
-        setRecords(recordsData);
-        setSummary(summaryResponse.ok ? summaryData : null);
-        setTotalUsers(
-          Array.isArray(usersData) ? usersData.filter((user) => !user.is_archived).length : null,
-        );
+        setRecords(snapshot.records);
+        setSummary(snapshot.summary);
+        setTotalUsers(snapshot.totalUsers);
+        setErrorMessage('');
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return;
         }
 
-        setErrorMessage(
-          error instanceof Error ? error.message : 'Unable to load attendance records.',
-        );
+        if (!silent && requestId === latestRequestId) {
+          setErrorMessage(
+            error instanceof Error ? error.message : 'Unable to load attendance records.',
+          );
+        }
       } finally {
-        if (!controller.signal.aborted) {
+        if (!signal.aborted && !silent && requestId === latestRequestId) {
           setIsLoading(false);
         }
       }
     }
 
-    void loadAttendance();
+    void syncAttendance(false, initialController.signal, accessToken);
+
+    const triggerRealtimeRefresh = () => {
+      refreshController?.abort();
+      refreshController = new AbortController();
+      void syncAttendance(true, refreshController.signal, accessToken);
+    };
+
+    const unsubscribe = subscribeRealtimeMessages(
+      (message) => {
+        if (message.type === 'attendance:changed' || message.type === 'users:changed') {
+          triggerRealtimeRefresh();
+        }
+      },
+      { onReconnect: triggerRealtimeRefresh },
+    );
 
     return () => {
-      controller.abort();
+      initialController.abort();
+      refreshController?.abort();
+      unsubscribe();
     };
   }, [session?.accessToken]);
+
+  const effectiveIsLoading = Boolean(session?.accessToken) && isLoading;
+  const effectiveErrorMessage = session?.accessToken
+    ? errorMessage
+    : 'Please sign in again to view attendance records.';
 
   const attendanceRows = useMemo(
     () =>
@@ -2963,11 +3094,9 @@ export function AttendanceManagementPage() {
         record.full_name,
         record.role || '-',
         formatClockTime(record.check_in_at, dateTimeSettings),
-        hasCheckedOut(record.check_in_at, record.check_out_at)
-          ? formatClockTime(record.check_out_at, dateTimeSettings)
-          : '-',
+        formatClockTime(record.check_out_at, dateTimeSettings),
         record.status,
-        formatTotalHours(record.check_in_at, record.check_out_at),
+        formatWorkedMinutes(record.total_minutes),
       ]),
     [records, dateTimeSettings],
   );
@@ -2981,7 +3110,7 @@ export function AttendanceManagementPage() {
     },
     {
       label: "Today's Attendance",
-      value: summary ? summary.present + summary.late : null,
+      value: summary ? (summary.attended ?? summary.present + summary.late) : null,
       Icon: Fingerprint,
       tone: 'blue',
     },
@@ -3025,8 +3154,8 @@ export function AttendanceManagementPage() {
         title="Today's Attendance"
         columns={['Employee ID', 'Name', 'Role', 'Time In', 'Time Out', 'Status', 'Total Hours']}
         rows={attendanceRows}
-        isLoading={isLoading}
-        errorMessage={errorMessage}
+        isLoading={effectiveIsLoading}
+        errorMessage={effectiveErrorMessage}
         emptyMessage="No attendance records found for today."
       />
     </section>
@@ -3385,7 +3514,7 @@ export function EnrollmentRequestsPage() {
                   </div>
                   <div>
                     <dt>Email</dt>
-                    <dd>{selectedRequest.email || 'Not provided'}</dd>
+                    <dd>{selectedRequest.email || 'N/A'}</dd>
                   </div>
                   <div>
                     <dt>Department</dt>
@@ -3393,7 +3522,7 @@ export function EnrollmentRequestsPage() {
                   </div>
                   <div>
                     <dt>Phone</dt>
-                    <dd>{selectedRequest.phone || 'Not provided'}</dd>
+                    <dd>{selectedRequest.phone || 'N/A'}</dd>
                   </div>
                 </dl>
               </div>
@@ -3526,7 +3655,7 @@ const REPORT_TYPES = [
 type ReportType = (typeof REPORT_TYPES)[number];
 
 const REPORT_STATUS_OPTIONS: Record<ReportType, string[]> = {
-  'Attendance Summary': ['Present', 'Late', 'Absent'],
+  'Attendance Summary': ['Present', 'Late', 'Clocked Out', 'Absent'],
   'Access Request Summary': ['Pending', 'Approved', 'Rejected'],
   'User Summary': ['Active', 'Disabled'],
   'Auto-Deactivated Accounts': [],
@@ -4719,6 +4848,16 @@ function validateRoleName(rawName: string, roles: Role[], ignoreId?: string): st
   return undefined;
 }
 
+function validateRfidCode(rawCode: string): string | undefined {
+  const code = rawCode.trim();
+
+  if (!code) return undefined;
+  if (!/^\d+$/.test(code)) return 'Only numeric values are permitted.';
+  if (code.length < 8 || code.length > 14) return 'RFID Code must be between 8 and 14 digits.';
+
+  return undefined;
+}
+
 function validateUserIdPrefix(
   rawPrefix: string,
   roles: Role[],
@@ -4748,7 +4887,7 @@ function sortRoles(roles: Role[]) {
 }
 
 export function SettingsPage() {
-  const { session } = useAuth();
+  const { session, updateAdminName } = useAuth();
   const [activeTab, setActiveTab] = useState<'general' | 'security' | 'organization'>('general');
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
   const [lastSavedSettings, setLastSavedSettings] =
@@ -4800,6 +4939,14 @@ export function SettingsPage() {
   const [roleError, setRoleError] = useState('');
   const [roleMessage, setRoleMessage] = useState('');
   const [pendingRoleAction, setPendingRoleAction] = useState<RoleAction | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'department' | 'role';
+    id: number;
+    name: string;
+    userCount?: number;
+  } | null>(null);
+  const [isDeletingTarget, setIsDeletingTarget] = useState(false);
+  const [deleteModalError, setDeleteModalError] = useState('');
   const [verifyTarget, setVerifyTarget] = useState<
     'profile' | 'organization' | 'department' | 'role'
   >('profile');
@@ -4878,10 +5025,18 @@ export function SettingsPage() {
 
     const headers = { Authorization: `Bearer ${session.accessToken}` };
     try {
-      const [rolesRes, usersRes] = await Promise.all([
+      const [deptRes, rolesRes, usersRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/departments`, { headers }),
         fetch(`${API_BASE_URL}/roles`, { headers }),
         fetch(`${API_BASE_URL}/users`, { headers }),
       ]);
+
+      if (deptRes.ok) {
+        const deptData = (await deptRes.json().catch(() => null)) as Department[] | null;
+        if (Array.isArray(deptData)) {
+          setDepartments(deptData);
+        }
+      }
 
       if (rolesRes.ok) {
         const rolesData = (await rolesRes.json().catch(() => null)) as Role[] | null;
@@ -4972,6 +5127,7 @@ export function SettingsPage() {
           if (
             message.type === 'users:changed' ||
             message.type === 'roles:changed' ||
+            message.type === 'departments:changed' ||
             message.type === 'activity:event' ||
             message.type === 'notification:created' ||
             message.type === 'enrollment:reviewed'
@@ -4993,6 +5149,7 @@ export function SettingsPage() {
 
     window.addEventListener('users:changed', handleRealtimeUpdate);
     window.addEventListener('roles:changed', handleRealtimeUpdate);
+    window.addEventListener('departments:changed', handleRealtimeUpdate);
 
     return () => {
       shouldReconnect = false;
@@ -5000,6 +5157,7 @@ export function SettingsPage() {
       socket?.close();
       window.removeEventListener('users:changed', handleRealtimeUpdate);
       window.removeEventListener('roles:changed', handleRealtimeUpdate);
+      window.removeEventListener('departments:changed', handleRealtimeUpdate);
     };
   }, [session?.accessToken, refreshOrganizationUsersAndRoles]);
 
@@ -5201,6 +5359,7 @@ export function SettingsPage() {
       }
 
       setProfile(data);
+      updateAdminName(data.name);
       setIsEditingProfile(false);
       setProfileMessage('Admin name updated successfully.');
       setVerifySuccessCountdown(5);
@@ -5416,6 +5575,8 @@ export function SettingsPage() {
     return submitProfileNameChange();
   }
 
+  const changeRfidValidationError = validateRfidCode(changeRfidInput);
+
   function openChangeRfidModal() {
     setChangeRfidInput('');
     setChangeRfidError('');
@@ -5427,6 +5588,10 @@ export function SettingsPage() {
 
     if (!changeRfidInput.trim()) {
       setChangeRfidError('Please scan or enter the new RFID card.');
+      return;
+    }
+
+    if (changeRfidValidationError) {
       return;
     }
 
@@ -5619,6 +5784,90 @@ export function SettingsPage() {
     });
   }
 
+  function promptDeleteDepartment(department: Department) {
+    cancelRenamingDepartment();
+    setDeleteModalError('');
+    setDeleteTarget({
+      type: 'department',
+      id: Number(department.id),
+      name: department.name,
+      userCount: department.user_count,
+    });
+  }
+
+  function promptDeleteRole(role: Role) {
+    cancelRenamingRole();
+    setDeleteModalError('');
+    setDeleteTarget({
+      type: 'role',
+      id: Number(role.id),
+      name: role.name,
+      userCount: role.user_count,
+    });
+  }
+
+  function closeDeleteModal() {
+    if (isDeletingTarget) return;
+    setDeleteTarget(null);
+    setDeleteModalError('');
+  }
+
+  async function confirmDeleteTarget() {
+    if (!deleteTarget || !session?.accessToken || isDeletingTarget) return;
+
+    setIsDeletingTarget(true);
+    setDeleteModalError('');
+
+    const headers = {
+      Authorization: `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    try {
+      const endpoint =
+        deleteTarget.type === 'department'
+          ? `${API_BASE_URL}/departments/${deleteTarget.id}`
+          : `${API_BASE_URL}/roles/${deleteTarget.id}`;
+
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+        headers,
+      });
+
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(data?.error || `Failed to delete ${deleteTarget.type}.`);
+      }
+
+      if (deleteTarget.type === 'department') {
+        setDepartments((current) => current.filter((dept) => Number(dept.id) !== deleteTarget.id));
+        setDepartmentError('');
+        setDepartmentMessage(`Department "${deleteTarget.name}" was permanently deleted.`);
+        window.dispatchEvent(new CustomEvent('departments:changed'));
+      } else {
+        setRoles((current) => current.filter((r) => Number(r.id) !== deleteTarget.id));
+        if (selectedRoleId && Number(selectedRoleId) === deleteTarget.id) {
+          setSelectedRoleId(null);
+        }
+        setRoleError('');
+        setRoleMessage(`Role "${deleteTarget.name}" was permanently deleted.`);
+        window.dispatchEvent(new CustomEvent('roles:changed'));
+      }
+
+      setDeleteTarget(null);
+    } catch (error) {
+      setDeleteModalError(
+        error instanceof Error ? error.message : `Failed to delete ${deleteTarget.type}.`,
+      );
+    } finally {
+      setIsDeletingTarget(false);
+    }
+  }
+
   const visibleRoles = roles.filter((role) => {
     const matchesSearch =
       !roleSearch.trim() || role.name.toLowerCase().includes(roleSearch.trim().toLowerCase());
@@ -5731,7 +5980,7 @@ export function SettingsPage() {
               </label>
               <div className="admin-profile-rfid-row">
                 <label>
-                  RFID Number
+                  RFID Code
                   <input disabled value={profile?.rfidUid ?? '—'} />
                 </label>
                 <button
@@ -6157,6 +6406,7 @@ export function SettingsPage() {
                                 <button
                                   aria-label={`Rename ${dept.name}`}
                                   className="edit"
+                                  data-tooltip="Rename"
                                   onClick={() => startRenamingDepartment(dept)}
                                   title="Rename"
                                   type="button"
@@ -6168,11 +6418,22 @@ export function SettingsPage() {
                                     dept.is_active ? 'Deactivate department' : 'Activate department'
                                   }
                                   className={dept.is_active ? 'deactivate' : 'activate'}
+                                  data-tooltip={dept.is_active ? 'Deactivate' : 'Activate'}
                                   onClick={() => toggleDepartmentStatus(dept)}
                                   title={dept.is_active ? 'Deactivate' : 'Activate'}
                                   type="button"
                                 >
                                   <Power size={16} />
+                                </button>
+                                <button
+                                  aria-label={`Delete ${dept.name}`}
+                                  className="delete"
+                                  data-tooltip="Delete"
+                                  onClick={() => promptDeleteDepartment(dept)}
+                                  title="Delete"
+                                  type="button"
+                                >
+                                  <Trash2 size={16} />
                                 </button>
                               </>
                             )}
@@ -6350,6 +6611,9 @@ export function SettingsPage() {
                                   <button
                                     aria-label={`View users assigned to ${role.name}`}
                                     className={`view-users ${isSelected ? 'active' : ''}`}
+                                    data-tooltip={
+                                      isSelected ? 'Hide Assigned Users' : 'View Assigned Users'
+                                    }
                                     onClick={() => handleSelectRole(role)}
                                     title={
                                       isSelected ? 'Hide Assigned Users' : 'View Assigned Users'
@@ -6361,6 +6625,7 @@ export function SettingsPage() {
                                   <button
                                     aria-label={`Edit ${role.name}`}
                                     className="edit"
+                                    data-tooltip="Edit"
                                     onClick={() => startRenamingRole(role)}
                                     title="Edit"
                                     type="button"
@@ -6372,11 +6637,22 @@ export function SettingsPage() {
                                       role.is_active ? 'Deactivate role' : 'Activate role'
                                     }
                                     className={role.is_active ? 'deactivate' : 'activate'}
+                                    data-tooltip={role.is_active ? 'Deactivate' : 'Activate'}
                                     onClick={() => toggleRoleStatus(role)}
                                     title={role.is_active ? 'Deactivate' : 'Activate'}
                                     type="button"
                                   >
                                     <Power size={16} />
+                                  </button>
+                                  <button
+                                    aria-label={`Delete ${role.name}`}
+                                    className="delete"
+                                    data-tooltip="Delete"
+                                    onClick={() => promptDeleteRole(role)}
+                                    title="Delete"
+                                    type="button"
+                                  >
+                                    <Trash2 size={16} />
                                   </button>
                                 </>
                               )}
@@ -6476,7 +6752,7 @@ export function SettingsPage() {
                                       ? `${user.last_name}, ${user.first_name}`
                                       : user.full_name}
                                   </strong>
-                                  <small>{user.email || '—'}</small>
+                                  <small>{user.email || 'N/A'}</small>
                                 </span>
                               </span>
                             </td>
@@ -6684,11 +6960,16 @@ export function SettingsPage() {
             <h2 id="change-rfid-title">Place New ID</h2>
             <p>Your new ID is being registered... Please wait.</p>
             <label className="rfid-scan-input">
-              <span>RFID Number</span>
+              <span>RFID Code</span>
               <input
+                aria-describedby={changeRfidValidationError ? 'change-rfid-validation' : undefined}
+                aria-invalid={Boolean(changeRfidValidationError)}
                 autoFocus
                 inputMode="numeric"
-                onChange={(event) => setChangeRfidInput(event.target.value)}
+                onChange={(event) => {
+                  setChangeRfidInput(event.target.value);
+                  setChangeRfidError('');
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
                     event.preventDefault();
@@ -6699,9 +6980,16 @@ export function SettingsPage() {
                 value={changeRfidInput}
               />
             </label>
+            {changeRfidValidationError ? (
+              <p className="module-table-message error" id="change-rfid-validation" role="alert">
+                {changeRfidValidationError}
+              </p>
+            ) : null}
             <button
               className="rfid-scan-capture-button"
-              disabled={isChangingRfid}
+              disabled={
+                isChangingRfid || !changeRfidInput.trim() || Boolean(changeRfidValidationError)
+              }
               onClick={() => void submitRfidChange()}
               type="button"
             >
@@ -6713,6 +7001,60 @@ export function SettingsPage() {
               </p>
             ) : null}
             <div className="rfid-scan-dots" aria-hidden="true" />
+          </section>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div className="delete-confirm-backdrop" onClick={closeDeleteModal} role="presentation">
+          <section
+            aria-describedby="delete-confirm-desc"
+            aria-labelledby="delete-confirm-title"
+            aria-modal="true"
+            className="delete-confirm-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="delete-confirm-icon-wrap" aria-hidden="true">
+              <AlertTriangle size={34} />
+            </div>
+            <h2 id="delete-confirm-title">
+              Delete {deleteTarget.type === 'department' ? 'Department' : 'Role'}
+            </h2>
+            <p id="delete-confirm-desc" className="delete-confirm-warning">
+              Are you sure you want to permanently delete <strong>"{deleteTarget.name}"</strong>?
+            </p>
+            <p className="delete-confirm-subtext">This action is permanent and cannot be undone.</p>
+            {deleteTarget.userCount && deleteTarget.userCount > 0 ? (
+              <p className="delete-confirm-user-notice">
+                {deleteTarget.userCount} active user{deleteTarget.userCount === 1 ? '' : 's'}{' '}
+                assigned to this {deleteTarget.type} will safely keep their historical records, but
+                this {deleteTarget.type} will be permanently excluded from future assignments.
+              </p>
+            ) : null}
+            {deleteModalError ? (
+              <p className="module-table-message error delete-modal-error" role="alert">
+                {deleteModalError}
+              </p>
+            ) : null}
+            <div className="delete-confirm-actions">
+              <button
+                className="delete-confirm-cancel"
+                disabled={isDeletingTarget}
+                onClick={closeDeleteModal}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="delete-confirm-submit"
+                disabled={isDeletingTarget}
+                onClick={() => void confirmDeleteTarget()}
+                type="button"
+              >
+                {isDeletingTarget ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
           </section>
         </div>
       ) : null}

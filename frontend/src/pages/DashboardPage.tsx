@@ -12,7 +12,8 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth';
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, subscribeRealtimeMessages } from '../lib/api';
+import { formatWorkedMinutes } from '../lib/attendanceFormat';
 import {
   formatDate,
   formatTime,
@@ -20,8 +21,6 @@ import {
   getLocalDateString,
 } from '../lib/dateTimeFormat';
 import { DateTimeSettings, useDateTimeSettings } from '../lib/systemSettingsStore';
-
-const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws').replace(/\/api$/, '/ws');
 
 type DashboardMetrics = {
   active_devices?: number;
@@ -40,6 +39,7 @@ type RecentActivityEvent = {
   area?: string | null;
   device?: string | null;
   device_name?: string | null;
+  details?: string | null;
   employee_id?: string | null;
   employeeId?: string | null;
   event?: string;
@@ -62,6 +62,7 @@ type DashboardAttendanceRecord = {
   check_out_at?: string | null;
   status?: string | null;
   location?: string | null;
+  total_minutes?: number | null;
 };
 
 type DashboardAttendanceTrendPoint = {
@@ -91,16 +92,30 @@ async function fetchDashboardData(accessToken: string, date?: string, signal?: A
   return response.ok && data ? data : null;
 }
 
+function normalizeAccessEventKey(event: RecentActivityEvent, eventTimestamp: string) {
+  if (typeof event.id === 'number') {
+    return `access-${event.id}`;
+  }
+
+  if (typeof event.id === 'string' && event.id.trim()) {
+    return event.id.trim();
+  }
+
+  return `${event.employeeId ?? event.employee_id ?? event.user ?? event.user_name ?? 'event'}-${eventTimestamp}`;
+}
+
 function toAccessEvent(event: RecentActivityEvent) {
   const status = event.status ?? event.result ?? 'Info';
   const eventTimestamp = event.time ?? event.event_time ?? new Date().toISOString();
 
   return {
+    rowKey: normalizeAccessEventKey(event, eventTimestamp),
     user: event.user ?? event.user_name ?? 'Unknown',
-    id: event.employeeId ?? event.employee_id ?? String(event.id),
+    id: event.employeeId ?? event.employee_id ?? String(event.id ?? ''),
     event: event.event ?? (status === 'Granted' ? 'Access Granted' : 'Access Denied'),
     area: event.area ?? 'System',
     device: event.device ?? event.device_name ?? 'EIngress',
+    details: event.details ?? null,
     sortTime: eventTimestamp,
     status:
       status === 'Granted' || status === 'Success'
@@ -112,7 +127,16 @@ function toAccessEvent(event: RecentActivityEvent) {
 }
 
 function sortAccessEventsByTime(events: ReturnType<typeof toAccessEvent>[]) {
-  return [...events].sort(
+  const seenKeys = new Set<string>();
+  const uniqueEvents = events.filter((event) => {
+    if (seenKeys.has(event.rowKey)) {
+      return false;
+    }
+    seenKeys.add(event.rowKey);
+    return true;
+  });
+
+  return uniqueEvents.sort(
     (eventA, eventB) => new Date(eventB.sortTime).getTime() - new Date(eventA.sortTime).getTime(),
   );
 }
@@ -131,17 +155,6 @@ function formatTrendLabel(value: string | null | undefined, settings: DateTimeSe
   }
 
   return formatWeekdayShort(value, settings);
-}
-
-function hasCheckedOut(checkInAt?: string | null, checkOutAt?: string | null) {
-  if (!checkInAt || !checkOutAt) {
-    return false;
-  }
-
-  const checkInTime = new Date(checkInAt).getTime();
-  const checkOutTime = new Date(checkOutAt).getTime();
-
-  return !Number.isNaN(checkInTime) && !Number.isNaN(checkOutTime) && checkOutTime !== checkInTime;
 }
 
 function getChangeBadge(
@@ -201,8 +214,9 @@ export function DashboardPage() {
     }
 
     const controller = new AbortController();
+    const requestDate = customDate ?? undefined;
 
-    void fetchDashboardData(session.accessToken, selectedDate, controller.signal)
+    void fetchDashboardData(session.accessToken, requestDate, controller.signal)
       .then((data) => {
         if (!controller.signal.aborted && data) {
           setDashboardMetrics(data.metrics ?? null);
@@ -216,21 +230,51 @@ export function DashboardPage() {
       });
 
     return () => controller.abort();
-  }, [session?.accessToken, selectedDate]);
+  }, [session?.accessToken, customDate, selectedDate]);
 
   useEffect(() => {
     if (!session?.accessToken) {
       return;
     }
 
-    const socket = new WebSocket(WS_BASE_URL);
-    socket.addEventListener('message', (event) => {
-      try {
-        const message = JSON.parse(event.data as string) as {
-          payload?: DashboardMetrics | RecentActivityEvent;
-          type?: string;
-        };
+    const accessToken = session.accessToken;
+    let refreshController: AbortController | null = null;
+    let latestRefreshId = 0;
 
+    const refreshDashboard = (includeAttendance: boolean) => {
+      const requestId = ++latestRefreshId;
+      refreshController?.abort();
+      const controller = new AbortController();
+      refreshController = controller;
+      const targetDate =
+        selectedDateRef.current === todayStringRef.current ? undefined : selectedDateRef.current;
+
+      void fetchDashboardData(accessToken, targetDate, controller.signal)
+        .then((data) => {
+          if (controller.signal.aborted || requestId !== latestRefreshId || !data) {
+            return;
+          }
+
+          setDashboardMetrics(data.metrics ?? null);
+
+          if (includeAttendance) {
+            setAttendanceRecords(data.attendanceRecords ?? []);
+            setAttendanceTrend(data.attendanceTrend ?? []);
+            if (Array.isArray(data.recentEvents)) {
+              const incomingEvents = data.recentEvents.map(toAccessEvent);
+              setAccessEvents((currentEvents) =>
+                sortAccessEventsByTime([...incomingEvents, ...currentEvents]).slice(0, 8),
+              );
+            }
+          }
+        })
+        .catch(() => {
+          // Keep the last known data if a realtime refresh is aborted or fails.
+        });
+    };
+
+    const unsubscribe = subscribeRealtimeMessages(
+      (message) => {
         if (message.type === 'dashboard:metrics-changed' && message.payload) {
           const metricsPayload = message.payload as DashboardMetrics;
 
@@ -250,17 +294,11 @@ export function DashboardPage() {
         }
 
         if (message.type === 'attendance:changed') {
-          void fetchDashboardData(session.accessToken, selectedDateRef.current)
-            .then((data) => {
-              if (data) {
-                setDashboardMetrics(data.metrics ?? null);
-                setAttendanceRecords(data.attendanceRecords ?? []);
-                setAttendanceTrend(data.attendanceTrend ?? []);
-              }
-            })
-            .catch(() => {
-              // Keep the last known metrics if a realtime refresh fails.
-            });
+          refreshDashboard(true);
+        }
+
+        if (message.type === 'users:changed') {
+          refreshDashboard(false);
         }
 
         const activityEvent = message.payload as RecentActivityEvent | undefined;
@@ -270,12 +308,16 @@ export function DashboardPage() {
             sortAccessEventsByTime([toAccessEvent(activityEvent), ...currentEvents]).slice(0, 8),
           );
         }
-      } catch {
-        // Ignore realtime messages that are not JSON.
-      }
-    });
+      },
+      {
+        onReconnect: () => refreshDashboard(true),
+      },
+    );
 
-    return () => socket.close();
+    return () => {
+      refreshController?.abort();
+      unsubscribe();
+    };
   }, [session?.accessToken]);
 
   const isToday = selectedDate === todayString;
@@ -303,18 +345,18 @@ export function DashboardPage() {
     'Failed Attempts': dashboardMetrics?.failed_attempts ?? null,
     "Today's Attendance": dashboardMetrics?.todays_attendance ?? null,
     'Total Access': dashboardMetrics?.total_access ?? null,
-    'Total Users': dashboardMetrics?.total_users ?? null,
+    'ACTIVE USERS': dashboardMetrics?.total_users ?? null,
   };
   const yesterdayValues: Record<string, number | undefined> = {
     'Active Devices': dashboardMetrics?.active_devices_yesterday,
     'Failed Attempts': dashboardMetrics?.failed_attempts_yesterday,
     'Total Access': dashboardMetrics?.total_access_yesterday,
-    'Total Users': dashboardMetrics?.total_users_yesterday,
+    'ACTIVE USERS': dashboardMetrics?.total_users_yesterday,
   };
 
   const metricDefinitions = [
     {
-      label: 'Total Users',
+      label: 'ACTIVE USERS',
       value: '1,248',
       Icon: UsersRound,
       tone: 'red',
@@ -500,7 +542,7 @@ export function DashboardPage() {
               </thead>
               <tbody>
                 {accessEvents.map((event) => (
-                  <tr key={event.id}>
+                  <tr key={event.rowKey}>
                     <td>
                       <span className="user-cell">
                         <span className="mini-avatar">{event.user.charAt(0)}</span>
@@ -519,7 +561,27 @@ export function DashboardPage() {
                     <td>{event.device}</td>
                     <td>{formatTime(event.sortTime, dateTimeSettings)}</td>
                     <td>
-                      <span className={event.status === 'Failed' ? 'status failed' : 'status'}>
+                      <span
+                        className={`status${event.status === 'Failed' ? ' failed' : event.status === 'Info' ? ' info' : ''}`}
+                        title={
+                          event.status === 'Info'
+                            ? [
+                                `Event: ${event.event}`,
+                                `User: ${event.user}${event.id ? ` (${event.id})` : ''}`,
+                                `Module: ${event.area}`,
+                                event.details ? `Details: ${event.details}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join('\n')
+                            : undefined
+                        }
+                        aria-label={
+                          event.status === 'Info'
+                            ? `Info. Event: ${event.event}. User: ${event.user}. Module: ${event.area}.${event.details ? ` Details: ${event.details}` : ''}`
+                            : event.status
+                        }
+                        tabIndex={event.status === 'Info' ? 0 : undefined}
+                      >
                         {event.status}
                       </span>
                     </td>
@@ -554,35 +616,39 @@ export function DashboardPage() {
                 <th>Time In</th>
                 <th>Time Out</th>
                 <th>Status</th>
+                <th>Total Hours</th>
                 <th>Location</th>
               </tr>
             </thead>
             <tbody>
               {attendanceRecords.length > 0 ? (
                 attendanceRecords.map((record, index) => (
-                  <tr key={`${record.employee_id ?? 'record'}-${index}`}>
+                  <tr
+                    key={
+                      record.employee_id
+                        ? `${record.attendance_date ?? 'today'}-${record.employee_id}`
+                        : `record-${index}`
+                    }
+                  >
                     <td>{record.employee_id ?? '—'}</td>
                     <td>{record.name ?? 'Unknown user'}</td>
                     <td>{record.department ?? '—'}</td>
                     <td>{formatAttendanceTime(record.check_in_at, dateTimeSettings) || '—'}</td>
-                    <td>
-                      {hasCheckedOut(record.check_in_at, record.check_out_at)
-                        ? formatAttendanceTime(record.check_out_at, dateTimeSettings)
-                        : '—'}
-                    </td>
+                    <td>{formatAttendanceTime(record.check_out_at, dateTimeSettings) || '—'}</td>
                     <td>
                       <span
-                        className={`attendance-status ${record.status?.toLowerCase() ?? 'present'}`}
+                        className={`attendance-status ${(record.status ?? 'present').toLowerCase().replace(/\s+/g, '-')}`}
                       >
                         {record.status ?? 'Present'}
                       </span>
                     </td>
+                    <td>{formatWorkedMinutes(record.total_minutes)}</td>
                     <td>{record.location ?? 'Office'}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="empty-state-row">
+                  <td colSpan={8} className="empty-state-row">
                     {isToday
                       ? 'No attendance records are available for today yet.'
                       : `No attendance records are available for ${selectedDateLabel}.`}

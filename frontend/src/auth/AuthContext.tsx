@@ -6,6 +6,7 @@ import {
   createStoredSession,
   getStoredSession,
   refreshStoredSession,
+  updateStoredSessionAdminName,
 } from './session';
 import { AuthContext, AuthContextValue, SignInInput } from './context';
 import { API_BASE_URL } from '../lib/api';
@@ -277,6 +278,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       extendSession() {
         lastRefreshAt.current = Date.now();
         setSession(refreshStoredSession());
+      },
+      updateAdminName(adminName: string) {
+        const updated = updateStoredSessionAdminName(adminName);
+        if (updated) {
+          setSession(updated);
+        }
       },
     }),
     [handleLogout, session],

@@ -4,6 +4,8 @@ import { query } from '../db.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { createNotification } from '../lib/notifications.js';
 import { fullNameSql } from '../lib/personName.js';
+import { ensureAttendanceStatus, isLateTapSql } from '../lib/attendance.js';
+import { getSystemTimeZone } from '../lib/timezone.js';
 
 export const reportsRouter = express.Router();
 reportsRouter.use(authMiddleware);
@@ -224,6 +226,13 @@ async function buildReportData(reportType, filters) {
   return { columns: [], rows: [] };
 }
 
+// A clocked-out user (status 'Clocked Out') still counts as present, or as late when their first tap was past the grace cutoff (08:16+).
+// timeZoneParam is the placeholder (e.g. '$2') that holds the system time zone in the query.
+const lateSql = (timeZoneParam) =>
+  `(status = 'Late' OR (status = 'Clocked Out' AND ${isLateTapSql('check_in_at', timeZoneParam)}))`;
+const presentSql = (timeZoneParam) =>
+  `(status = 'Present' OR (status = 'Clocked Out' AND NOT ${lateSql(timeZoneParam)}))`;
+
 reportsRouter.get('/summary', async (req, res, next) => {
   try {
     const date = req.query.date || new Date().toISOString().slice(0, 10);
@@ -233,16 +242,19 @@ reportsRouter.get('/summary', async (req, res, next) => {
     startDate.setUTCDate(startDate.getUTCDate() - (trendDays - 1));
     const startDateString = startDate.toISOString().slice(0, 10);
 
+    await ensureAttendanceStatus();
+    const timeZone = await getSystemTimeZone();
+
     const [attendance, departments, trend] = await Promise.all([
       query(
         `SELECT
-          COUNT(*) FILTER (WHERE status = 'Present')::int AS present,
-          COUNT(*) FILTER (WHERE status = 'Late')::int AS late,
+          COUNT(*) FILTER (WHERE ${presentSql('$2')})::int AS present,
+          COUNT(*) FILTER (WHERE ${lateSql('$2')})::int AS late,
           COUNT(*) FILTER (WHERE status = 'Absent')::int AS absent,
           COUNT(*)::int AS total
          FROM attendance_records
          WHERE attendance_date = $1`,
-        [date],
+        [date, timeZone],
       ),
       query(
         `SELECT u.department, COUNT(*)::int AS total
@@ -255,14 +267,14 @@ reportsRouter.get('/summary', async (req, res, next) => {
       ),
       query(
         `SELECT attendance_date,
-          COUNT(*) FILTER (WHERE status = 'Present')::int AS present,
-          COUNT(*) FILTER (WHERE status = 'Late')::int AS late,
+          COUNT(*) FILTER (WHERE ${presentSql('$3')})::int AS present,
+          COUNT(*) FILTER (WHERE ${lateSql('$3')})::int AS late,
           COUNT(*) FILTER (WHERE status = 'Absent')::int AS absent
          FROM attendance_records
          WHERE attendance_date BETWEEN $1 AND $2
          GROUP BY attendance_date
          ORDER BY attendance_date`,
-        [startDateString, date],
+        [startDateString, date, timeZone],
       ),
     ]);
 

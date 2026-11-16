@@ -14,6 +14,7 @@ export type AuthContextValue = {
   signIn: (input: SignInInput) => Promise<AuthSession>;
   signOut: () => void;
   extendSession: () => void;
+  updateAdminName: (adminName: string) => void;
 };
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

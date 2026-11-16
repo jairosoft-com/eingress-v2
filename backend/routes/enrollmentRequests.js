@@ -75,8 +75,6 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
     const { firstName, lastName, errors } = validateNameParts(req.body);
 
     if (!role) errors.role = 'Role is required.';
-    if (!email) errors.email = 'Email is required.';
-    if (!phone) errors.phone = 'Phone number is required.';
 
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({ error: Object.values(errors).join(' '), errors });
@@ -94,7 +92,9 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
     }
 
     const fullName = composeFullName(firstName, lastName);
-    const normalizedPhone = normalizePhPhoneNumber(phone);
+    // Email and phone are optional; a blank value is stored as NULL (shown as N/A in the UI).
+    const trimmedEmail = String(email || '').trim() || null;
+    const normalizedPhone = String(phone || '').trim() ? normalizePhPhoneNumber(phone) : null;
 
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock($1)', [20260617]);
@@ -116,7 +116,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       return res.status(409).json({ error: 'Existing user. This name is already registered or pending enrollment.' });
     }
 
-    const existingEmail = await client.query(
+    const existingEmail = trimmedEmail === null ? { rowCount: 0 } : await client.query(
       `SELECT email
        FROM (
          SELECT email FROM users WHERE email IS NOT NULL
@@ -125,7 +125,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
        ) existing_emails
        WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))
        LIMIT 1`,
-      [email],
+      [trimmedEmail],
     );
 
     if (existingEmail.rowCount > 0) {
@@ -136,7 +136,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
       });
     }
 
-    const existingPhone = await client.query(
+    const existingPhone = normalizedPhone === null ? { rowCount: 0 } : await client.query(
       `SELECT phone
        FROM (
          SELECT phone FROM users WHERE phone IS NOT NULL
@@ -197,7 +197,7 @@ enrollmentRequestsRouter.post('/public', async (req, res, next) => {
         lastName,
         roleCheck.name,
         'New Enrollment',
-        email.trim(),
+        trimmedEmail,
         normalizedPhone,
         rfidUid,
       ],

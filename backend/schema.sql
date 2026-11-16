@@ -2,7 +2,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 DO $$
 BEGIN
-  CREATE TYPE attendance_status AS ENUM ('Present', 'Late', 'Absent');
+  CREATE TYPE attendance_status AS ENUM ('Present', 'Late', 'Absent', 'Clocked Out');
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;

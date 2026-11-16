@@ -426,6 +426,11 @@ authRouter.patch('/me', authMiddleware, async (req, res, next) => {
       'success',
     );
 
+    broadcastMessage({
+      type: 'auth:profile-updated',
+      payload: { adminId: admin.id, name: updatedAdmin.username },
+    });
+
     return res.json({
       name: updatedAdmin.username,
       email: updatedAdmin.email,
@@ -446,6 +451,17 @@ authRouter.patch('/me/rfid', authMiddleware, async (req, res, next) => {
 
   if (!rfidUid) {
     return res.status(400).json({ error: 'A new RFID card is required' });
+  }
+
+  // Ticket 212481: a new admin RFID Code is 8-14 digits. Codes already stored keep working; this only checks a change.
+  if (!/^[0-9]+$/.test(rfidUid)) {
+    const message = 'Only numeric values are permitted.';
+    return res.status(400).json({ error: message, errors: { rfidUid: message } });
+  }
+
+  if (rfidUid.length < 8 || rfidUid.length > 14) {
+    const message = 'RFID Code must be between 8 and 14 digits.';
+    return res.status(400).json({ error: message, errors: { rfidUid: message } });
   }
 
   try {

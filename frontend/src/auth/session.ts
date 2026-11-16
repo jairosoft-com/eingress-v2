@@ -100,3 +100,20 @@ export function refreshStoredSession(now = Date.now()) {
 export function clearStoredSession() {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
 }
+
+export function updateStoredSessionAdminName(adminName: string) {
+  const session = getStoredSession();
+
+  if (!session) {
+    return null;
+  }
+
+  const updatedSession: AuthSession = {
+    ...session,
+    adminName,
+  };
+
+  writeSession(updatedSession);
+
+  return updatedSession;
+}
