@@ -141,7 +141,7 @@ async function processKioskScanUnsafe(req, res) {
       payload: accessMetrics,
     });
     broadcastActivityEvent({
-      id: logResult.rows[0].id,
+      id: `access-${logResult.rows[0].id}`,
       user: fingerprintId ? "Unknown Fingerprint" : "Unknown RFID",
       employeeId: rfidUid || fingerprintId || "",
       event: "Access Denied",
@@ -324,7 +324,7 @@ async function processKioskScanUnsafe(req, res) {
   });
   broadcastMessage({ type: "access-log", payload: log });
   broadcastActivityEvent({
-    id: log.id,
+    id: `access-${log.id}`,
     user: log.userName,
     employeeId: log.employeeId,
     event: result === "Granted" ? "Access Granted" : "Access Denied",
