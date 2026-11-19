@@ -19,6 +19,9 @@ import { emitDoorUnlock } from "../socketio.js";
 
 export const kioskRouter = express.Router();
 
+// Two scans of the same user and result this close together are one physical tap seen by two readers (Ticket 212709).
+const DUPLICATE_TAP_WINDOW_SECONDS = 5;
+
 void ensureAttendanceStatus().catch((error) => {
   console.error("Unable to ensure attendance status exists", error);
 });
@@ -104,6 +107,27 @@ async function processKioskScanUnsafe(req, res) {
   );
 
   if (userResult.rowCount === 0) {
+    // Same double-post as below for a card nobody owns. access_logs does not store the card number, so this treats any
+    // unknown-card Denied entry in the last few seconds as the same tap.
+    const unknownRepeat = await query(
+      `SELECT id FROM access_logs
+       WHERE user_id IS NULL AND result = 'Denied' AND area = 'Kiosk'
+         AND access_time >= NOW() - make_interval(secs => $1)
+       LIMIT 1`,
+      [DUPLICATE_TAP_WINDOW_SECONDS],
+    );
+
+    if (unknownRepeat.rowCount > 0) {
+      const repeatMetrics = await getTodaysAccessMetrics(timeZone);
+
+      return res.status(404).json({
+        error: "User not found",
+        failedAttempts: repeatMetrics.failed_attempts,
+        successfulAttempts: repeatMetrics.successful_attempts,
+        totalAccess: repeatMetrics.total_access,
+      });
+    }
+
     const logResult = await query(
       `INSERT INTO access_logs (device_id, authentication_method, result, area)
        VALUES ($1, $2, $3, $4)
@@ -145,6 +169,49 @@ async function processKioskScanUnsafe(req, res) {
     user.expiration_date &&
     new Date(user.expiration_date) < new Date();
   const result = user.is_active && !isExpiredStudent ? "Granted" : "Denied";
+
+  // Ticket 212709. With the kiosk page open, one physical tap reaches this endpoint twice (the Pi relay posts it, then the
+  // kiosk page does ~1s later). A second request for the same user and result within a few seconds is that same tap:
+  // answer it from the first one without a second log row, Dashboard event, notification or attendance pass.
+  const duplicateTap = await query(
+    `SELECT id, access_time FROM access_logs
+     WHERE user_id = $1 AND result = $2 AND area = 'Kiosk'
+       AND access_time >= NOW() - make_interval(secs => $3)
+     ORDER BY access_time DESC
+     LIMIT 1`,
+    [user.id, result, DUPLICATE_TAP_WINDOW_SECONDS],
+  );
+
+  if (duplicateTap.rowCount > 0) {
+    let repeatTimeType = null;
+
+    if (result === "Granted" && ATTENDANCE_AUTH_METHODS.includes(method)) {
+      const attendance = await query(
+        `SELECT check_out_at FROM attendance_records
+         WHERE user_id = $1 AND attendance_date = (NOW() AT TIME ZONE $2)::date`,
+        [user.id, timeZone],
+      );
+      repeatTimeType = attendance.rows[0]?.check_out_at ? "out" : "in";
+    }
+
+    const repeatMetrics = await getTodaysAccessMetrics(timeZone);
+
+    return res.json({
+      id: duplicateTap.rows[0].id,
+      userId: user.id,
+      employeeId: user.employee_id,
+      userName: user.full_name,
+      department: user.department,
+      role: user.role,
+      authenticationMethod: method,
+      result,
+      timeType: repeatTimeType,
+      accessTime: duplicateTap.rows[0].access_time,
+      failedAttempts: repeatMetrics.failed_attempts,
+      successfulAttempts: repeatMetrics.successful_attempts,
+      totalAccess: repeatMetrics.total_access,
+    });
+  }
 
   const logResult = await query(
     `INSERT INTO access_logs (user_id, device_id, authentication_method, result, area)
