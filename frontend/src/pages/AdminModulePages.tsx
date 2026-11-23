@@ -267,6 +267,7 @@ type UserEditForm = {
   department: string;
   role: string;
   email: string;
+  phone: string;
   fingerprintId: string;
 };
 
@@ -286,6 +287,30 @@ function validateNamePart(label: string, value: string): string | undefined {
   if (!/^[A-Za-zÀ-ÖØ-öø-ÿ]+(?:[ '’-][A-Za-zÀ-ÖØ-öø-ÿ]+)*$/.test(value.trim()))
     return `Enter a valid ${label.toLowerCase()}.`;
   return undefined;
+}
+
+function toEditablePhPhone(rawPhone: string | null | undefined): string {
+  const digits = String(rawPhone ?? '')
+    .trim()
+    .replace(/\D/g, '');
+
+  if (!digits) {
+    return '';
+  }
+
+  if (digits.startsWith('63') && digits.length === 12) {
+    return digits.slice(2);
+  }
+
+  if (digits.startsWith('09') && digits.length === 11) {
+    return digits.slice(1);
+  }
+
+  if (digits.startsWith('9') && digits.length === 10) {
+    return digits;
+  }
+
+  return digits.slice(0, 10);
 }
 
 type CreateUserForm = {
@@ -814,6 +839,7 @@ export function UserManagementPage() {
     department: '',
     role: '',
     email: '',
+    phone: '',
     fingerprintId: '',
   });
   const [editFormError, setEditFormError] = useState('');
@@ -1262,6 +1288,7 @@ export function UserManagementPage() {
       department: user.department || '',
       role: user.role || '',
       email: user.email || '',
+      phone: toEditablePhPhone(user.phone),
       fingerprintId: user.fingerprint_id || '',
     });
     setEditFormError('');
@@ -1357,6 +1384,7 @@ export function UserManagementPage() {
     const department = editForm.department.trim();
     const role = editForm.role.trim();
     const email = editForm.email.trim();
+    const phone = editForm.phone.trim();
     const fingerprintId = editForm.fingerprintId.trim();
 
     const fieldErrors: UserFormFieldErrors = {
@@ -1364,6 +1392,7 @@ export function UserManagementPage() {
       lastName: validateNamePart('Last name', lastName),
     };
     const emailError = validateCreateUserField('email', email);
+    const phoneError = validateCreateUserField('phone', phone);
 
     if (!role) {
       fieldErrors.role = 'Role is required.';
@@ -1380,14 +1409,15 @@ export function UserManagementPage() {
     }
 
     setEditFieldErrors(fieldErrors);
-    setEditErrors({ email: emailError });
+    setEditErrors({ email: emailError, phone: phoneError });
 
     if (
       fieldErrors.firstName ||
       fieldErrors.lastName ||
       fieldErrors.role ||
       fieldErrors.department ||
-      emailError
+      emailError ||
+      phoneError
     ) {
       setEditFormError('');
       return;
@@ -1412,6 +1442,7 @@ export function UserManagementPage() {
           department: department || null,
           role,
           email,
+          phone: phone ? `+63${phone}` : '',
           rfidUid: rfidUid || null,
           fingerprintId: fingerprintId || null,
         }),
@@ -1419,8 +1450,25 @@ export function UserManagementPage() {
 
       const data = (await response.json().catch(() => null)) as
         | UserRecord
-        | { error?: string; errors?: UserFormFieldErrors }
+        | { error?: string; errors?: UserFormFieldErrors & CreateUserErrors; field?: string }
         | null;
+
+      if (
+        !response.ok &&
+        data &&
+        'field' in data &&
+        (data.field === 'phone' || data.field === 'email')
+      ) {
+        setEditErrors((prev) => ({
+          ...prev,
+          [data.field as keyof CreateUserErrors]:
+            data.error ||
+            (data.field === 'phone'
+              ? 'Enter a valid 10-digit mobile number starting with 9.'
+              : 'Enter a valid email address.'),
+        }));
+        return;
+      }
 
       if (
         !response.ok &&
@@ -1429,9 +1477,15 @@ export function UserManagementPage() {
         (data.errors?.firstName ||
           data.errors?.lastName ||
           data.errors?.department ||
-          data.errors?.role)
+          data.errors?.role ||
+          data.errors?.email ||
+          data.errors?.phone)
       ) {
         setEditFieldErrors(data.errors);
+        setEditErrors({
+          email: data.errors.email,
+          phone: data.errors.phone,
+        });
         return;
       }
 
@@ -1623,8 +1677,25 @@ export function UserManagementPage() {
 
       const data = (await response.json().catch(() => null)) as
         | UserRecord
-        | { error?: string; errors?: UserFormFieldErrors }
+        | { error?: string; errors?: UserFormFieldErrors & CreateUserErrors; field?: string }
         | null;
+
+      if (
+        !response.ok &&
+        data &&
+        'field' in data &&
+        (data.field === 'phone' || data.field === 'email')
+      ) {
+        setCreateErrors((prev) => ({
+          ...prev,
+          [data.field as keyof CreateUserErrors]:
+            data.error ||
+            (data.field === 'phone'
+              ? 'Enter a valid 10-digit mobile number starting with 9.'
+              : 'Enter a valid email address.'),
+        }));
+        return;
+      }
 
       if (
         !response.ok &&
@@ -1633,9 +1704,15 @@ export function UserManagementPage() {
         (data.errors?.department ||
           data.errors?.role ||
           data.errors?.firstName ||
-          data.errors?.lastName)
+          data.errors?.lastName ||
+          data.errors?.email ||
+          data.errors?.phone)
       ) {
         setCreateFieldErrors(data.errors);
+        setCreateErrors({
+          email: data.errors.email,
+          phone: data.errors.phone,
+        });
         return;
       }
 
@@ -2267,6 +2344,66 @@ export function UserManagementPage() {
                 </label>
 
                 <label className="user-edit-field">
+                  <span>Email</span>
+                  <input
+                    aria-describedby={editErrors.email ? 'edit-email-error' : undefined}
+                    aria-invalid={Boolean(editErrors.email)}
+                    autoComplete="email"
+                    onBlur={() => {
+                      const error = validateCreateUserField('email', editForm.email);
+                      setEditErrors((prev) => ({ ...prev, email: error }));
+                    }}
+                    onChange={(event) => {
+                      const sanitized = event.target.value.replace(/[^A-Za-z0-9._%+@-]/g, '');
+                      setEditForm((currentForm) => ({ ...currentForm, email: sanitized }));
+                      setEditErrors((prev) => ({
+                        ...prev,
+                        email: validateCreateUserField('email', sanitized),
+                      }));
+                      setEditFormError('');
+                    }}
+                    type="email"
+                    value={editForm.email}
+                  />
+                  {editErrors.email ? (
+                    <span className="field-error" id="edit-email-error">
+                      {editErrors.email}
+                    </span>
+                  ) : null}
+                </label>
+
+                <label className="user-edit-field">
+                  <span>Phone (+63)</span>
+                  <input
+                    aria-describedby={editErrors.phone ? 'edit-phone-error' : undefined}
+                    aria-invalid={Boolean(editErrors.phone)}
+                    autoComplete="tel-national"
+                    inputMode="numeric"
+                    maxLength={10}
+                    onBlur={() => {
+                      const error = validateCreateUserField('phone', editForm.phone);
+                      setEditErrors((prev) => ({ ...prev, phone: error }));
+                    }}
+                    onChange={(event) => {
+                      const sanitized = event.target.value.replace(/\D/g, '').slice(0, 10);
+                      setEditForm((currentForm) => ({ ...currentForm, phone: sanitized }));
+                      if (editErrors.phone && !validateCreateUserField('phone', sanitized)) {
+                        setEditErrors((prev) => ({ ...prev, phone: undefined }));
+                      }
+                      setEditFormError('');
+                    }}
+                    placeholder="9171234567"
+                    type="tel"
+                    value={editForm.phone}
+                  />
+                  {editErrors.phone ? (
+                    <span className="field-error" id="edit-phone-error">
+                      {editErrors.phone}
+                    </span>
+                  ) : null}
+                </label>
+
+                <label className="user-edit-field">
                   <span>Role *</span>
                   <select
                     aria-invalid={Boolean(editFieldErrors.role)}
@@ -2356,36 +2493,6 @@ export function UserManagementPage() {
                   </select>
                   {editFieldErrors.department ? (
                     <small className="field-error">{editFieldErrors.department}</small>
-                  ) : null}
-                </label>
-
-                <label className="user-edit-field">
-                  <span>Email</span>
-                  <input
-                    aria-describedby={editErrors.email ? 'edit-email-error' : undefined}
-                    aria-invalid={Boolean(editErrors.email)}
-                    autoComplete="email"
-                    autoFocus
-                    onBlur={() => {
-                      const error = validateCreateUserField('email', editForm.email);
-                      setEditErrors((prev) => ({ ...prev, email: error }));
-                    }}
-                    onChange={(event) => {
-                      const sanitized = event.target.value.replace(/[^A-Za-z0-9._%+@-]/g, '');
-                      setEditForm((currentForm) => ({ ...currentForm, email: sanitized }));
-                      setEditErrors((prev) => ({
-                        ...prev,
-                        email: validateCreateUserField('email', sanitized),
-                      }));
-                      setEditFormError('');
-                    }}
-                    type="email"
-                    value={editForm.email}
-                  />
-                  {editErrors.email ? (
-                    <span className="field-error" id="edit-email-error">
-                      {editErrors.email}
-                    </span>
                   ) : null}
                 </label>
               </div>
