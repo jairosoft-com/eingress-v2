@@ -181,6 +181,29 @@ function getChangeBadge(
   };
 }
 
+type EventTone = 'failed' | 'warning' | 'ok';
+
+const RED_EVENTS = new Set(['user deleted', 'deleted user']);
+
+const AMBER_EVENTS = new Set([
+  'user disabled',
+  'disabled user',
+  'user auto-deactivated',
+  'auto-deactivated user',
+  'rfid access expired',
+  'access expired',
+]);
+
+function getEventTone(event: ReturnType<typeof toAccessEvent>): EventTone {
+  const name = event.event.trim().toLowerCase();
+
+  if (RED_EVENTS.has(name)) return 'failed';
+  if (AMBER_EVENTS.has(name)) return 'warning';
+  if (event.status === 'Failed') return 'failed';
+
+  return 'ok';
+}
+
 const initialAccessEvents: ReturnType<typeof toAccessEvent>[] = [];
 
 export function DashboardPage() {
@@ -553,9 +576,7 @@ export function DashboardPage() {
                       </span>
                     </td>
                     <td>
-                      <strong className={event.status === 'Failed' ? 'event-failed' : 'event-ok'}>
-                        {event.event}
-                      </strong>
+                      <strong className={`event-${getEventTone(event)}`}>{event.event}</strong>
                       <small>{event.area}</small>
                     </td>
                     <td>{event.device}</td>
