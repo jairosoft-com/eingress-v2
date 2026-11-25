@@ -1,7 +1,6 @@
 import {
   BarChart3,
   ChevronDown,
-  CircleHelp,
   Eye,
   Fingerprint,
   Globe2,
@@ -16,6 +15,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
+import { AuthHelpButton } from '../auth/AuthHelpButton';
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
 
@@ -169,10 +169,7 @@ export function LoginPage() {
               English
               <ChevronDown size={16} />
             </button>
-            <a className="help-link" href="/login">
-              <CircleHelp size={18} />
-              Need help?
-            </a>
+            <AuthHelpButton />
           </div>
         </header>
 

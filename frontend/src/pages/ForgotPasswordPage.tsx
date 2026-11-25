@@ -1,7 +1,6 @@
 import {
   BarChart3,
   ChevronDown,
-  CircleHelp,
   Fingerprint,
   Globe2,
   LockKeyhole,
@@ -15,6 +14,7 @@ import { Link } from 'react-router-dom';
 
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
+import { AuthHelpButton } from '../auth/AuthHelpButton';
 import { API_BASE_URL } from '../lib/api';
 
 const resetFeatures = [
@@ -104,10 +104,7 @@ export function ForgotPasswordPage() {
               English
               <ChevronDown size={16} />
             </button>
-            <a className="help-link" href="/login">
-              <CircleHelp size={18} />
-              Need help?
-            </a>
+            <AuthHelpButton />
           </div>
         </header>
 

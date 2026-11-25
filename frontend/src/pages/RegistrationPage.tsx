@@ -2,7 +2,6 @@ import {
   Building2,
   CheckCircle2,
   ChevronDown,
-  CircleHelp,
   Globe2,
   Mail,
   Phone,
@@ -13,6 +12,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import eingressIcon from '../assets/icons/eingress-icon.png';
+import { AuthHelpButton } from '../auth/AuthHelpButton';
 
 import { API_BASE_URL } from '../lib/api';
 
@@ -302,10 +302,7 @@ export function RegistrationPage() {
             English
             <ChevronDown size={16} />
           </button>
-          <Link className="help-link" to="/login">
-            <CircleHelp size={18} />
-            Need help?
-          </Link>
+          <AuthHelpButton />
         </div>
       </header>
 
