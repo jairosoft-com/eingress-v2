@@ -4,7 +4,7 @@ import {
   LockKeyhole,
   Mail,
   RadioTower,
-  Send,SSS
+  Send,
   ShieldCheck,
 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
@@ -99,15 +99,6 @@ export function ForgotPasswordPage() {
 
           <div className="auth-actions">
             <AuthLanguageMenu />
-            <a className="help-link" href="/login">
-              <CircleHelp size={18} />
-              Need help?
-            </a>
-            <button className="language-button" type="button">
-              <Globe2 size={18} />
-              English
-              <ChevronDown size={16} />
-            </button>
             <AuthHelpButton />
           </div>
         </header>
