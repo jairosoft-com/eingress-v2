@@ -9,6 +9,7 @@ import { composeFullName, fullNameSql, validateNameParts } from '../lib/personNa
 import { checkDepartmentAssignable } from '../lib/departments.js';
 import { checkRoleAssignable } from '../lib/roles.js';
 import { generateUserId, USER_ID_LOCK_KEY } from '../lib/userIds.js';
+import { validateOptionalPhPhone } from '../lib/phone.js';
 
 
 export const usersRouter = express.Router();
@@ -48,6 +49,13 @@ export function getDuplicateUserMessage(error) {
     return {
       error: 'Existing email. This email address is already assigned to another user.',
       field: 'email',
+    };
+  }
+
+  if (constraint.includes('phone')) {
+    return {
+      error: 'Existing phone number. This phone number is already assigned to another user.',
+      field: 'phone',
     };
   }
 
@@ -187,6 +195,11 @@ usersRouter.get('/next-id', async (req, res) => {
 usersRouter.post('/', async (req, res) => {
   const { email, phone, department, role, fingerprintId, rfidUid, isActive = true } = req.body;
   const { firstName, lastName, errors } = validateNameParts(req.body);
+  const phoneCheck = validateOptionalPhPhone(phone);
+
+  if (phoneCheck.error) {
+    errors.phone = phoneCheck.error;
+  }
 
   if (!role || !String(role).trim()) {
     errors.role = 'Role is required.';
@@ -197,6 +210,20 @@ usersRouter.post('/', async (req, res) => {
   }
 
   try {
+    if (phoneCheck.normalized) {
+      const existingPhone = await query(
+        `SELECT id FROM users WHERE phone IS NOT NULL AND LOWER(TRIM(phone)) = LOWER(TRIM($1)) LIMIT 1`,
+        [phoneCheck.normalized],
+      );
+
+      if (existingPhone.rowCount > 0) {
+        return res.status(409).json({
+          error: 'Existing phone number. This phone number is already assigned to another user.',
+          field: 'phone',
+        });
+      }
+    }
+
     const departmentCheck = await checkDepartmentAssignable(department);
     const roleCheck = await checkRoleAssignable(role);
 
@@ -225,7 +252,7 @@ usersRouter.post('/', async (req, res) => {
         `INSERT INTO users (employee_id, first_name, last_name, email, phone, department, role, fingerprint_id, rfid_uid, is_active, is_archived, expiration_date)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, FALSE, $11)
          RETURNING ${USER_FIELDS}`,
-        [employeeId, firstName, lastName, email || null, phone || null, departmentCheck.name || null, roleCheck.name, fingerprintId || null, rfidUid || null, isActive, expirationDate],
+        [employeeId, firstName, lastName, email || null, phoneCheck.normalized, departmentCheck.name || null, roleCheck.name, fingerprintId || null, rfidUid || null, isActive, expirationDate],
       );
       await client.query('COMMIT');
     } catch (insertError) {
@@ -317,6 +344,39 @@ usersRouter.patch('/:id', async (req, res) => {
           error: 'Existing RFID. This RFID UID is already assigned to another user.',
           field: 'rfidUid',
         });
+      }
+    }
+
+    const phoneProvided = req.body.phone !== undefined;
+    let phoneParam = null;
+
+    if (phoneProvided) {
+      if (String(phone ?? '').trim() === '') {
+        phoneParam = '';
+      } else {
+        const phoneCheck = validateOptionalPhPhone(phone);
+
+        if (phoneCheck.error) {
+          return res.status(400).json({
+            error: phoneCheck.error,
+            errors: { phone: phoneCheck.error },
+            field: 'phone',
+          });
+        }
+
+        const existingPhone = await query(
+          `SELECT id FROM users WHERE phone IS NOT NULL AND LOWER(TRIM(phone)) = LOWER(TRIM($1)) AND id <> $2 LIMIT 1`,
+          [phoneCheck.normalized, id],
+        );
+
+        if (existingPhone.rowCount > 0) {
+          return res.status(409).json({
+            error: 'Existing phone number. This phone number is already assigned to another user.',
+            field: 'phone',
+          });
+        }
+
+        phoneParam = phoneCheck.normalized;
       }
     }
 
@@ -417,7 +477,7 @@ usersRouter.patch('/:id', async (req, res) => {
         namesProvided ? firstName : null,
         namesProvided ? lastName : null,
         email ?? null,
-        phone ?? null,
+        phoneParam,
         departmentValue ?? null,
         roleValue ?? null,
         fingerprintId ?? null,
