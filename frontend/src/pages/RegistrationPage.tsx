@@ -1,12 +1,4 @@
-import { Building2, CheckCircle2, CircleHelp, Mail, Phone, Send, UserRound } from 'lucide-react';
-import {
-  Building2,
-  Globe2,
-  Mail,
-  Phone,
-  Send,
-  UserRound,
-} from 'lucide-react';
+import { Building2, CheckCircle2, Mail, Phone, Send, UserRound } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -298,15 +290,6 @@ export function RegistrationPage() {
 
         <div className="auth-actions">
           <AuthLanguageMenu />
-          <Link className="help-link" to="/login">
-            <CircleHelp size={18} />
-            Need help?
-          </Link>
-          <button className="language-button" type="button">
-            <Globe2 size={18} />
-            English
-            <ChevronDown size={16} />
-          </button>
           <AuthHelpButton />
         </div>
       </header>
