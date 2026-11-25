@@ -2092,9 +2092,8 @@ export function UserManagementPage() {
                       <td>
                         <span className="user-row-actions">
                           <button
-                            className={user.accessStatus === 'Active' ? 'activate' : 'deactivate'}
+                            className={user.accessStatus === 'Disabled' ? 'activate' : 'deactivate'}
                             type="button"
-                            title={user.accessStatus === 'Disabled' ? 'Activate' : 'Deactivate'}
                             data-tooltip={
                               user.accessStatus === 'Disabled' ? 'Activate' : 'Deactivate'
                             }
