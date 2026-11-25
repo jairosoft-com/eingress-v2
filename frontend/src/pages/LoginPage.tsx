@@ -1,6 +1,5 @@
 import {
   BarChart3,
-  CircleHelp,
   Eye,
   Fingerprint,
   IdCard,
@@ -15,6 +14,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
 import { AuthLanguageMenu } from '../auth/AuthLanguageMenu';
+import { AuthHelpButton } from '../auth/AuthHelpButton';
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
 
@@ -168,6 +168,12 @@ export function LoginPage() {
               <CircleHelp size={18} />
               Need help?
             </a>
+            <button className="language-button" type="button">
+              <Globe2 size={18} />
+              English
+              <ChevronDown size={16} />
+            </button>
+            <AuthHelpButton />
           </div>
         </header>
 

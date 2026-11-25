@@ -1,9 +1,18 @@
 import { Building2, CheckCircle2, CircleHelp, Mail, Phone, Send, UserRound } from 'lucide-react';
+import {
+  Building2,
+  Globe2,
+  Mail,
+  Phone,
+  Send,
+  UserRound,
+} from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import eingressIcon from '../assets/icons/eingress-icon.png';
 import { AuthLanguageMenu } from '../auth/AuthLanguageMenu';
+import { AuthHelpButton } from '../auth/AuthHelpButton';
 
 import { API_BASE_URL } from '../lib/api';
 
@@ -293,6 +302,12 @@ export function RegistrationPage() {
             <CircleHelp size={18} />
             Need help?
           </Link>
+          <button className="language-button" type="button">
+            <Globe2 size={18} />
+            English
+            <ChevronDown size={16} />
+          </button>
+          <AuthHelpButton />
         </div>
       </header>
 

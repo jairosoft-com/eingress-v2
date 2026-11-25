@@ -1,11 +1,10 @@
 import {
   BarChart3,
-  CircleHelp,
   Fingerprint,
   LockKeyhole,
   Mail,
   RadioTower,
-  Send,
+  Send,SSS
   ShieldCheck,
 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
@@ -14,6 +13,7 @@ import { Link } from 'react-router-dom';
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
 import { AuthLanguageMenu } from '../auth/AuthLanguageMenu';
+import { AuthHelpButton } from '../auth/AuthHelpButton';
 import { API_BASE_URL } from '../lib/api';
 
 const resetFeatures = [
@@ -103,6 +103,12 @@ export function ForgotPasswordPage() {
               <CircleHelp size={18} />
               Need help?
             </a>
+            <button className="language-button" type="button">
+              <Globe2 size={18} />
+              English
+              <ChevronDown size={16} />
+            </button>
+            <AuthHelpButton />
           </div>
         </header>
 
