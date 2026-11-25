@@ -1,9 +1,7 @@
 import {
   BarChart3,
-  ChevronDown,
   CircleHelp,
   Fingerprint,
-  Globe2,
   LockKeyhole,
   Mail,
   RadioTower,
@@ -15,6 +13,7 @@ import { Link } from 'react-router-dom';
 
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
+import { AuthLanguageMenu } from '../auth/AuthLanguageMenu';
 import { API_BASE_URL } from '../lib/api';
 
 const resetFeatures = [
@@ -99,11 +98,7 @@ export function ForgotPasswordPage() {
           </div>
 
           <div className="auth-actions">
-            <button className="language-button" type="button">
-              <Globe2 size={18} />
-              English
-              <ChevronDown size={16} />
-            </button>
+            <AuthLanguageMenu />
             <a className="help-link" href="/login">
               <CircleHelp size={18} />
               Need help?

@@ -1,18 +1,9 @@
-import {
-  Building2,
-  CheckCircle2,
-  ChevronDown,
-  CircleHelp,
-  Globe2,
-  Mail,
-  Phone,
-  Send,
-  UserRound,
-} from 'lucide-react';
+import { Building2, CheckCircle2, CircleHelp, Mail, Phone, Send, UserRound } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import eingressIcon from '../assets/icons/eingress-icon.png';
+import { AuthLanguageMenu } from '../auth/AuthLanguageMenu';
 
 import { API_BASE_URL } from '../lib/api';
 
@@ -297,11 +288,7 @@ export function RegistrationPage() {
         </Link>
 
         <div className="auth-actions">
-          <button className="language-button" type="button">
-            <Globe2 size={18} />
-            English
-            <ChevronDown size={16} />
-          </button>
+          <AuthLanguageMenu />
           <Link className="help-link" to="/login">
             <CircleHelp size={18} />
             Need help?

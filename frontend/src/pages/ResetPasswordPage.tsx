@@ -1,12 +1,10 @@
 import {
   BarChart3,
   Check,
-  ChevronDown,
   CircleHelp,
   Eye,
   EyeOff,
   Fingerprint,
-  Globe2,
   KeyRound,
   LockKeyhole,
   RadioTower,
@@ -17,6 +15,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
+import { AuthLanguageMenu } from '../auth/AuthLanguageMenu';
 import { useAuth } from '../auth/useAuth';
 import { API_BASE_URL } from '../lib/api';
 import {
@@ -191,11 +190,7 @@ export function ResetPasswordPage() {
           </div>
 
           <div className="auth-actions">
-            <button className="language-button" type="button">
-              <Globe2 size={18} />
-              English
-              <ChevronDown size={16} />
-            </button>
+            <AuthLanguageMenu />
             <a className="help-link" href="/login">
               <CircleHelp size={18} />
               Need help?
