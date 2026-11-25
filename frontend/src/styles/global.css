@@ -1807,6 +1807,10 @@ td small {
   color: #dc2626;
 }
 
+.event-warning {
+  color: #b45309;
+}
+
 .status {
   display: inline-flex;
   padding: 6px 10px;
