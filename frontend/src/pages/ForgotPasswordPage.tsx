@@ -1,12 +1,10 @@
 import {
   BarChart3,
-  ChevronDown,
   Fingerprint,
-  Globe2,
   LockKeyhole,
   Mail,
   RadioTower,
-  Send,
+  Send,SSS
   ShieldCheck,
 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
@@ -14,6 +12,7 @@ import { Link } from 'react-router-dom';
 
 import authShieldIcon from '../assets/icons/auth-shield.png';
 import eingressIcon from '../assets/icons/eingress-icon.png';
+import { AuthLanguageMenu } from '../auth/AuthLanguageMenu';
 import { AuthHelpButton } from '../auth/AuthHelpButton';
 import { API_BASE_URL } from '../lib/api';
 
@@ -99,6 +98,11 @@ export function ForgotPasswordPage() {
           </div>
 
           <div className="auth-actions">
+            <AuthLanguageMenu />
+            <a className="help-link" href="/login">
+              <CircleHelp size={18} />
+              Need help?
+            </a>
             <button className="language-button" type="button">
               <Globe2 size={18} />
               English
